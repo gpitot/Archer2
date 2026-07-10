@@ -1,0 +1,32 @@
+{
+  "name": "archer-js",
+  "version": "0.1.0",
+  "description": "Browser-based isometric multiplayer arena game",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "shot": "pnpm tsx scripts/screenshot.ts"
+  },
+  "keywords": [
+    "game",
+    "multiplayer",
+    "isometric",
+    "threejs"
+  ],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.33.0",
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "playwright": "^1.61.1",
+    "tsx": "^4.23.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.4"
+  },
+  "dependencies": {
+    "@types/three": "^0.185.1",
+    "three": "^0.185.1"
+  }
+}
