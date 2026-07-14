@@ -104,6 +104,57 @@ export class Pathfinder {
     return null;
   }
 
+  /**
+   * Find a path between two world positions and smooth it with
+   * line-of-sight string pulling (the approach WC3/LoL-style games use):
+   * the raw grid path zig-zags through cell centers, so we drop every
+   * waypoint that is directly visible from an earlier one, leaving turns
+   * only at obstacle corners.
+   *
+   * Returns world positions starting at the exact start position and
+   * ending at the exact goal position, or null if no path exists.
+   */
+  findSmoothedPath(
+    startWX: number,
+    startWZ: number,
+    goalWX: number,
+    goalWZ: number,
+  ): { wx: number; wz: number }[] | null {
+    const start = this._grid.worldToGrid(startWX, startWZ);
+    const goal = this._grid.worldToGrid(goalWX, goalWZ);
+
+    const gridPath = this.findPath(start.gx, start.gz, goal.gx, goal.gz);
+    if (!gridPath) return null;
+
+    const points = gridPath.map((p) => this._grid.gridToWorld(p.gx, p.gz));
+    // Use the exact start/goal positions instead of cell centers. Both lie
+    // inside walkable cells already on the path, so this is always safe.
+    points[0] = { wx: startWX, wz: startWZ };
+    if (points.length === 1) {
+      points.push({ wx: goalWX, wz: goalWZ });
+    } else {
+      points[points.length - 1] = { wx: goalWX, wz: goalWZ };
+    }
+
+    // String pulling: from each anchor, jump to the farthest visible point.
+    const smoothed: { wx: number; wz: number }[] = [points[0]];
+    let anchor = 0;
+    while (anchor < points.length - 1) {
+      let next = anchor + 1;
+      for (let j = points.length - 1; j > anchor + 1; j--) {
+        const a = points[anchor];
+        const b = points[j];
+        if (this._grid.hasLineOfSight(a.wx, a.wz, b.wx, b.wz)) {
+          next = j;
+          break;
+        }
+      }
+      smoothed.push(points[next]);
+      anchor = next;
+    }
+    return smoothed;
+  }
+
   private _reconstructPath(node: PathNode): { gx: number; gz: number }[] {
     const path: { gx: number; gz: number }[] = [];
     let current: PathNode | null = node;

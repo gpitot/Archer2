@@ -63,6 +63,65 @@ export class NavGrid {
     }
   }
 
+  /**
+   * True if the straight world-space segment from (wx0, wz0) to (wx1, wz1)
+   * crosses only walkable cells. Uses a supercover grid traversal: when the
+   * segment passes exactly through a cell corner, both adjacent cells must
+   * be walkable (same no-corner-cutting rule as diagonal neighbours).
+   */
+  hasLineOfSight(wx0: number, wz0: number, wx1: number, wz1: number): boolean {
+    // Continuous grid coordinates
+    const x0 = (wx0 - this.originX) / this.cellSize;
+    const z0 = (wz0 - this.originZ) / this.cellSize;
+    const x1 = (wx1 - this.originX) / this.cellSize;
+    const z1 = (wz1 - this.originZ) / this.cellSize;
+
+    let gx = Math.floor(x0);
+    let gz = Math.floor(z0);
+    const goalGX = Math.floor(x1);
+    const goalGZ = Math.floor(z1);
+
+    if (!this.isWalkable(gx, gz)) return false;
+
+    const dx = x1 - x0;
+    const dz = z1 - z0;
+    const stepX = Math.sign(dx);
+    const stepZ = Math.sign(dz);
+
+    const tDeltaX = stepX !== 0 ? Math.abs(1 / dx) : Infinity;
+    const tDeltaZ = stepZ !== 0 ? Math.abs(1 / dz) : Infinity;
+
+    // t at which the ray first crosses a vertical / horizontal cell boundary
+    let tMaxX = stepX !== 0 ? (stepX > 0 ? gx + 1 - x0 : x0 - gx) * tDeltaX : Infinity;
+    let tMaxZ = stepZ !== 0 ? (stepZ > 0 ? gz + 1 - z0 : z0 - gz) * tDeltaZ : Infinity;
+
+    // Safety guard: a supercover traversal takes at most this many axis steps
+    let guard = Math.abs(goalGX - gx) + Math.abs(goalGZ - gz) + 2;
+    const EPS = 1e-9;
+
+    while ((gx !== goalGX || gz !== goalGZ) && guard-- > 0) {
+      if (Math.abs(tMaxX - tMaxZ) < EPS) {
+        // Exact corner crossing — treat like a diagonal step
+        if (!this.isWalkable(gx + stepX, gz) || !this.isWalkable(gx, gz + stepZ)) {
+          return false;
+        }
+        gx += stepX;
+        gz += stepZ;
+        tMaxX += tDeltaX;
+        tMaxZ += tDeltaZ;
+      } else if (tMaxX < tMaxZ) {
+        gx += stepX;
+        tMaxX += tDeltaX;
+      } else {
+        gz += stepZ;
+        tMaxZ += tDeltaZ;
+      }
+      if (!this.isWalkable(gx, gz)) return false;
+    }
+
+    return true;
+  }
+
   // ── Neighbours (flat, no slope) ──────────────────────────
 
   getNeighbors(gx: number, gz: number): { gx: number; gz: number; cost: number }[] {
