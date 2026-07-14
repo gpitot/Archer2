@@ -1,0 +1,129 @@
+STRING 18
+{
+Player 1
+}
+STRING 88
+{
+Player 2
+}
+STRING 89
+{
+Player 3
+}
+STRING 90
+{
+Player 4
+}
+STRING 96
+{
+Archer Wars: Legacy 1.4d
+}
+STRING 97
+{
+Full House
+}
+STRING 98
+{
+The struggle for victory to be forever known as a legacy.  Twelve adept archers compete alone or in teams to crush their enemies in this last stand.  They must use anything at their disposal to protect their Ancient of War and destroy their enemies.
+
+
+}
+STRING 99
+{
+cleeezzz
+}
+STRING 223
+{
+Player 5
+}
+STRING 224
+{
+Player 6
+}
+STRING 225
+{
+Player 7
+}
+STRING 226
+{
+Player 8
+}
+STRING 1413
+{
+Player 9
+}
+STRING 1414
+{
+Player 10
+}
+STRING 1415
+{
+Player 11
+}
+STRING 1416
+{
+Player 12
+}
+STRING 3179
+{
+|c00FF0000Archer Wars
+}
+STRING 3180
+{
+Map made by cleeezzz
+}
+STRING 3385
+{
+Player Options
+-zoom xxxx  =  Sets your camera to xxx distance.
+-zoom overhead = Sets your camera to a top down view
+-delay   =    View your current delay.
+-ms       =    Shows the speed of your archer.
+-tt xx     =    Timed Text; make text dissapear in xx seconds. ex. (.02)
+-save    =    Saves Rank
+
+}
+STRING 3387
+{
+Game Modes
+ffa   = Free For All
+2team  = Players split into 2 teams
+3team  = Players split into 3 teams
+4team  = Players split into 4 teams
+5team  = Players split into 5 teams
+6team  = Players split into 6 teams
+dm (x)  = Deathmatch (Replace "x" with number of kills)
+sg  (x)  = Starting Gold (Replace "x" with gold amount)
+}
+STRING 4687
+{
+--=|c00FFFF66Archer Wars: Legacy 1.4d|r=--
+Map created by |c00FF0000cleeezzz|r
+Terrain: Devrak and Rei
+
+Vexorian: NewGen, Optimizer
+WILLALLMIGHTY: Black Hole Model
+Skizzik: Pentagram Aura
+JetFangInferno: Spiral Aura, Ignis Aura
+General Frank: Modified Aura
+
+Special Thanks:
+U_R_A_NOOBCAKE, Queens_Joker (Renendaru)
+}
+STRING 4688
+{
+|cffffcc00Rank|r            |cffffcc00Kills Needed|r
+New:                    0
+Beginner:            10
+Novice:               30 
+Trainer:                60
+Archer:               100
+Marksman:         200
+Ranger:              500
+Hunter:              1000
+Assassin:           1500
+Master:              2000
+Priestess:           5000
+Angel:               10000
+Goddess:          20000
+}
