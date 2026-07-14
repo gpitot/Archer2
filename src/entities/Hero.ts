@@ -217,27 +217,22 @@ export class Hero {
   setDestination(worldPos: THREE.Vector3): void {
     if (!this._alive) return;
 
-    const start = this._navGrid.worldToGrid(
+    const path = this._pathfinder.findSmoothedPath(
       this.mesh.position.x,
       this.mesh.position.z,
-    );
-    const goal = this._navGrid.worldToGrid(worldPos.x, worldPos.z);
-    const path = this._pathfinder.findPath(
-      start.gx,
-      start.gz,
-      goal.gx,
-      goal.gz,
+      worldPos.x,
+      worldPos.z,
     );
 
     if (path && path.length > 1) {
-      this._waypoints = path.slice(1).map((p) => {
-        const w = this._navGrid.gridToWorld(p.gx, p.gz);
-        return new THREE.Vector3(
-          w.wx,
-          this._heightAt(w.wx, w.wz) + Hero.GROUND_OFFSET,
-          w.wz,
-        );
-      });
+      // path[0] is the hero's current position — walk the rest.
+      this._waypoints = path.slice(1).map((p) =>
+        new THREE.Vector3(
+          p.wx,
+          this._heightAt(p.wx, p.wz) + Hero.GROUND_OFFSET,
+          p.wz,
+        ),
+      );
       this._state = "moving";
     } else {
       this._waypoints = [];
