@@ -6,6 +6,8 @@ export interface ShopItem {
   name: string;
   cost: number;
   description: string;
+  /** Stackable items (e.g. ward charges) can be re-bought while owned. */
+  stackable?: boolean;
   /** Apply effect to buyer, return ownership data for inventory. */
   apply: (hero: import('../entities/Hero').Hero) => void;
 }
@@ -36,9 +38,12 @@ export class Shop {
     if (!this.canInteract(hero.position)) return null;
     const item = this.items[itemIndex];
     if (hero.gold < item.cost) return null;
-    if (hero.hasItem(item.id)) return null; // already owned
-    const slot = hero.addItem(item.id);
-    if (slot === -1) return null; // inventory full
+    const owned = hero.hasItem(item.id);
+    if (owned && !item.stackable) return null; // already owned
+    if (!owned) {
+      const slot = hero.addItem(item.id);
+      if (slot === -1) return null; // inventory full
+    }
     hero.addGold(-item.cost);
     item.apply(hero);
     return item;

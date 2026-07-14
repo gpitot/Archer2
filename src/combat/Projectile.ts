@@ -55,6 +55,7 @@ export class Projectile {
   get state(): ProjectileState { return this._state; }
   get damage(): number { return this._damage; }
   get position(): THREE.Vector3 { return this.mesh.position; }
+  get owner(): Hero | null { return this._owner; }
 
   spawn(config: ProjectileConfig): void {
     this.mesh.position.copy(config.position);

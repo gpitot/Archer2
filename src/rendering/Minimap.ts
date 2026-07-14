@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { NavGrid } from '../navigation/NavGrid';
+import { FogOfWar, FOG_EXPLORED, FOG_VISIBLE } from '../vision/FogOfWar';
 
 interface MinimapMarker {
   x: number;
@@ -23,6 +24,13 @@ export class Minimap {
   private _halfArena: number;
   private _navGrid: NavGrid;
   private _terrainImage: ImageData | null = null;
+
+  // Fog-of-war overlay (small offscreen canvas scaled up with smoothing)
+  private _fog: FogOfWar | null = null;
+  private _fogTeam = 0;
+  private _fogCanvas: HTMLCanvasElement | null = null;
+  private _fogCtx: CanvasRenderingContext2D | null = null;
+  private _fogImage: ImageData | null = null;
 
   /** Called with world (x, z) when minimap is clicked. */
   onClick: ((wx: number, wz: number) => void) | null = null;
@@ -78,6 +86,17 @@ export class Minimap {
     this._bakeTerrain();
   }
 
+  /** Attach a fog-of-war overlay drawn from the given team's point of view. */
+  setFog(fog: FogOfWar, team: number): void {
+    this._fog = fog;
+    this._fogTeam = team;
+    this._fogCanvas = document.createElement('canvas');
+    this._fogCanvas.width = fog.cells;
+    this._fogCanvas.height = fog.cells;
+    this._fogCtx = this._fogCanvas.getContext('2d')!;
+    this._fogImage = this._fogCtx.createImageData(fog.cells, fog.cells);
+  }
+
   private _bakeTerrain(): void {
     const size = this._mapSizePx;
     this._terrainImage = this._ctx.createImageData(size, size);
@@ -122,6 +141,25 @@ export class Minimap {
     // Baked terrain
     if (this._terrainImage) {
       ctx.putImageData(this._terrainImage, pad, pad);
+    }
+
+    // Fog-of-war overlay: hidden = near-black, explored = dimmed, visible = clear.
+    if (this._fog && this._fogCtx && this._fogImage && this._fogCanvas) {
+      const states = this._fog.team(this._fogTeam);
+      const data = this._fogImage.data;
+      for (let i = 0; i < states.length; i++) {
+        const alpha =
+          states[i] === FOG_VISIBLE ? 0 :
+          states[i] === FOG_EXPLORED ? 110 : 235;
+        data[i * 4] = 0;
+        data[i * 4 + 1] = 0;
+        data[i * 4 + 2] = 0;
+        data[i * 4 + 3] = alpha;
+      }
+      // Fog rows run -Z → +Z like minimap rows, so no flip is needed.
+      this._fogCtx.putImageData(this._fogImage, 0, 0);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(this._fogCanvas, pad, pad, this._mapSizePx, this._mapSizePx);
     }
 
     // Camera view rectangle (axis-aligned — matches top-down world)
