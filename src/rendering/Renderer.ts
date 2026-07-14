@@ -9,8 +9,7 @@ export class Renderer {
       alpha: false,
     });
     this._renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this._renderer.shadowMap.enabled = true;
-    this._renderer.shadowMap.type = THREE.PCFShadowMap;
+    this._renderer.shadowMap.enabled = false;
     this._renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this._renderer.toneMappingExposure = 1.0;
   }

@@ -3,10 +3,8 @@ import { GameLoop } from './GameLoop';
 import { Renderer } from '../rendering/Renderer';
 import { createScene } from '../rendering/Scene';
 import { createLighting } from '../rendering/Lighting';
-import { IsometricCamera } from '../rendering/Camera';
+import { TopDownCamera } from '../rendering/Camera';
 import { Minimap } from '../rendering/Minimap';
-import { createTerrain } from '../world/Terrain';
-import { HeightMap } from '../world/HeightMap';
 import { createObstacles, DEFAULT_OBSTACLES } from '../world/Obstacles';
 import { ObstacleRegistry } from '../world/ObstacleRegistry';
 import { NavGrid } from '../navigation/NavGrid';
@@ -24,12 +22,11 @@ export class Game {
   private _loop: GameLoop;
   private _renderer!: Renderer;
   private _scene!: THREE.Scene;
-  private _camera!: IsometricCamera;
+  private _camera!: TopDownCamera;
   private _hero!: Hero;
   private _heroes: Hero[] = [];
   private _input!: InputManager;
   private _navGrid!: NavGrid;
-  private _heightMap!: HeightMap;
   private _projectiles!: ProjectilePool;
   private _obstacleRegistry!: ObstacleRegistry;
   private _minimap!: Minimap;
@@ -52,28 +49,29 @@ export class Game {
     this._scene = createScene();
     createLighting(this._scene);
 
-    // ── Height map ──
-    this._heightMap = new HeightMap(ARENA_SIZE, ARENA_SIZE, CELL_SIZE, -HALF, -HALF);
+    // ── Flat ground plane ──
+    const groundGeo = new THREE.PlaneGeometry(ARENA_SIZE, ARENA_SIZE);
+    const groundMat = new THREE.MeshStandardMaterial({
+      color: 0x3a6b2a,
+      roughness: 0.9,
+    });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2; // lay flat on XZ
+    ground.receiveShadow = true;
+    this._scene.add(ground);
 
-    // ── Terrain ──
-    this._scene.add(createTerrain(this._heightMap));
-
-    // ── Navigation (elevation-aware) ──
+    // ── Navigation (flat) ──
     this._navGrid = new NavGrid(ARENA_SIZE, ARENA_SIZE, CELL_SIZE, -HALF, -HALF);
-    this._navGrid.setHeightMap(this._heightMap);
     const pathfinder = new Pathfinder(this._navGrid);
 
     // ── Obstacles ──
     this._obstacleRegistry = new ObstacleRegistry();
-    this._scene.add(
-      createObstacles(DEFAULT_OBSTACLES, this._navGrid, this._obstacleRegistry, this._heightMap),
-    );
+    this._scene.add(createObstacles(DEFAULT_OBSTACLES, this._navGrid, this._obstacleRegistry));
 
     // ── Heroes ──
     this._hero = this._createHero(pathfinder, 0, -15);
     this._heroes.push(this._hero);
 
-    // Target dummy
     const dummy = this._createHero(pathfinder, 10, -5);
     const dummyBody = dummy.mesh.getObjectByName('heroBody') as THREE.Mesh;
     (dummyBody.material as THREE.MeshStandardMaterial).color.set(0xcc3333);
@@ -87,7 +85,7 @@ export class Game {
     this._hero.ability = new ArrowAbility(this._hero, this._projectiles);
 
     // ── Camera ──
-    this._camera = new IsometricCamera();
+    this._camera = new TopDownCamera();
     this._camera.setTarget(this._hero.position);
 
     // ── Input ──
@@ -99,7 +97,7 @@ export class Game {
     );
 
     // ── Minimap ──
-    this._minimap = new Minimap(ARENA_SIZE, this._heightMap, this._navGrid);
+    this._minimap = new Minimap(ARENA_SIZE, this._navGrid);
 
     window.addEventListener('resize', this._onResize.bind(this));
     this._loop.start();
@@ -109,8 +107,7 @@ export class Game {
 
   private _createHero(pathfinder: Pathfinder, x: number, z: number): Hero {
     const hero = new Hero(pathfinder, this._navGrid);
-    const y = this._heightMap.getHeightAt(x, z) + 0.5;
-    hero.mesh.position.set(x, y, z);
+    hero.mesh.position.set(x, 0.5, z);
     this._scene.add(hero.mesh);
     return hero;
   }
@@ -121,11 +118,9 @@ export class Game {
   }
 
   private update(delta: number): void {
-    // ── Edge panning ──
+    // Edge panning
     const pan = this._input.edgePan;
     if (pan.length() > 0) {
-      // Pan opposite direction in isometric space:
-      // screen-right → camera target moves +X, screen-up → moves +Z
       this._camera.pan(pan.multiplyScalar(25 * delta));
     }
 
@@ -142,7 +137,7 @@ export class Game {
   private _render(_interpolation: number): void {
     this._renderer.render(this._scene, this._camera.camera);
 
-    // ── Minimap ──
+    // Minimap
     const markers = this._heroes
       .filter((h) => h.isAlive)
       .map((h, i) => ({
@@ -155,7 +150,7 @@ export class Game {
     this._minimap.draw(markers, {
       cx: this._camera.target.x,
       cz: this._camera.target.z,
-      halfW: 15, // approximate view half-width
+      halfW: this._camera.viewHalfWidth(),
     });
   }
 
@@ -165,8 +160,7 @@ export class Game {
       const gz = Math.floor(Math.random() * ARENA_SIZE);
       if (this._navGrid.isWalkable(gx, gz)) {
         const { wx, wz } = this._navGrid.gridToWorld(gx, gz);
-        const wy = this._heightMap.getHeightAt(wx, wz) + 0.5;
-        return new THREE.Vector3(wx, wy, wz);
+        return new THREE.Vector3(wx, 0.5, wz);
       }
     }
     return new THREE.Vector3(0, 0.5, 0);

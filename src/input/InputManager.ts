@@ -92,23 +92,16 @@ export class InputManager {
     const h = window.innerHeight;
     const t = this._edgeThreshold;
 
-    // Screen-space direction (sdx=right, sdy=up)
-    let sdx = 0;
-    let sdy = 0;
+    let wx = 0; // world east/west (+X = east)
+    let wz = 0; // world north/south (+Z = north)
 
-    if (this._mouseScreenX < t) sdx = -1;
-    else if (this._mouseScreenX > w - t) sdx = 1;
+    if (this._mouseScreenX < t) wx = -1;        // left  → west
+    else if (this._mouseScreenX > w - t) wx = 1; // right → east
 
-    if (this._mouseScreenY < t) sdy = 1;
-    else if (this._mouseScreenY > h - t) sdy = -1;
+    if (this._mouseScreenY < t) wz = -1;          // top    → north
+    else if (this._mouseScreenY > h - t) wz = +1; // bottom → south
 
-    if (sdx !== 0 || sdy !== 0) {
-      // Isometric camera (azimuth 45°):
-      // Screen-right in world XZ =  ( 1, -1)/√2
-      // Screen-up    in world XZ =  (-1, -1)/√2
-      const iso = Math.SQRT1_2;
-      const wx = (sdx - sdy) * iso;
-      const wz = -(sdx + sdy) * iso;
+    if (wx !== 0 || wz !== 0) {
       this._panDirection.set(wx, 0, wz).normalize();
     } else {
       this._panDirection.set(0, 0, 0);

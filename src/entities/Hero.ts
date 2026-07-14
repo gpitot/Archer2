@@ -3,9 +3,44 @@ import { Pathfinder } from "../navigation/Pathfinder";
 import { NavGrid } from "../navigation/NavGrid";
 import { ArrowAbility } from "../combat/ArrowAbility";
 import { HealthBar } from "./HealthBar";
-import { buildArcherMesh } from "./ArcherMesh";
 
 export type HeroState = "idle" | "moving";
+
+/** Build a simple flat circle mesh for the hero. */
+function buildHeroCircle(radius: number, color: number): THREE.Group {
+  const group = new THREE.Group();
+
+  // Body — flat disc
+  const bodyGeo = new THREE.CylinderGeometry(radius, radius, 0.15, 24);
+  const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.name = 'heroBody';
+  group.add(body);
+
+  // Direction indicator — small triangle to show facing
+  const triShape = new THREE.Shape();
+  triShape.moveTo(0, -radius * 1.2);
+  triShape.lineTo(-radius * 0.35, -radius * 0.5);
+  triShape.lineTo(radius * 0.35, -radius * 0.5);
+  triShape.closePath();
+  const triGeo = new THREE.ShapeGeometry(triShape);
+  const triMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, side: THREE.DoubleSide });
+  const tri = new THREE.Mesh(triGeo, triMat);
+  tri.rotation.x = -Math.PI / 2; // lay flat on XZ
+  tri.position.y = 0.08;
+  tri.name = 'heroFacing';
+  group.add(tri);
+
+  // Shadow disc
+  const shadowGeo = new THREE.CylinderGeometry(radius * 0.9, radius * 0.9, 0.05, 24);
+  const shadowMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 1, transparent: true, opacity: 0.25 });
+  const shadow = new THREE.Mesh(shadowGeo, shadowMat);
+  shadow.position.y = -0.1;
+  shadow.name = 'heroShadow';
+  group.add(shadow);
+
+  return group;
+}
 
 /**
  * Player-controlled hero entity.
@@ -57,7 +92,7 @@ export class Hero {
     this._hp = this.maxHP;
     this.scale = scale;
 
-    this.mesh = buildArcherMesh();
+    this.mesh = buildHeroCircle(0.45, 0x4488cc);
     this.mesh.scale.setScalar(this.scale);
     this._body = this.mesh.getObjectByName("heroBody") as THREE.Mesh;
     this._bodyMat = this._body.material as THREE.MeshStandardMaterial;
@@ -126,8 +161,7 @@ export class Hero {
     if (path && path.length > 1) {
       this._waypoints = path.slice(1).map((p) => {
         const w = this._navGrid.gridToWorld(p.gx, p.gz);
-        const y = this._navGrid.getCellHeight(p.gx, p.gz) + 0.5;
-        return new THREE.Vector3(w.wx, y, w.wz);
+        return new THREE.Vector3(w.wx, 0.5, w.wz);
       });
       this._state = "moving";
     } else {
