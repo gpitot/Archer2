@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 export type ClickHandler = (worldPos: THREE.Vector3) => void;
 export type KeyHandler = () => void;
+export type ScrollHandler = (deltaY: number) => void;
 
 /**
  * Captures mouse clicks (ground targeting), mouse movement (aim tracking),
@@ -12,8 +13,10 @@ export class InputManager {
   private _camera: THREE.Camera;
   private _raycaster = new THREE.Raycaster();
   private _groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private _ground: THREE.Object3D | null = null;
 
   private _clickHandlers: ClickHandler[] = [];
+  private _scrollHandlers: ScrollHandler[] = [];
 
   // Mouse aim
   private _aimPosition = new THREE.Vector3();
@@ -37,10 +40,25 @@ export class InputManager {
 
     this._canvas.addEventListener('click', this._onClick.bind(this));
     this._canvas.addEventListener('mousemove', this._onMouseMove.bind(this));
+    this._canvas.addEventListener('wheel', this._onWheel.bind(this), { passive: true });
     window.addEventListener('keydown', this._onKeyDown.bind(this));
     window.addEventListener('keyup', this._onKeyUp.bind(this));
     // Track mouse on the whole window for edge panning
     window.addEventListener('mousemove', this._onWindowMouseMove.bind(this));
+  }
+
+  /** Set the terrain mesh to raycast for click/aim. Falls back to the y=0 plane. */
+  setGround(mesh: THREE.Object3D): void {
+    this._ground = mesh;
+  }
+
+  /** Register a mouse-wheel handler (positive deltaY = scroll down). */
+  onScroll(handler: ScrollHandler): void {
+    this._scrollHandlers.push(handler);
+  }
+
+  private _onWheel(event: WheelEvent): void {
+    for (const h of this._scrollHandlers) h(event.deltaY);
   }
 
   // ── Mouse aim ──────────────────────────────────────────────────
@@ -76,7 +94,12 @@ export class InputManager {
 
   // ── Edge panning ───────────────────────────────────────────────
 
-  /** Direction to pan the camera (normalized in XZ plane). Zero vector if not near edge. */
+  /**
+   * Screen-space pan intent while near a screen edge. Zero vector if not.
+   *  - `.x` = screen right (+1) / left (-1)
+   *  - `.z` = screen forward/up (+1) / down (-1)
+   * The camera converts these into world directions via its yaw.
+   */
   get edgePan(): THREE.Vector3 {
     return this._panDirection.clone();
   }
@@ -92,17 +115,17 @@ export class InputManager {
     const h = window.innerHeight;
     const t = this._edgeThreshold;
 
-    let wx = 0; // world east/west (+X = east)
-    let wz = 0; // world north/south (+Z = north)
+    let right = 0;   // screen right (+1) / left (-1)
+    let forward = 0; // screen up/forward (+1) / down (-1)
 
-    if (this._mouseScreenX < t) wx = -1;        // left  → west
-    else if (this._mouseScreenX > w - t) wx = 1; // right → east
+    if (this._mouseScreenX < t) right = -1;
+    else if (this._mouseScreenX > w - t) right = 1;
 
-    if (this._mouseScreenY < t) wz = -1;          // top    → north
-    else if (this._mouseScreenY > h - t) wz = +1; // bottom → south
+    if (this._mouseScreenY < t) forward = 1;         // top    → into screen
+    else if (this._mouseScreenY > h - t) forward = -1; // bottom → toward camera
 
-    if (wx !== 0 || wz !== 0) {
-      this._panDirection.set(wx, 0, wz).normalize();
+    if (right !== 0 || forward !== 0) {
+      this._panDirection.set(right, 0, forward).normalize();
     } else {
       this._panDirection.set(0, 0, 0);
     }
@@ -117,6 +140,13 @@ export class InputManager {
 
     this._raycaster.setFromCamera(mouse, this._camera);
 
+    // Prefer the actual terrain surface under the cursor.
+    if (this._ground) {
+      const hits = this._raycaster.intersectObject(this._ground, false);
+      if (hits.length > 0) return hits[0].point.clone();
+    }
+
+    // Fallback: the flat y=0 plane (e.g. cursor pointing at the sky).
     const intersection = new THREE.Vector3();
     const hit = this._raycaster.ray.intersectPlane(this._groundPlane, intersection);
     return hit ? intersection : null;

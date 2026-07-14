@@ -27,10 +27,19 @@ export class Minimap {
   /** Called with world (x, z) when minimap is clicked. */
   onClick: ((wx: number, wz: number) => void) | null = null;
 
-  constructor(arenaSize: number, navGrid: NavGrid, size = 200, padding = 8) {
+  private _heightAt: (x: number, z: number) => number;
+
+  constructor(
+    arenaSize: number,
+    navGrid: NavGrid,
+    size = 200,
+    padding = 8,
+    heightAt: (x: number, z: number) => number = () => 0,
+  ) {
     this._arenaSize = arenaSize;
     this._halfArena = arenaSize / 2;
     this._navGrid = navGrid;
+    this._heightAt = heightAt;
 
     this._width = size + padding * 2;
     this._mapSizePx = size;
@@ -86,10 +95,11 @@ export class Minimap {
           this._terrainImage!.data[idx + 1] = 40;
           this._terrainImage!.data[idx + 2] = 24;
         } else {
-          // Flat grass green
-          this._terrainImage!.data[idx] = 34;
-          this._terrainImage!.data[idx + 1] = 90;
-          this._terrainImage!.data[idx + 2] = 30;
+          // Grass green, brightened by elevation for readability.
+          const shade = THREE.MathUtils.clamp(this._heightAt(wx, wz) / 300, 0, 1);
+          this._terrainImage!.data[idx] = 34 + shade * 150;
+          this._terrainImage!.data[idx + 1] = 90 + shade * 90;
+          this._terrainImage!.data[idx + 2] = 30 + shade * 120;
         }
         this._terrainImage!.data[idx + 3] = 255;
       }

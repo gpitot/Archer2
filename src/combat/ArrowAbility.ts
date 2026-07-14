@@ -86,11 +86,12 @@ export class ArrowAbility {
       dir = new THREE.Vector3(Math.sin(this.hero.facing), 0, Math.cos(this.hero.facing)).normalize();
     }
 
-    // Spawn in front of hero
+    // Spawn in front of hero, at shoulder height (Projectile re-heights it to
+    // terrain + FLY_HEIGHT each step; this just seeds the first frame).
     const spawnOffset = this.hero.scale * 0.8;
     const spawnPos = new THREE.Vector3(
       heroPos.x + dir.x * spawnOffset,
-      heroPos.y,
+      heroPos.y + 20,
       heroPos.z + dir.z * spawnOffset,
     );
 

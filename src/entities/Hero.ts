@@ -78,8 +78,12 @@ export class Hero {
   }
   readonly scale: number;
 
+  /** Height above the sampled terrain the hero mesh sits at. */
+  static readonly GROUND_OFFSET = 0.5;
+
   private _pathfinder: Pathfinder;
   private _navGrid: NavGrid;
+  private _heightAt: (x: number, z: number) => number;
   private _waypoints: THREE.Vector3[] = [];
   private _state: HeroState = "idle";
 
@@ -130,9 +134,15 @@ export class Hero {
   private _body: THREE.Mesh;
   private _shadow: THREE.Mesh;
 
-  constructor(pathfinder: Pathfinder, navGrid: NavGrid, scale = 3) {
+  constructor(
+    pathfinder: Pathfinder,
+    navGrid: NavGrid,
+    scale = 3,
+    heightAt: (x: number, z: number) => number = () => 0,
+  ) {
     this._pathfinder = pathfinder;
     this._navGrid = navGrid;
+    this._heightAt = heightAt;
     this._hp = this.maxHP;
     this.scale = scale;
 
@@ -222,7 +232,11 @@ export class Hero {
     if (path && path.length > 1) {
       this._waypoints = path.slice(1).map((p) => {
         const w = this._navGrid.gridToWorld(p.gx, p.gz);
-        return new THREE.Vector3(w.wx, 0.5, w.wz);
+        return new THREE.Vector3(
+          w.wx,
+          this._heightAt(w.wx, w.wz) + Hero.GROUND_OFFSET,
+          w.wz,
+        );
       });
       this._state = "moving";
     } else {
@@ -441,6 +455,11 @@ export class Hero {
     }
 
     this._updateFacing(delta);
+
+    // Follow the terrain surface (Y is presentation only; gameplay is 2D).
+    this.mesh.position.y =
+      this._heightAt(this.mesh.position.x, this.mesh.position.z) +
+      Hero.GROUND_OFFSET;
   }
 
   /** Returns true if respawn is ready (timer expired). */

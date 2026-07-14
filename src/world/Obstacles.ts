@@ -31,17 +31,19 @@ export function createObstacles(
   defs: ObstacleDef[],
   navGrid: NavGrid,
   registry: ObstacleRegistry,
+  heightAt: (x: number, z: number) => number = () => 0,
 ): THREE.Group {
   const group = new THREE.Group();
 
   for (const def of defs) {
-    const mesh = createObstacleMesh(def);
+    const groundY = heightAt(def.x, def.z);
+    const mesh = createObstacleMesh(def, groundY);
     group.add(mesh);
 
     navGrid.blockRegion(def.x, def.z, def.halfWidth, def.halfDepth);
 
     registry.register(
-      new THREE.Vector3(def.x, def.height / 2, def.z),
+      new THREE.Vector3(def.x, groundY + def.height / 2, def.z),
       def.halfWidth,
       def.height,
       def.halfDepth,
@@ -51,7 +53,7 @@ export function createObstacles(
   return group;
 }
 
-function createObstacleMesh(def: ObstacleDef): THREE.Group {
+function createObstacleMesh(def: ObstacleDef, groundY = 0): THREE.Group {
   const group = new THREE.Group();
 
   if (def.halfWidth === def.halfDepth && def.height > 2) {
@@ -76,6 +78,6 @@ function createObstacleMesh(def: ObstacleDef): THREE.Group {
     group.add(mesh);
   }
 
-  group.position.set(def.x, 0, def.z);
+  group.position.set(def.x, groundY, def.z);
   return group;
 }

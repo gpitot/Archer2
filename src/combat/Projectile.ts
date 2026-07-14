@@ -33,16 +33,22 @@ export class Projectile {
 
   private _obstacles: ObstacleRegistry;
   private _heroesProvider: () => Hero[];
+  private _heightAt: (x: number, z: number) => number;
   private _owner: Hero | null = null;
   private _collisionRadius = 8;
 
-  private _trail: THREE.Mesh;
+  /** Height the arrow flies above the terrain beneath it. */
+  static readonly FLY_HEIGHT = 22;
 
-  constructor(obstacles: ObstacleRegistry, heroesProvider: () => Hero[]) {
+  constructor(
+    obstacles: ObstacleRegistry,
+    heroesProvider: () => Hero[],
+    heightAt: (x: number, z: number) => number = () => 0,
+  ) {
     this._obstacles = obstacles;
     this._heroesProvider = heroesProvider;
+    this._heightAt = heightAt;
     this.mesh = this._buildMesh();
-    this._trail = this.mesh.getObjectByName('arrowTrail') as THREE.Mesh;
     this.mesh.visible = false;
   }
 
@@ -61,10 +67,9 @@ export class Projectile {
     this._state = 'flying';
     this.mesh.visible = true;
 
-    const angle = Math.atan2(this._direction.x, this._direction.z);
-    this.mesh.rotation.y = angle;
-    const pitch = -Math.asin(this._direction.y);
-    this._trail.rotation.x = pitch;
+    // Flight is flat (2D gameplay), so orientation is yaw-only. The shaft and
+    // head keep their build-time X-rotations that lay them along local +Z.
+    this.mesh.rotation.y = Math.atan2(this._direction.x, this._direction.z);
   }
 
   despawn(): void {
@@ -88,7 +93,14 @@ export class Projectile {
     const movement = this._direction.clone().multiplyScalar(step);
     this.mesh.position.add(movement);
 
-    // Obstacle collision
+    // Ride at a fixed height above the terrain — arrows fly OVER hills and
+    // never collide with slopes (WC3-style constant fly-height). Y is visual;
+    // all collision below is 2D on the XZ plane.
+    this.mesh.position.y =
+      this._heightAt(this.mesh.position.x, this.mesh.position.z) +
+      Projectile.FLY_HEIGHT;
+
+    // Obstacle collision (rocks/trees are ground features)
     if (this._obstacles.sphereCast(this.mesh.position, this._collisionRadius)) {
       this.despawn();
       return { status: 'dead', reason: 'obstacle' };
@@ -101,11 +113,6 @@ export class Projectile {
       return { status: 'hit', hero, source: this._owner! };
     }
 
-    // Keep above ground
-    if (this.mesh.position.y < 6) {
-      this.mesh.position.y = 6;
-    }
-
     return { status: 'flying' };
   }
 
@@ -116,12 +123,9 @@ export class Projectile {
       if (hero === this._owner) continue;
       if (!hero.isAlive || hero.isInvulnerable) continue;
 
-      // Simple cylinder check
+      // 2D hit test — height is ignored (gameplay is on the XZ plane).
       const dx = this.mesh.position.x - hero.position.x;
       const dz = this.mesh.position.z - hero.position.z;
-      const dy = Math.abs(this.mesh.position.y - hero.position.y);
-      // Hero height is ~1.9 * scale (body 1.4 + head 0.7). Allow generous Y window.
-      if (dy > hero.scale * 2.0) continue;
       const distSq = dx * dx + dz * dz;
       const hitRadius = hero.bodyRadius + this._collisionRadius;
 

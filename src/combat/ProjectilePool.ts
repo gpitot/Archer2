@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Projectile, ProjectileConfig } from './Projectile';
 import { ObstacleRegistry } from '../world/ObstacleRegistry';
+import { FloatingTextManager } from '../ui/FloatingText';
 import { Hero } from '../entities/Hero';
 
 /**
@@ -11,10 +12,18 @@ export class ProjectilePool {
   private _pool: Projectile[] = [];
   private _active: Projectile[] = [];
   private _group = new THREE.Group();
+  private _floatingText: FloatingTextManager;
 
-  constructor(size: number, obstacles: ObstacleRegistry, heroesProvider: () => Hero[]) {
+  constructor(
+    size: number,
+    obstacles: ObstacleRegistry,
+    heroesProvider: () => Hero[],
+    floatingText: FloatingTextManager,
+    heightAt: (x: number, z: number) => number = () => 0,
+  ) {
+    this._floatingText = floatingText;
     for (let i = 0; i < size; i++) {
-      const p = new Projectile(obstacles, heroesProvider);
+      const p = new Projectile(obstacles, heroesProvider, heightAt);
       this._group.add(p.mesh);
       this._pool.push(p);
     }
@@ -48,6 +57,7 @@ export class ProjectilePool {
       // Apply damage on hero hit
       if (result.status === 'hit') {
         result.hero.takeDamage(result.source, p.damage);
+        this._floatingText.spawn(result.hero.position, p.damage);
       }
     }
   }

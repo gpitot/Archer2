@@ -3,8 +3,9 @@ import { GameLoop } from './GameLoop';
 import { Renderer } from '../rendering/Renderer';
 import { createScene } from '../rendering/Scene';
 import { createLighting } from '../rendering/Lighting';
-import { TopDownCamera } from '../rendering/Camera';
+import { IsometricCamera } from '../rendering/Camera';
 import { Minimap } from '../rendering/Minimap';
+import { Terrain } from '../world/Terrain';
 import { createObstacles, DEFAULT_OBSTACLES } from '../world/Obstacles';
 import { Shop, ShopItem } from '../world/Shop';
 import { ObstacleRegistry } from '../world/ObstacleRegistry';
@@ -17,6 +18,7 @@ import { ArrowAbility } from '../combat/ArrowAbility';
 import { ItemBar } from '../ui/ItemBar';
 import { KDDisplay } from '../ui/KDDisplay';
 import { ShopWindow } from '../ui/ShopWindow';
+import { FloatingTextManager } from '../ui/FloatingText';
 import { ShopOverlay } from '../ui/ShopOverlay';
 import { GoldDisplay } from '../ui/GoldDisplay';
 import { HeroPortrait } from '../ui/HeroPortrait';
@@ -30,14 +32,19 @@ export class Game {
   private _loop: GameLoop;
   private _renderer!: Renderer;
   private _scene!: THREE.Scene;
-  private _camera!: TopDownCamera;
+  private _camera!: IsometricCamera;
+  private _terrain!: Terrain;
   private _hero!: Hero;
   private _heroes: Hero[] = [];
   private _input!: InputManager;
   private _navGrid!: NavGrid;
   private _projectiles!: ProjectilePool;
+  private _floatingText = new FloatingTextManager();
   private _obstacleRegistry!: ObstacleRegistry;
   private _minimap!: Minimap;
+  // League-style camera lock: follow the hero only while locked. Edge-panning
+  // or a minimap click unlocks; Space re-centers and re-locks.
+  private _cameraLocked = true;
   private _spellBar!: SpellBar;
   private _portrait!: HeroPortrait;
   private _goldDisplay!: GoldDisplay;
@@ -66,24 +73,19 @@ export class Game {
     this._scene = createScene();
     createLighting(this._scene);
 
-    // ── Flat ground plane ──
-    const groundGeo = new THREE.PlaneGeometry(ARENA_SIZE, ARENA_SIZE);
-    const groundMat = new THREE.MeshStandardMaterial({
-      color: 0x3a6b2a,
-      roughness: 0.9,
-    });
-    const ground = new THREE.Mesh(groundGeo, groundMat);
-    ground.rotation.x = -Math.PI / 2; // lay flat on XZ
-    ground.receiveShadow = true;
-    this._scene.add(ground);
+    // ── Terrain (smooth heightfield) ──
+    this._terrain = new Terrain(ARENA_SIZE);
+    this._scene.add(this._terrain.mesh);
+    const heightAt = (x: number, z: number) => this._terrain.heightAt(x, z);
 
-    // ── Navigation (flat) ──
+    // ── Navigation ──
     this._navGrid = new NavGrid(ARENA_SIZE / CELL_SIZE, ARENA_SIZE / CELL_SIZE, CELL_SIZE, -HALF, -HALF);
+    this._terrain.applyToNav(this._navGrid); // block cells too steep to climb
     const pathfinder = new Pathfinder(this._navGrid);
 
     // ── Obstacles ──
     this._obstacleRegistry = new ObstacleRegistry();
-    this._scene.add(createObstacles(DEFAULT_OBSTACLES, this._navGrid, this._obstacleRegistry));
+    this._scene.add(createObstacles(DEFAULT_OBSTACLES, this._navGrid, this._obstacleRegistry, heightAt));
 
     // ── Shop (bottom-right of arena) ──
     const bootsItem: ShopItem = {
@@ -94,6 +96,7 @@ export class Game {
       apply: (hero) => hero.addSpeedBonus(60),
     };
     this._shop = new Shop(new THREE.Vector3(400, 0, -900), [bootsItem]);
+    this._shop.mesh.position.y = heightAt(400, -900);
     this._scene.add(this._shop.mesh);
 
     // ── Shop overlay ──
@@ -114,18 +117,21 @@ export class Game {
     this._heroes.push(dummy);
 
     // ── Projectiles ──
-    this._projectiles = new ProjectilePool(20, this._obstacleRegistry, () => this._heroes);
+    this._projectiles = new ProjectilePool(20, this._obstacleRegistry, () => this._heroes, this._floatingText, heightAt);
     this._scene.add(this._projectiles.group);
 
     // ── Ability ──
     this._hero.ability = new ArrowAbility(this._hero, this._projectiles);
 
     // ── Camera ──
-    this._camera = new TopDownCamera();
+    this._camera = new IsometricCamera();
     this._camera.setTarget(this._hero.position);
+    this._camera.setFocusY(this._hero.position.y);
 
     // ── Input ──
     this._input = new InputManager(this._renderer.domElement, this._camera.camera);
+    this._input.setGround(this._terrain.mesh);
+    this._input.onScroll((deltaY) => this._camera.zoom(deltaY * 0.6));
     this._input.onClick((pos) => {
       // If click near shop, open shop instead of moving
       if (this._shop.canInteract(this._hero.position)) {
@@ -163,6 +169,11 @@ export class Game {
       if (this._shopWindow.visible) this._shopWindow.close();
     });
 
+    // Space — re-center camera on hero and resume following
+    this._input.onKeyDown('Space', () => {
+      this._cameraLocked = true;
+    });
+
     // Number keys 1–6 for quick buy
     for (let i = 1; i <= 6; i++) {
       this._input.onKeyDown(`Digit${i}`, () => {
@@ -189,9 +200,10 @@ export class Game {
     this._kdDisplay = new KDDisplay();
 
     // ── Minimap ──
-    this._minimap = new Minimap(ARENA_SIZE, this._navGrid);
+    this._minimap = new Minimap(ARENA_SIZE, this._navGrid, 200, 8, (x, z) => this._terrain.heightAt(x, z));
     this._minimap.onClick = (wx, wz) => {
-      this._camera.setTarget(new THREE.Vector3(wx, 0, wz));
+      this._cameraLocked = false;
+      this._camera.setTarget(new THREE.Vector3(wx, this._terrain.heightAt(wx, wz), wz));
     };
 
     window.addEventListener('resize', this._onResize.bind(this));
@@ -201,8 +213,9 @@ export class Game {
   get hero(): Hero { return this._hero; }
 
   private _createHero(pathfinder: Pathfinder, x: number, z: number): Hero {
-    const hero = new Hero(pathfinder, this._navGrid, 60);
-    hero.mesh.position.set(x, 0.5, z);
+    const heightAt = (hx: number, hz: number) => this._terrain.heightAt(hx, hz);
+    const hero = new Hero(pathfinder, this._navGrid, 60, heightAt);
+    hero.mesh.position.set(x, heightAt(x, z) + Hero.GROUND_OFFSET, z);
     this._scene.add(hero.mesh);
     return hero;
   }
@@ -213,11 +226,19 @@ export class Game {
   }
 
   private update(delta: number): void {
-    // Edge panning
+    // Camera: edge-panning unlocks; the camera stays where the player left it
+    // until Space re-locks it onto the hero (League-style).
     const pan = this._input.edgePan;
     if (pan.length() > 0) {
-      this._camera.pan(pan.multiplyScalar(500 * delta));
+      this._cameraLocked = false;
+      const speed = 900 * delta;
+      this._camera.panScreen(pan.x * speed, pan.z * speed);
+    } else if (this._cameraLocked) {
+      this._camera.follow(this._hero.position);
     }
+    // Keep the camera focus riding on the terrain surface.
+    const focus = this._camera.focus;
+    this._camera.setFocusY(this._terrain.heightAt(focus.x, focus.z));
 
     for (const hero of this._heroes) {
       hero.update(delta);
@@ -227,6 +248,7 @@ export class Game {
       }
     }
     this._projectiles.update(delta);
+    this._floatingText.update(delta, this._camera.camera);
 
     // Passive gold income (1 tick per second per hero)
     this._incomeAccumulator += delta;
@@ -298,9 +320,9 @@ export class Game {
       const gz = Math.floor(Math.random() * gw);
       if (this._navGrid.isWalkable(gx, gz)) {
         const { wx, wz } = this._navGrid.gridToWorld(gx, gz);
-        return new THREE.Vector3(wx, 0.5, wz);
+        return new THREE.Vector3(wx, this._terrain.heightAt(wx, wz) + Hero.GROUND_OFFSET, wz);
       }
     }
-    return new THREE.Vector3(0, 0.5, 0);
+    return new THREE.Vector3(0, this._terrain.heightAt(0, 0) + Hero.GROUND_OFFSET, 0);
   }
 }
