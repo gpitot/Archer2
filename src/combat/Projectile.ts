@@ -15,7 +15,7 @@ export type ProjectileState = 'flying' | 'dead';
 export type ProjectileResult =
   | { status: 'flying' }
   | { status: 'dead'; reason: 'range' | 'obstacle' }
-  | { status: 'hit'; hero: Hero };
+  | { status: 'hit'; hero: Hero; source: Hero };
 
 /**
  * A single projectile (arrow) that flies through the world.
@@ -34,7 +34,7 @@ export class Projectile {
   private _obstacles: ObstacleRegistry;
   private _heroesProvider: () => Hero[];
   private _owner: Hero | null = null;
-  private _collisionRadius = 0.4;
+  private _collisionRadius = 8;
 
   private _trail: THREE.Mesh;
 
@@ -98,12 +98,12 @@ export class Projectile {
     const hero = this._checkHeroCollision();
     if (hero) {
       this.despawn();
-      return { status: 'hit', hero };
+      return { status: 'hit', hero, source: this._owner! };
     }
 
     // Keep above ground
-    if (this.mesh.position.y < 0.3) {
-      this.mesh.position.y = 0.3;
+    if (this.mesh.position.y < 6) {
+      this.mesh.position.y = 6;
     }
 
     return { status: 'flying' };
@@ -137,27 +137,27 @@ export class Projectile {
   private _buildMesh(): THREE.Group {
     const group = new THREE.Group();
 
-    const shaftGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.2, 6);
+    const shaftGeo = new THREE.CylinderGeometry(1.2, 1.2, 24, 6);
     const shaftMat = new THREE.MeshStandardMaterial({
       color: 0xddcc88, roughness: 0.3, emissive: 0x331100,
     });
     const shaft = new THREE.Mesh(shaftGeo, shaftMat);
-    shaft.position.z = 0.6;
+    shaft.position.z = 12;
     shaft.rotation.x = Math.PI / 2;
     shaft.name = 'arrowTrail';
     group.add(shaft);
 
-    const headGeo = new THREE.ConeGeometry(0.1, 0.35, 6);
+    const headGeo = new THREE.ConeGeometry(2, 7, 6);
     const headMat = new THREE.MeshStandardMaterial({
       color: 0xcccccc, roughness: 0.2, metalness: 0.8, emissive: 0x111111,
     });
     const head = new THREE.Mesh(headGeo, headMat);
-    head.position.z = 1.3;
+    head.position.z = 26;
     head.rotation.x = Math.PI / 2;
     group.add(head);
 
-    const light = new THREE.PointLight(0xffaa44, 3, 3);
-    light.position.z = 0.6;
+    const light = new THREE.PointLight(0xffaa44, 60, 60);
+    light.position.z = 12;
     group.add(light);
 
     return group;

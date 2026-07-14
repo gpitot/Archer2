@@ -31,43 +31,29 @@ async function main() {
   console.log('=== Before ===');
   console.table(await dump());
 
-  // Dummy is at (10, -5). Player at (0, -15).
-  // Fire three shots toward the dummy, aiming at its position
-  for (let shot = 1; shot <= 4; shot++) {
-    await page.evaluate(() => {
-      const g = (window as any).__game;
-      const hero = g._hero;
-      const dummy = g._heroes[1]; // dummy is second hero
+  // Dummy at (200, -100). Player at (0, -300). Arrow does 200 dmg at level 1.
+  // Learn Shoot Arrow (skill point)
+  await page.keyboard.down('ControlLeft');
+  await page.keyboard.press('KeyQ');
+  await page.keyboard.up('ControlLeft');
+  await page.waitForTimeout(100);
 
-      // Start charge
-      hero.beginCharge();
-    });
-
-    // Wait for charge (simulate holding Space)
-    await page.waitForTimeout(1000); // 67% charge ≈ 30 damage
-
-    // Fire directly at dummy position
-    await page.evaluate(() => {
-      const g = (window as any).__game;
-      const hero = g._hero;
-      const dummy = g._heroes[1];
-      const aimPos = dummy.position.clone();
-      hero.releaseCharge(aimPos);
-    });
-
-    await page.waitForTimeout(1000); // Let projectile fly
-    console.log(`=== After shot ${shot} ===`);
-    console.table(await dump());
-  }
-
-  // Wait for respawn
-  console.log('\n=== Waiting for respawn (3s)... ===');
-  await page.waitForTimeout(3500);
+  // One shot kills dummy (100 HP).
+  await page.evaluate(() => {
+    const g = (window as any).__game;
+    const dummy = g._heroes[1];
+    g._hero.fireAbility(dummy.position.clone());
+  });
+  await page.waitForTimeout(500);
+  console.log('=== After shot (dmg=200) ===');
   console.table(await dump());
 
-  await page.screenshot({ path: resolve(ROOT, 'screenshot-phase4.png') });
-  console.log('Saved screenshot-phase4.png');
+  // Wait for respawn
+  await page.waitForTimeout(3500);
+  console.log('=== After respawn ===');
+  console.table(await dump());
 
+  await page.screenshot({ path: resolve(ROOT, 'screenshot-damage.png') });
   await browser.close();
   await server.close();
 }

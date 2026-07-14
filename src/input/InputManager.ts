@@ -25,8 +25,8 @@ export class InputManager {
   private _keyUpHandlers = new Map<string, KeyHandler[]>();
 
   // Edge panning
-  private _edgeThreshold = 30; // px from window edge to trigger pan
-  private _panSpeed = 25;       // world units/sec
+  private _edgeThreshold = 30;
+  private _panSpeed = 500;       // world units/sec
   private _mouseScreenX = 0;
   private _mouseScreenY = 0;
   private _panDirection = new THREE.Vector3();

@@ -12,19 +12,19 @@ export interface ObstacleDef {
 }
 
 export const DEFAULT_OBSTACLES: ObstacleDef[] = [
-  { x: 5, z: 5, halfWidth: 3, halfDepth: 2, height: 2, color: 0x888888 },
-  { x: -3, z: -4, halfWidth: 2, halfDepth: 2, height: 1.5, color: 0x777777 },
-  { x: -6, z: 6, halfWidth: 2, halfDepth: 3, height: 2.5, color: 0x999999 },
-  { x: 12, z: 3, halfWidth: 0.6, halfDepth: 0.6, height: 3, color: 0x2d5a27 },
-  { x: 15, z: -2, halfWidth: 0.6, halfDepth: 0.6, height: 3.5, color: 0x2d5a27 },
-  { x: -10, z: 8, halfWidth: 0.6, halfDepth: 0.6, height: 3, color: 0x2d5a27 },
-  { x: -12, z: -6, halfWidth: 0.6, halfDepth: 0.6, height: 4, color: 0x2d5a27 },
-  { x: 8, z: -10, halfWidth: 0.6, halfDepth: 0.6, height: 3, color: 0x2d5a27 },
-  { x: -5, z: -12, halfWidth: 0.6, halfDepth: 0.6, height: 3.5, color: 0x2d5a27 },
-  { x: 18, z: 12, halfWidth: 2, halfDepth: 2, height: 1.8, color: 0x8a8a8a },
-  { x: -15, z: 15, halfWidth: 2.5, halfDepth: 2, height: 2, color: 0x7a7a7a },
-  { x: 10, z: -18, halfWidth: 1.5, halfDepth: 3, height: 1.5, color: 0x888880 },
-  { x: -18, z: -10, halfWidth: 2, halfDepth: 2, height: 2.2, color: 0x8a8a8a },
+  { x: 100, z: 100, halfWidth: 60, halfDepth: 40, height: 40, color: 0x888888 },
+  { x: -60, z: -80, halfWidth: 40, halfDepth: 40, height: 30, color: 0x777777 },
+  { x: -120, z: 120, halfWidth: 40, halfDepth: 60, height: 50, color: 0x999999 },
+  { x: 240, z: 60, halfWidth: 12, halfDepth: 12, height: 60, color: 0x2d5a27 },
+  { x: 300, z: -40, halfWidth: 12, halfDepth: 12, height: 70, color: 0x2d5a27 },
+  { x: -200, z: 160, halfWidth: 12, halfDepth: 12, height: 60, color: 0x2d5a27 },
+  { x: -240, z: -120, halfWidth: 12, halfDepth: 12, height: 80, color: 0x2d5a27 },
+  { x: 160, z: -200, halfWidth: 12, halfDepth: 12, height: 60, color: 0x2d5a27 },
+  { x: -100, z: -240, halfWidth: 12, halfDepth: 12, height: 70, color: 0x2d5a27 },
+  { x: 360, z: 240, halfWidth: 40, halfDepth: 40, height: 36, color: 0x8a8a8a },
+  { x: -300, z: 300, halfWidth: 50, halfDepth: 40, height: 40, color: 0x7a7a7a },
+  { x: 200, z: -360, halfWidth: 30, halfDepth: 60, height: 30, color: 0x888880 },
+  { x: -360, z: -200, halfWidth: 40, halfDepth: 40, height: 44, color: 0x8a8a8a },
 ];
 
 export function createObstacles(

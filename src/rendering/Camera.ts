@@ -17,8 +17,8 @@ export class TopDownCamera {
   readonly camera: THREE.OrthographicCamera;
 
   private _target = new THREE.Vector3();
-  private _viewSize = 30;
-  private _elevation = 60;
+  private _viewSize = 600; // half-height in world units (~WC3 camera)
+  private _elevation = 1200;
 
   constructor() {
     const aspect = window.innerWidth / window.innerHeight;
@@ -28,7 +28,7 @@ export class TopDownCamera {
       this._viewSize,
       -this._viewSize,
       1,
-      200,
+      3000,
     );
 
     // Rx(-π/2): look straight down, right = +X, up = -Z (south)

@@ -50,7 +50,32 @@ function buildHeroCircle(radius: number, color: number): THREE.Group {
  */
 export class Hero {
   readonly mesh: THREE.Group;
-  readonly speed = 24;
+  readonly baseSpeed = 480;
+  private _speedBonus = 0; // from items like Boots
+
+  get speed(): number { return this.baseSpeed + this._speedBonus; }
+
+  /** Add permanent speed from an item. */
+  addSpeedBonus(amount: number): void { this._speedBonus += amount; }
+
+  // ── Inventory (6 slots) ──
+  private _inventory: (string | null)[] = [null, null, null, null, null, null];
+
+  get inventory(): readonly (string | null)[] { return this._inventory; }
+
+  /** Check if item is already owned. */
+  hasItem(itemId: string): boolean { return this._inventory.includes(itemId); }
+
+  /** Add item to first empty slot. Returns slot index or -1 if full. */
+  addItem(itemId: string): number {
+    for (let i = 0; i < 6; i++) {
+      if (this._inventory[i] === null) {
+        this._inventory[i] = itemId;
+        return i;
+      }
+    }
+    return -1;
+  }
   readonly scale: number;
 
   private _pathfinder: Pathfinder;
@@ -71,6 +96,25 @@ export class Hero {
   private _invulnerableTimer = 0;
   private _respawnTimer = 0;
   private _respawnDelay = 3; // seconds
+
+  // XP & Levels
+  private _xp = 0;
+  private _level = 1;
+  private _skillPoints = 1; // 1 point to spend at level 1
+  readonly maxLevel = 10;
+  // XP needed to reach each level (index = target level)
+  private static readonly _xpTable = [0, 0, 200, 500, 900, 1400, 2000, 2700, 3500, 4400, 5400];
+
+  // Gold & K/D
+  private _gold = 0;
+  private _kills = 0;
+  private _deaths = 0;
+  private _killStreak = 0;   // consecutive kills without dying
+  private _multiKillCount = 0;
+  private _multiKillTimer = 0; // seconds since last kill in chain
+
+  // First blood flag (shared across all heroes)
+  private static _firstBlood = true;
 
   // Hit flash
   private _hitFlashTimer = 0;
@@ -108,8 +152,25 @@ export class Hero {
   get state(): HeroState {
     return this._state;
   }
-  get isCharging(): boolean {
-    return this.ability?.state === "charging";
+  get isShooting(): boolean {
+    return this.ability?.state === 'cooldown';
+  }
+  get xp(): number { return this._xp; }
+  get level(): number { return this._level; }
+  get skillPoints(): number { return this._skillPoints; }
+  get gold(): number { return this._gold; }
+  get kills(): number { return this._kills; }
+  get deaths(): number { return this._deaths; }
+  /** Total XP needed to reach the given level. */
+  static xpForLevel(level: number): number {
+    return Hero._xpTable[Math.min(level, 10)] ?? 5400;
+  }
+
+  /** Passive gold per second based on K/D. */
+  get passiveIncome(): number {
+    if (this._kills === 0) return 5;
+    const raw = (this._deaths * 2) / this._kills;
+    return Math.max(1, Math.min(30, Math.round(raw)));
   }
   get isAlive(): boolean {
     return this._alive;
@@ -177,23 +238,18 @@ export class Hero {
 
   // ── Ability ───────────────────────────────────────────────────
 
-  beginCharge(): void {
+  fireAbility(aimPos?: THREE.Vector3): void {
     if (!this._alive) return;
-    this.ability?.startCharge(performance.now() / 1000);
-  }
-
-  releaseCharge(aimPos?: THREE.Vector3): void {
-    if (!this._alive) return;
-    this.ability?.releaseCharge(aimPos);
+    this.ability?.fire(aimPos);
   }
 
   // ── Health & Damage ───────────────────────────────────────────
 
   /**
-   * Apply damage. Respects invulnerability. Triggers hit effects.
+   * Apply damage from a source hero. Awards XP to the source on kill.
    * Returns true if the hero died from this hit.
    */
-  takeDamage(amount: number): boolean {
+  takeDamage(source: Hero, amount: number): boolean {
     if (!this._alive || this._invulnerable) return false;
 
     this._hp = Math.max(0, this._hp - amount);
@@ -206,9 +262,104 @@ export class Hero {
 
     if (this._hp <= 0) {
       this._die();
+      // Track K/D
+      this._deaths++;
+      this._killStreak = 0; // victim loses streak
+      source._kills++;
+      source._killStreak++;
+
+      // Award gold & XP
+      source._awardKillGold(this);
+      source.addXP(this._xpReward(source));
+
+      // Multi-kill tracking
+      source._multiKillTimer = 0.5; // reset multi-kill window
+      source._multiKillCount++;
+
       return true;
     }
     return false;
+  }
+
+  /** XP the killer earns for killing this hero. */
+  private _xpReward(killer: Hero): number {
+    // Base XP from victim's level (WC3 hero kill table)
+    const baseTable = [0, 100, 120, 160, 220, 300, 300, 300, 300, 300, 300];
+    let xp = baseTable[Math.min(this._level, 10)];
+    // Underdog bonus: 50 × level difference if victim is higher
+    if (this._level > killer._level) {
+      xp += (this._level - killer._level) * 50;
+    }
+    return xp;
+  }
+
+  /** Award kill gold (base + spree + bounty + multi-kill). */
+  private _awardKillGold(victim: Hero): void {
+    let total = 0;
+    const msgs: string[] = [];
+
+    // Base kill
+    total += 5;
+
+    // First blood
+    if (Hero._firstBlood) {
+      Hero._firstBlood = false;
+      total += 5;
+      msgs.push('First Blood!');
+    }
+
+    // Spree bonus (awarded to killer when reaching a spree level)
+    if (this._killStreak >= 3) {
+      const spreeBonus = [0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 7];
+      const bonus = spreeBonus[Math.min(this._killStreak, 10)] ?? 7;
+      total += bonus;
+      if (bonus > 0) msgs.push(`+${bonus}g spree`);
+    }
+
+    // Bounty for ending victim's streak
+    if (victim._killStreak >= 4) {
+      const bountyTable = [0, 0, 0, 0, 1, 3, 6, 10, 15, 21, 28];
+      const bounty = bountyTable[Math.min(victim._killStreak, 10)] ?? 28;
+      total += bounty;
+      msgs.push(`+${bounty}g bounty`);
+    }
+
+    // Multi-kill
+    if (this._multiKillCount === 2) {
+      total += 15;
+      msgs.push('Double Kill! +15g');
+    } else if (this._multiKillCount >= 3) {
+      total += 30;
+      msgs.push('Triple Kill! +30g');
+    }
+
+    this._gold += total;
+    if (msgs.length > 0) {
+      // will add floating text later; for now just add silently
+    }
+  }
+
+  /** Add XP, triggering level-ups as needed. */
+  addXP(amount: number): void {
+    this._xp += amount;
+    while (this._level < this.maxLevel && this._xp >= Hero._xpTable[this._level + 1]) {
+      this._level++;
+      this._skillPoints++;
+    }
+  }
+
+  /** Add gold (external source like passive income). */
+  addGold(amount: number): void {
+    this._gold += amount;
+  }
+
+  /** Spend a skill point to level up or learn an ability. */
+  spendSkillPoint(): boolean {
+    if (this._skillPoints <= 0 || !this.ability) return false;
+    if (this.ability.level >= 4) return false;
+    this._skillPoints--;
+    this.ability.levelUp();
+    return true;
   }
 
   /**
@@ -244,6 +395,14 @@ export class Hero {
       // Tick respawn timer
       this._respawnTimer -= delta;
       return;
+    }
+
+    // Multi-kill window decay
+    if (this._multiKillTimer > 0) {
+      this._multiKillTimer -= delta;
+      if (this._multiKillTimer <= 0) {
+        this._multiKillCount = 0;
+      }
     }
 
     // Tick ability
@@ -294,9 +453,6 @@ export class Hero {
   private _die(): void {
     this._alive = false;
     this._respawnTimer = this._respawnDelay;
-
-    // Cancel any active charge
-    this.ability?.cancelCharge();
 
     // Hide mesh
     this.mesh.visible = false;

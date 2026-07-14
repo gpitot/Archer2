@@ -47,7 +47,7 @@ export class ProjectilePool {
 
       // Apply damage on hero hit
       if (result.status === 'hit') {
-        result.hero.takeDamage(p.damage);
+        result.hero.takeDamage(result.source, p.damage);
       }
     }
   }

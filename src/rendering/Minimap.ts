@@ -24,6 +24,9 @@ export class Minimap {
   private _navGrid: NavGrid;
   private _terrainImage: ImageData | null = null;
 
+  /** Called with world (x, z) when minimap is clicked. */
+  onClick: ((wx: number, wz: number) => void) | null = null;
+
   constructor(arenaSize: number, navGrid: NavGrid, size = 200, padding = 8) {
     this._arenaSize = arenaSize;
     this._halfArena = arenaSize / 2;
@@ -31,6 +34,7 @@ export class Minimap {
 
     this._width = size + padding * 2;
     this._mapSizePx = size;
+    const pad = padding;
 
     this.canvas = document.createElement('canvas');
     this.canvas.width = this._width;
@@ -43,11 +47,25 @@ export class Minimap {
       border-radius: 4px;
       background: rgba(0,0,0,0.5);
       z-index: 100;
-      pointer-events: none;
+      pointer-events: auto;
+      cursor: pointer;
     `;
     document.body.appendChild(this.canvas);
 
     this._ctx = this.canvas.getContext('2d')!;
+
+    // Click → world coords
+    this.canvas.addEventListener('click', (e) => {
+      const rect = this.canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left - pad;
+      const py = e.clientY - rect.top - pad;
+      if (px < 0 || px > size || py < 0 || py > size) return;
+      const wx = (px / size) * this._arenaSize - this._halfArena;
+      // Invert Y: canvas py=0 = top = +Z (north)
+      const wz = -((size - py) / size * this._arenaSize - this._halfArena);
+      this.onClick?.(wx, wz);
+    });
+
     this._bakeTerrain();
   }
 
@@ -82,7 +100,6 @@ export class Minimap {
     const px = ((wx + this._halfArena) / this._arenaSize) * this._mapSizePx;
     // Canvas Y=0 is top, so invert Z: +Z (north) → top, -Z (south) → bottom
     const py = this._mapSizePx - ((-wz + this._halfArena) / this._arenaSize) * this._mapSizePx;
-    console.log(`worldToPixel: wz=${wz} => py=${py}`);
     return [px, py];
   }
 
