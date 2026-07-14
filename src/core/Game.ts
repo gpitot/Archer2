@@ -12,6 +12,9 @@ import { ObstacleRegistry } from '../world/ObstacleRegistry';
 import { NavGrid } from '../navigation/NavGrid';
 import { Pathfinder } from '../navigation/Pathfinder';
 import { Hero } from '../entities/Hero';
+import { Ward } from '../entities/Ward';
+import { FogOfWar } from '../vision/FogOfWar';
+import { FogLayer } from '../vision/FogLayer';
 import { InputManager } from '../input/InputManager';
 import { ProjectilePool } from '../combat/ProjectilePool';
 import { ArrowAbility } from '../combat/ArrowAbility';
@@ -27,6 +30,7 @@ import { SpellBar } from '../ui/SpellBar';
 const ARENA_SIZE = 4000;
 const HALF = ARENA_SIZE / 2;
 const CELL_SIZE = 20;
+const FOG_CELL_SIZE = 40;
 
 export class Game {
   private _loop: GameLoop;
@@ -41,6 +45,9 @@ export class Game {
   private _projectiles!: ProjectilePool;
   private _floatingText = new FloatingTextManager();
   private _obstacleRegistry!: ObstacleRegistry;
+  private _fog!: FogOfWar;
+  private _fogLayer!: FogLayer;
+  private _wards: Ward[] = [];
   private _minimap!: Minimap;
   // League-style camera lock: follow the hero only while locked. Edge-panning
   // or a minimap click unlocks; Space re-centers and re-locks.
@@ -85,7 +92,17 @@ export class Game {
 
     // ── Obstacles ──
     this._obstacleRegistry = new ObstacleRegistry();
-    this._scene.add(createObstacles(DEFAULT_OBSTACLES, this._navGrid, this._obstacleRegistry, heightAt));
+    const obstacleGroup = createObstacles(DEFAULT_OBSTACLES, this._navGrid, this._obstacleRegistry, heightAt);
+    this._scene.add(obstacleGroup);
+
+    // ── Fog of war (WC3-style: high ground blocks sight, trees occlude) ──
+    this._fog = new FogOfWar(ARENA_SIZE, FOG_CELL_SIZE, heightAt);
+    for (const def of DEFAULT_OBSTACLES) {
+      this._fog.addSightBlocker(def.x, def.z, def.halfWidth, def.halfDepth, def.height);
+    }
+    this._fogLayer = new FogLayer(this._fog, 0); // player team's view
+    this._fogLayer.applyTo(this._terrain.mesh);
+    this._fogLayer.applyTo(obstacleGroup);
 
     // ── Shop (bottom-right of arena) ──
     const bootsItem: ShopItem = {
@@ -95,9 +112,18 @@ export class Game {
       description: '+60 movement speed',
       apply: (hero) => hero.addSpeedBonus(60),
     };
-    this._shop = new Shop(new THREE.Vector3(400, 0, -900), [bootsItem]);
+    const wardsItem: ShopItem = {
+      id: 'sentry_wards',
+      name: 'Sentry Wards',
+      cost: 10,
+      description: '5 charges — press W to place a ward granting vision for 300s',
+      stackable: true,
+      apply: (hero) => hero.addWardCharges(5),
+    };
+    this._shop = new Shop(new THREE.Vector3(400, 0, -900), [bootsItem, wardsItem]);
     this._shop.mesh.position.y = heightAt(400, -900);
     this._scene.add(this._shop.mesh);
+    this._fogLayer.applyTo(this._shop.mesh);
 
     // ── Shop overlay ──
     this._shopOverlay = new ShopOverlay();
@@ -108,13 +134,17 @@ export class Game {
     });
 
     // ── Heroes ──
-    this._hero = this._createHero(pathfinder, 0, -300);
+    this._hero = this._createHero(pathfinder, 0, -300, 0);
     this._heroes.push(this._hero);
 
-    const dummy = this._createHero(pathfinder, 200, -100);
+    const dummy = this._createHero(pathfinder, 200, -100, 1);
     const dummyBody = dummy.mesh.getObjectByName('heroBody') as THREE.Mesh;
     (dummyBody.material as THREE.MeshStandardMaterial).color.set(0xcc3333);
     this._heroes.push(dummy);
+
+    // Every hero feeds vision to its own team's fog map (shared team sight).
+    for (const hero of this._heroes) this._fog.addSource(hero);
+    this._fog.recomputeNow();
 
     // ── Projectiles ──
     this._projectiles = new ProjectilePool(20, this._obstacleRegistry, () => this._heroes, this._floatingText, heightAt);
@@ -154,6 +184,9 @@ export class Game {
         this._hero.fireAbility(this._input.aimPosition ?? undefined);
       }
     });
+
+    // W — Place a sentry ward (requires charges from the shop)
+    this._input.onKeyDown('KeyW', () => this._placeWard());
 
     // B — Open shop when near
     this._input.onKeyDown('KeyB', () => {
@@ -201,6 +234,7 @@ export class Game {
 
     // ── Minimap ──
     this._minimap = new Minimap(ARENA_SIZE, this._navGrid, 200, 8, (x, z) => this._terrain.heightAt(x, z));
+    this._minimap.setFog(this._fog, this._hero.team);
     this._minimap.onClick = (wx, wz) => {
       this._cameraLocked = false;
       this._camera.setTarget(new THREE.Vector3(wx, this._terrain.heightAt(wx, wz), wz));
@@ -212,9 +246,9 @@ export class Game {
 
   get hero(): Hero { return this._hero; }
 
-  private _createHero(pathfinder: Pathfinder, x: number, z: number): Hero {
+  private _createHero(pathfinder: Pathfinder, x: number, z: number, team: number): Hero {
     const heightAt = (hx: number, hz: number) => this._terrain.heightAt(hx, hz);
-    const hero = new Hero(pathfinder, this._navGrid, 60, heightAt);
+    const hero = new Hero(pathfinder, this._navGrid, 60, heightAt, team);
     hero.mesh.position.set(x, heightAt(x, z) + Hero.GROUND_OFFSET, z);
     this._scene.add(hero.mesh);
     return hero;
@@ -250,6 +284,22 @@ export class Game {
     this._projectiles.update(delta);
     this._floatingText.update(delta, this._camera.camera);
 
+    // Wards: tick lifetime, remove expired ones
+    for (let i = this._wards.length - 1; i >= 0; i--) {
+      const ward = this._wards[i];
+      ward.update(delta);
+      if (ward.expired) {
+        this._scene.remove(ward.mesh);
+        this._fog.removeSource(ward);
+        this._wards.splice(i, 1);
+      }
+    }
+
+    // Fog of war: recompute team vision, ease the render layer, cull enemies
+    this._fog.update(delta);
+    this._fogLayer.update(delta);
+    this._applyFogVisibility();
+
     // Passive gold income (1 tick per second per hero)
     this._incomeAccumulator += delta;
     while (this._incomeAccumulator >= 1.0) {
@@ -263,15 +313,25 @@ export class Game {
   private _render(_interpolation: number): void {
     this._renderer.render(this._scene, this._camera.camera);
 
-    // Minimap
+    // Minimap — enemies only appear while inside our team's vision (WC3 rule)
+    const playerTeam = this._hero.team;
     const markers = this._heroes
-      .filter((h) => h.isAlive)
-      .map((h, i) => ({
+      .filter((h) =>
+        h.isAlive &&
+        (h.team === playerTeam || this._fog.isVisible(playerTeam, h.position.x, h.position.z)))
+      .map((h) => ({
         x: h.position.x,
         z: h.position.z,
-        color: i === 0 ? '#44aaff' : '#ff4444',
-        radius: i === 0 ? 4 : 3,
+        color: h.team === playerTeam ? '#44aaff' : '#ff4444',
+        radius: h === this._hero ? 4 : 3,
       }));
+
+    // Own wards
+    for (const ward of this._wards) {
+      if (ward.team === playerTeam) {
+        markers.push({ x: ward.position.x, z: ward.position.z, color: '#66ff88', radius: 2 });
+      }
+    }
 
     // Shop marker
     markers.push({
@@ -302,7 +362,7 @@ export class Game {
     );
 
     this._goldDisplay.update(this._hero.gold);
-    this._itemBar.update(this._hero.inventory);
+    this._itemBar.update(this._hero.inventory, { sentry_wards: this._hero.wardCharges });
     this._kdDisplay.update(this._hero.kills, this._hero.deaths);
 
     // Shop overlay — show when in range
@@ -310,6 +370,42 @@ export class Game {
       this._shopOverlay.show(this._shop.items);
     } else {
       this._shopOverlay.hide();
+    }
+  }
+
+  /** Place a sentry ward at the hero's feet if a charge is available. */
+  private _placeWard(): void {
+    if (!this._hero.isAlive) return;
+    if (!this._hero.consumeWardCharge()) return;
+    const pos = this._hero.position;
+    const ward = new Ward(
+      this._hero.team,
+      new THREE.Vector3(pos.x, this._terrain.heightAt(pos.x, pos.z), pos.z),
+    );
+    this._wards.push(ward);
+    this._scene.add(ward.mesh);
+    this._fog.addSource(ward);
+  }
+
+  /**
+   * Show/hide units by the player team's fog (WC3-style pop-in): teammates
+   * are always drawn; enemy heroes, wards, and arrows only inside vision.
+   */
+  private _applyFogVisibility(): void {
+    const team = this._hero.team;
+    for (const h of this._heroes) {
+      if (h.team === team) continue;
+      h.mesh.visible = h.isAlive && this._fog.isVisible(team, h.position.x, h.position.z);
+    }
+    for (const p of this._projectiles.active) {
+      p.mesh.visible =
+        !p.owner || p.owner.team === team ||
+        this._fog.isVisible(team, p.position.x, p.position.z);
+    }
+    for (const ward of this._wards) {
+      ward.mesh.visible =
+        ward.team === team ||
+        this._fog.isVisible(team, ward.position.x, ward.position.z);
     }
   }
 

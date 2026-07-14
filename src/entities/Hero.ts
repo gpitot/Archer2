@@ -51,6 +51,10 @@ function buildHeroCircle(radius: number, color: number): THREE.Group {
 export class Hero {
   readonly mesh: THREE.Group;
   readonly baseSpeed = 480;
+  /** Team for fog-of-war vision sharing (and future alliances). */
+  readonly team: number;
+  /** Fog-of-war sight radius (world units). */
+  readonly sightRadius = 900;
   private _speedBonus = 0; // from items like Boots
 
   get speed(): number { return this.baseSpeed + this._speedBonus; }
@@ -75,6 +79,27 @@ export class Hero {
       }
     }
     return -1;
+  }
+
+  /** Remove an item from the inventory (e.g. last ward charge used). */
+  removeItem(itemId: string): void {
+    const i = this._inventory.indexOf(itemId);
+    if (i !== -1) this._inventory[i] = null;
+  }
+
+  // ── Wards ──
+  private _wardCharges = 0;
+
+  get wardCharges(): number { return this._wardCharges; }
+
+  addWardCharges(count: number): void { this._wardCharges += count; }
+
+  /** Spend one ward charge. Returns false if none remain. */
+  consumeWardCharge(): boolean {
+    if (this._wardCharges <= 0) return false;
+    this._wardCharges--;
+    if (this._wardCharges === 0) this.removeItem('sentry_wards');
+    return true;
   }
   readonly scale: number;
 
@@ -139,12 +164,14 @@ export class Hero {
     navGrid: NavGrid,
     scale = 3,
     heightAt: (x: number, z: number) => number = () => 0,
+    team = 0,
   ) {
     this._pathfinder = pathfinder;
     this._navGrid = navGrid;
     this._heightAt = heightAt;
     this._hp = this.maxHP;
     this.scale = scale;
+    this.team = team;
 
     this.mesh = buildHeroCircle(0.45, 0x4488cc);
     this.mesh.scale.setScalar(this.scale);
@@ -183,6 +210,10 @@ export class Hero {
     return Math.max(1, Math.min(30, Math.round(raw)));
   }
   get isAlive(): boolean {
+    return this._alive;
+  }
+  /** Vision-source liveness for FogOfWar: dead heroes grant no vision. */
+  get active(): boolean {
     return this._alive;
   }
   get hp(): number {
