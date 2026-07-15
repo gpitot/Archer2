@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-/** One purchasable item in a shop. */
+/** One purchasable item in a shop (display fields only; buy logic lives in the sim). */
 export interface ShopItem {
   id: string;
   name: string;
@@ -8,45 +8,23 @@ export interface ShopItem {
   description: string;
   /** Stackable items (e.g. ward charges) can be re-bought while owned. */
   stackable?: boolean;
-  /** Apply effect to buyer, return ownership data for inventory. */
-  apply: (hero: import('../entities/Hero').Hero) => void;
 }
 
 /**
- * A shop building in the world. Heroes near it can buy items.
+ * A shop building in the world — rendering only. Buy validation and item
+ * application are handled by the authoritative simulation (`stepMatch`).
  */
 export class Shop {
   readonly mesh: THREE.Group;
   readonly position: THREE.Vector3;
   readonly items: ShopItem[];
-  readonly interactRadius = 120; // how close hero must be
+  readonly interactRadius = 120;
 
   constructor(position: THREE.Vector3, items: ShopItem[]) {
     this.position = position.clone();
     this.items = items;
     this.mesh = this._buildMesh();
-  }
-
-  /** Check if a hero is in range to interact. */
-  canInteract(heroPos: THREE.Vector3): boolean {
-    return this.position.distanceTo(heroPos) <= this.interactRadius;
-  }
-
-  /** Try to buy an item. Returns the item if successful, null otherwise. */
-  buy(hero: import('../entities/Hero').Hero, itemIndex: number): ShopItem | null {
-    if (itemIndex < 0 || itemIndex >= this.items.length) return null;
-    if (!this.canInteract(hero.position)) return null;
-    const item = this.items[itemIndex];
-    if (hero.gold < item.cost) return null;
-    const owned = hero.hasItem(item.id);
-    if (owned && !item.stackable) return null; // already owned
-    if (!owned) {
-      const slot = hero.addItem(item.id);
-      if (slot === -1) return null; // inventory full
-    }
-    hero.addGold(-item.cost);
-    item.apply(hero);
-    return item;
+    this.mesh.position.copy(position);
   }
 
   private _buildMesh(): THREE.Group {
@@ -81,7 +59,6 @@ export class Shop {
     ring.position.y = 4.5;
     g.add(ring);
 
-    g.position.copy(this.position);
     return g;
   }
 }

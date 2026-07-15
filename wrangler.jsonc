@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "archer-js",
+  "main": "server/index.ts",
+  "compatibility_date": "2025-07-01",
+
+  "assets": {
+    "directory": "dist"
+  },
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "GAME_ROOM",
+        "class_name": "GameRoom"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["GameRoom"]
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}

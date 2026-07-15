@@ -1,0 +1,150 @@
+/**
+ * Plain-data simulation state. Every field is JSON-serialisable so a whole
+ * `MatchState` (or a per-entity slice) can be sent over the wire as a snapshot.
+ * No behaviour lives here — the logic is in `stepMatch`.
+ */
+import { Vec2 } from './math';
+import { HERO } from './rules';
+
+/** Six inventory slots holding item ids (null = empty). */
+export type Inventory = (string | null)[];
+
+export interface HeroState {
+  id: string;
+  team: number;
+  pos: Vec2;
+  /** Smoothed facing yaw (radians). */
+  facing: number;
+  /** Facing the hero is turning toward. */
+  targetFacing: number;
+  /** Remaining path waypoints (world-space cell centers), first = next target. */
+  path: Vec2[];
+  moving: boolean;
+
+  // Health / life-cycle
+  hp: number;
+  alive: boolean;
+  invulnerable: boolean;
+  invulnerableTimer: number;
+  respawnTimer: number;
+
+  // Progression
+  xp: number;
+  level: number;
+  skillPoints: number;
+
+  // Economy & score
+  gold: number;
+  kills: number;
+  deaths: number;
+  killStreak: number;
+  multiKillCount: number;
+  multiKillTimer: number;
+
+  // Items / abilities
+  speedBonus: number;
+  inventory: Inventory;
+  wardCharges: number;
+  abilityLevel: number;
+  abilityCooldown: number;
+}
+
+export interface ProjectileState {
+  id: string;
+  ownerId: string;
+  team: number;
+  pos: Vec2;
+  dir: Vec2;
+  speed: number;
+  maxRange: number;
+  traveled: number;
+  damage: number;
+}
+
+export interface WardState {
+  id: string;
+  team: number;
+  pos: Vec2;
+  life: number;
+}
+
+export interface MatchState {
+  tick: number;
+  heroes: HeroState[];
+  projectiles: ProjectileState[];
+  wards: WardState[];
+  /** First blood is a one-time global bonus. */
+  firstBlood: boolean;
+  /** Accumulates real time toward the next per-second passive-income tick. */
+  incomeAccumulator: number;
+  nextProjectileId: number;
+  nextWardId: number;
+}
+
+// ── Commands (client → sim) ───────────────────────────────────────────
+export type Command =
+  | { type: 'moveTo'; x: number; z: number }
+  | { type: 'fire'; aimX: number; aimZ: number }
+  | { type: 'ward' }
+  | { type: 'buy'; itemIndex: number }
+  | { type: 'levelAbility' };
+
+/** A command tagged with the hero it applies to, queued for the next tick. */
+export interface HeroInput {
+  heroId: string;
+  cmd: Command;
+}
+
+// ── Events (sim → clients) ────────────────────────────────────────────
+export type SimEvent =
+  | { type: 'hit'; targetId: string; sourceId: string; damage: number; x: number; z: number }
+  | { type: 'kill'; sourceId: string; victimId: string }
+  | { type: 'respawn'; heroId: string }
+  | { type: 'fire'; heroId: string; projectileId: string }
+  | { type: 'purchase'; heroId: string; itemId: string }
+  | { type: 'levelUp'; heroId: string; level: number };
+
+// ── Factories ─────────────────────────────────────────────────────────
+export function createHeroState(id: string, team: number, pos: Vec2): HeroState {
+  return {
+    id,
+    team,
+    pos: { x: pos.x, z: pos.z },
+    facing: 0,
+    targetFacing: 0,
+    path: [],
+    moving: false,
+    hp: HERO.maxHp,
+    alive: true,
+    invulnerable: false,
+    invulnerableTimer: 0,
+    respawnTimer: 0,
+    xp: 0,
+    level: 1,
+    skillPoints: 1,
+    gold: 0,
+    kills: 0,
+    deaths: 0,
+    killStreak: 0,
+    multiKillCount: 0,
+    multiKillTimer: 0,
+    speedBonus: 0,
+    inventory: [null, null, null, null, null, null],
+    wardCharges: 0,
+    abilityLevel: 0,
+    abilityCooldown: 0,
+  };
+}
+
+export function createMatchState(): MatchState {
+  return {
+    tick: 0,
+    heroes: [],
+    projectiles: [],
+    wards: [],
+    firstBlood: true,
+    incomeAccumulator: 0,
+    nextProjectileId: 1,
+    nextWardId: 1,
+  };
+}

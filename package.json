@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:server": "wrangler dev",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "shot": "pnpm tsx scripts/screenshot.ts"
+    "shot": "pnpm tsx scripts/screenshot.ts",
+    "build:navdata": "pnpm tsx scripts/build-navdata-compact.ts"
   },
   "keywords": [
     "game",
@@ -23,10 +25,14 @@
     "playwright": "^1.61.1",
     "tsx": "^4.23.0",
     "typescript": "^7.0.2",
-    "vite": "^8.1.4"
+    "vite": "^8.1.4",
+    "wrangler": "^4.110.0"
   },
   "dependencies": {
     "@types/three": "^0.185.1",
     "three": "^0.185.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "workerd", "sharp"]
   }
 }

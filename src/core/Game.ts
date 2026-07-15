@@ -14,13 +14,9 @@ import { Doodads } from '../world/Doodads';
 import { isCellWalkable } from '../world/wc3/WpmParser';
 import { NavGrid } from '../navigation/NavGrid';
 import { Pathfinder } from '../navigation/Pathfinder';
-import { Hero } from '../entities/Hero';
-import { Ward } from '../entities/Ward';
-import { FogOfWar } from '../vision/FogOfWar';
+import { FogOfWar, VisionSource } from '../vision/FogOfWar';
 import { FogLayer } from '../vision/FogLayer';
 import { InputManager } from '../input/InputManager';
-import { ProjectilePool } from '../combat/ProjectilePool';
-import { ArrowAbility } from '../combat/ArrowAbility';
 import { ItemBar } from '../ui/ItemBar';
 import { KDDisplay } from '../ui/KDDisplay';
 import { ShopWindow } from '../ui/ShopWindow';
@@ -30,45 +26,88 @@ import { GoldDisplay } from '../ui/GoldDisplay';
 import { HeroPortrait } from '../ui/HeroPortrait';
 import { SpellBar } from '../ui/SpellBar';
 
+// ── Sim layer ──
+import { HeroState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
+import { stepMatch, xpForLevel, heroSpeed } from '../sim/stepMatch';
+import { SimWorld } from '../sim/world';
+import { buildSimWorld, buildObstaclesFromSolids } from '../sim/buildWorld';
+import { HERO, ARROW, WARD } from '../sim/rules';
+import { SHOP_ITEMS } from '../sim/shopItems';
+import { SnapshotMessage, WelcomeMessage, EventMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot } from '../sim/protocol';
+
+// ── Networking ──
+import { NetworkClient } from '../net/NetworkClient';
+
+// ── View layer ──
+import { HeroView } from '../entities/HeroView';
+import { ProjectileView } from '../combat/ProjectileView';
+import { WardView } from '../entities/WardView';
+
 const FOG_CELL_SIZE = 40;
 
-/** Ground surface abstraction; Phase 2 swaps the flat stand-in for Wc3Terrain. */
+/** Ground surface abstraction. */
 interface GroundProvider {
   mesh: THREE.Object3D;
   heightAt(x: number, z: number): number;
 }
 
 export class Game {
+  // ── Rendering ──
   private _loop: GameLoop;
   private _renderer!: Renderer;
   private _scene!: THREE.Scene;
   private _camera!: IsometricCamera;
   private _map!: MapData;
-  /** Gameplay is confined to one arena of the map, like the original. */
   private _arena: ArenaRect = ARENA_TERRAIN1;
   private _terrain!: GroundProvider;
   private _water!: Water;
-  private _hero!: Hero;
-  private _heroes: Hero[] = [];
-  private _input!: InputManager;
+
+  // ── Shared world data ──
   private _navGrid!: NavGrid;
   private _pathfinder!: Pathfinder;
-  private _projectiles!: ProjectilePool;
-  private _floatingText = new FloatingTextManager();
   private _obstacleRegistry!: ObstacleRegistry;
+
+  // ── Simulation ──
+  private _world!: SimWorld;
+  private _state!: MatchState;
+  private _playerId!: string;
+  private _pendingCommands: Command[] = [];
+
+  // ── Networking ──
+  private _network: NetworkClient | null = null;
+  private _networkMode = false;
+  private _roomCode: string | null = null;
+
+  // ── Views ──
+  private _heroViews = new Map<string, HeroView>();
+  private _projectileViews = new Map<string, ProjectileView>();
+  private _wardViews = new Map<string, WardView>();
+  private _projectilePool: ProjectileView[] = [];
+
+  // ── Player helpers ──
+  /** The local player's HeroState (a live reference into _state.heroes). */
+  private _playerState!: HeroState;
+  /** The local player's HeroView. */
+  private _playerView!: HeroView;
+
+  // ── Vision ──
   private _fog!: FogOfWar;
   private _fogLayer!: FogLayer;
-  private _wards: Ward[] = [];
-  private _minimap!: Minimap;
-  // League-style camera lock: follow the hero only while locked. Edge-panning
-  // or a minimap click unlocks; Space re-centers and re-locks.
+  private _heroVisionAdapters = new Map<string, VisionSource>();
+  private _wardVisionAdapters = new Map<string, VisionSource>();
+
+  // ── Input ──
+  private _input!: InputManager;
+
+  // ── UI ──
+  private _floatingText = new FloatingTextManager();
   private _cameraLocked = true;
+  private _minimap!: Minimap;
   private _spellBar!: SpellBar;
   private _portrait!: HeroPortrait;
   private _goldDisplay!: GoldDisplay;
   private _itemBar!: ItemBar;
   private _kdDisplay!: KDDisplay;
-  private _incomeAccumulator = 0;
   private _shop!: Shop;
   private _shopOverlay!: ShopOverlay;
   private _shopWindow!: ShopWindow;
@@ -81,6 +120,14 @@ export class Game {
 
   async init(): Promise<void> {
     (window as any).__game = this;
+
+    // ── Detect network mode from URL (?room=XXXX) ──
+    const urlParams = new URLSearchParams(window.location.search);
+    this._roomCode = urlParams.get('room');
+    if (this._roomCode) {
+      this._networkMode = true;
+      this._network = new NetworkClient();
+    }
 
     // ── Original map data (terrain, pathing, doodads) ──
     this._map = await loadMapData();
@@ -95,16 +142,16 @@ export class Game {
     this._scene = createScene();
     createLighting(this._scene);
 
-    // ── Terrain (original map heightfield, procedural WC3-style textures) ──
+    // ── Terrain ──
     this._terrain = new Wc3Terrain(this._map);
     this._scene.add(this._terrain.mesh);
     const heightAt = (x: number, z: number) => this._terrain.heightAt(x, z);
 
-    // ── Water (original per-tilepoint water levels) ──
+    // ── Water ──
     this._water = new Water(this._map);
     this._scene.add(this._water.group);
 
-    // ── Navigation (authoritative walkability from the original pathing map) ──
+    // ── Navigation ──
     this._navGrid = new NavGrid(
       this._map.pathing.width,
       this._map.pathing.height,
@@ -113,122 +160,152 @@ export class Game {
       bounds.minZ,
     );
     this._applyPathingToNav();
-    const pathfinder = new Pathfinder(this._navGrid);
-    this._pathfinder = pathfinder;
+    this._pathfinder = new Pathfinder(this._navGrid);
 
-    // ── Doodads (trees/rocks/bushes at original positions) ──
+    // ── Doodads ──
     this._obstacleRegistry = new ObstacleRegistry();
     const doodads = new Doodads(this._map, heightAt, this._obstacleRegistry);
     this._scene.add(doodads.group);
 
-    // ── Fog of war over the active arena (WC3-style) ──
+    // ── Fog of war ──
     this._fog = new FogOfWar(this._arena, FOG_CELL_SIZE, heightAt);
-    // Tree walls occlude vision like the original; only arena doodads matter.
     for (const s of doodads.solids) {
       if (s.x >= this._arena.minX && s.x <= this._arena.maxX &&
           s.z >= this._arena.minZ && s.z <= this._arena.maxZ) {
         this._fog.addSightBlocker(s.x, s.z, s.halfW, s.halfD, s.height);
       }
     }
-    this._fogLayer = new FogLayer(this._fog, 0); // player team's view
-    this._fogLayer.applyTo(this._terrain.mesh);
-    this._fogLayer.applyTo(this._water.group);
-    this._fogLayer.applyTo(doodads.group);
+    this._fogLayer = null!; // set below after we know the player's team
 
-    // ── Shop (near the arena center, snapped to walkable ground) ──
-    const bootsItem: ShopItem = {
-      id: 'boots',
-      name: 'Boots of Speed',
-      cost: 5,
-      description: '+60 movement speed',
-      apply: (hero) => hero.addSpeedBonus(60),
-    };
-    const wardsItem: ShopItem = {
-      id: 'sentry_wards',
-      name: 'Sentry Wards',
-      cost: 10,
-      description: '5 charges — press W to place a ward granting vision for 300s',
-      stackable: true,
-      apply: (hero) => hero.addWardCharges(5),
-    };
-    const shopPos = this._findWalkableNear(this._arena.centerX, this._arena.centerZ);
-    this._shop = new Shop(shopPos, [bootsItem, wardsItem]);
-    this._shop.mesh.position.y = heightAt(shopPos.x, shopPos.z);
+    // ── Simulation world ──
+    this._world = buildSimWorld(
+      this._map.pathing,
+      { minX: bounds.minX, minZ: bounds.minZ },
+      {
+        minX: this._arena.minX, minZ: this._arena.minZ,
+        maxX: this._arena.maxX, maxZ: this._arena.maxZ,
+        centerX: this._arena.centerX, centerZ: this._arena.centerZ,
+        width: this._arena.width, height: this._arena.height,
+      },
+    );
+    this._world.obstacles = buildObstaclesFromSolids(doodads.solids);
+
+    // Override the shop position with the actual placed shop location
+    // (buildSimWorld picks a walkable spot, but we already found one below).
+    const shopPos3 = this._findWalkableNear(this._arena.centerX, this._arena.centerZ);
+    this._world.shop.pos = { x: shopPos3.x, z: shopPos3.z };
+
+    // ── Shop (3D mesh only; buy logic is in the sim) ──
+    this._shop = new Shop(
+      new THREE.Vector3(shopPos3.x, heightAt(shopPos3.x, shopPos3.z), shopPos3.z),
+      SHOP_ITEMS as ShopItem[],
+    );
     this._scene.add(this._shop.mesh);
-    this._fogLayer.applyTo(this._shop.mesh);
 
-    // ── Shop overlay ──
     this._shopOverlay = new ShopOverlay();
-
     this._shopWindow = new ShopWindow({
-      onBuy: (idx) => this._shop.buy(this._hero, idx),
+      onBuy: (idx) => this._enqueueCommand({ type: 'buy', itemIndex: idx }),
       onClose: () => {},
     });
 
-    // ── Heroes (spawn on random walkable arena ground) ──
-    const heroSpawn = this._findRespawnPosition();
-    this._hero = this._createHero(pathfinder, heroSpawn.x, heroSpawn.z, 0);
-    this._heroes.push(this._hero);
+    // ── Match state ──
+    this._state = createMatchState();
 
-    const dummySpawn = this._findWalkableNear(heroSpawn.x + 400, heroSpawn.z + 200);
-    const dummy = this._createHero(pathfinder, dummySpawn.x, dummySpawn.z, 1);
-    const dummyBody = dummy.mesh.getObjectByName('heroBody') as THREE.Mesh;
-    (dummyBody.material as THREE.MeshStandardMaterial).color.set(0xcc3333);
-    this._heroes.push(dummy);
+    if (this._networkMode && this._network) {
+      // ── Network mode: connect to server, wait for welcome ──
+      await this._initNetwork(heightAt, doodads.solids);
+    } else {
+      // ── Offline mode: create local heroes ──
+      const heroSpawn = this._findRespawnPosition();
+      const playerState = createHeroState('player', 0, { x: heroSpawn.x, z: heroSpawn.z });
+      this._state.heroes.push(playerState);
+      this._playerId = 'player';
+      this._playerState = playerState;
 
-    // Every hero feeds vision to its own team's fog map (shared team sight).
-    for (const hero of this._heroes) this._fog.addSource(hero);
-    this._fog.recomputeNow();
+      const dummySpawn = this._findWalkableNear(heroSpawn.x + 400, heroSpawn.z + 200);
+      const dummyState = createHeroState('dummy', 1, { x: dummySpawn.x, z: dummySpawn.z });
+      this._state.heroes.push(dummyState);
 
-    // ── Projectiles ──
-    this._projectiles = new ProjectilePool(20, this._obstacleRegistry, () => this._heroes, this._floatingText, heightAt);
-    this._scene.add(this._projectiles.group);
+      // Create hero views
+      for (const hs of this._state.heroes) {
+        const color = hs.team === 0 ? 0x4488cc : 0xcc3333;
+        const view = new HeroView(hs.id, color, heightAt);
+        view.sync(hs, 0);
+        this._heroViews.set(hs.id, view);
+        this._scene.add(view.mesh);
+        const vSrc = this._createHeroVisionSource(hs, view);
+        this._heroVisionAdapters.set(hs.id, vSrc);
+        this._fog.addSource(vSrc);
+      }
+      this._playerView = this._heroViews.get('player')!;
+      this._fog.recomputeNow();
+    }
 
-    // ── Ability ──
-    this._hero.ability = new ArrowAbility(this._hero, this._projectiles);
+    // ── Fog render layer (needs the player's team, set above) ──
+    this._fogLayer = new FogLayer(this._fog, this._playerState.team);
+    this._fogLayer.applyTo(this._terrain.mesh);
+    this._fogLayer.applyTo(this._water.group);
+    this._fogLayer.applyTo(doodads.group);
+    this._fogLayer.applyTo(this._shop.mesh);
 
-    // ── Camera (bounds confined to the arena, like the original) ──
+    // ── Projectile view pool (20 pre-allocated) ──
+    for (let i = 0; i < 20; i++) {
+      const pv = new ProjectileView(`pool_${i}`);
+      this._scene.add(pv.mesh);
+      this._projectilePool.push(pv);
+    }
+
+    // ── Camera ──
     this._camera = new IsometricCamera();
     this._camera.setBounds(this._arena.minX, this._arena.minZ, this._arena.maxX, this._arena.maxZ);
-    this._camera.setTarget(this._hero.position);
-    this._camera.setFocusY(this._hero.position.y);
+    this._camera.setTarget(new THREE.Vector3(
+      this._playerState.pos.x,
+      heightAt(this._playerState.pos.x, this._playerState.pos.z),
+      this._playerState.pos.z,
+    ));
+    this._camera.setFocusY(heightAt(this._playerState.pos.x, this._playerState.pos.z));
 
     // ── Input ──
     this._input = new InputManager(this._renderer.domElement, this._camera.camera);
     this._input.setGround(this._terrain.mesh);
     this._input.onScroll((deltaY) => this._camera.zoom(deltaY * 0.6));
+
     this._input.onClick((pos) => {
       // If click near shop, open shop instead of moving
-      if (this._shop.canInteract(this._hero.position)) {
-        const dx = pos.x - this._shop.position.x;
-        const dz = pos.z - this._shop.position.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        if (dist < this._shop.interactRadius) {
-          this._shopWindow.open(this._shop.items, this._hero.gold, this._hero.inventory);
-          return;
-        }
+      const shopWPt = this._world.shop.pos;
+      const dx = pos.x - shopWPt.x;
+      const dz = pos.z - shopWPt.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < this._world.shop.interactRadius) {
+        this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory);
+        return;
       }
-      this._hero.setDestination(pos);
+      this._enqueueCommand({ type: 'moveTo', x: pos.x, z: pos.z });
     });
 
     // Q — Shoot Arrow (Ctrl+Q to spend skill point)
     this._input.onKeyDown('KeyQ', () => {
       if (this._input.isKeyDown('ControlLeft') || this._input.isKeyDown('ControlRight')) {
-        this._hero.spendSkillPoint();
+        this._enqueueCommand({ type: 'levelAbility' });
       } else {
-        this._hero.fireAbility(this._input.aimPosition ?? undefined);
+        const aim = this._input.aimPosition;
+        this._enqueueCommand({
+          type: 'fire',
+          aimX: aim ? aim.x : this._playerState.pos.x + Math.sin(this._playerState.facing) * 100,
+          aimZ: aim ? aim.z : this._playerState.pos.z + Math.cos(this._playerState.facing) * 100,
+        });
       }
     });
 
-    // W — Place a sentry ward (requires charges from the shop)
-    this._input.onKeyDown('KeyW', () => this._placeWard());
+    // W — Place a sentry ward
+    this._input.onKeyDown('KeyW', () => this._enqueueCommand({ type: 'ward' }));
 
     // B — Open shop when near
     this._input.onKeyDown('KeyB', () => {
       if (this._shopWindow.visible) {
         this._shopWindow.close();
-      } else if (this._shop.canInteract(this._hero.position)) {
-        this._shopWindow.open(this._shop.items, this._hero.gold, this._hero.inventory);
+      } else if (this._isPlayerNearShop()) {
+        this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory);
       }
     });
 
@@ -237,49 +314,132 @@ export class Game {
       if (this._shopWindow.visible) this._shopWindow.close();
     });
 
-    // Space — re-center camera on hero and resume following
-    this._input.onKeyDown('Space', () => {
-      this._cameraLocked = true;
-    });
+    // Space — re-center camera
+    this._input.onKeyDown('Space', () => { this._cameraLocked = true; });
 
     // Number keys 1–6 for quick buy
     for (let i = 1; i <= 6; i++) {
       this._input.onKeyDown(`Digit${i}`, () => {
         if (this._shopWindow.visible) {
-          this._shop.buy(this._hero, i - 1);
+          this._enqueueCommand({ type: 'buy', itemIndex: i - 1 });
           this._shopWindow.close();
         }
       });
     }
 
-    // ── Spell bar ──
+    // ── UI ──
     this._spellBar = new SpellBar();
-
-    // ── Hero portrait (XP ring + level) ──
     this._portrait = new HeroPortrait();
-
-    // ── Gold display ──
     this._goldDisplay = new GoldDisplay();
-
-    // ── Item bar (6 empty slots) ──
     this._itemBar = new ItemBar();
-
-    // ── K/D display ──
     this._kdDisplay = new KDDisplay();
 
-    // ── Minimap (active arena, baked from original tile data) ──
     this._minimap = new Minimap(this._map, this._arena, 200, 8);
-    this._minimap.setFog(this._fog, this._hero.team);
+    this._minimap.setFog(this._fog, this._playerState.team);
     this._minimap.onClick = (wx, wz) => {
       this._cameraLocked = false;
-      this._camera.setTarget(new THREE.Vector3(wx, this._terrain.heightAt(wx, wz), wz));
+      this._camera.setTarget(new THREE.Vector3(wx, heightAt(wx, wz), wz));
     };
 
     window.addEventListener('resize', this._onResize.bind(this));
     this._loop.start();
   }
 
-  get hero(): Hero { return this._hero; }
+  get heroState(): HeroState { return this._playerState; }
+
+  // ── Input queue ─────────────────────────────────────────────────────
+
+  private _enqueueCommand(cmd: Command): void {
+    this._pendingCommands.push(cmd);
+  }
+
+  // ── Network init ────────────────────────────────────────────────────
+
+  private async _initNetwork(
+    heightAt: (x: number, z: number) => number,
+    _solids: { x: number; z: number; halfW: number; halfD: number }[],
+  ): Promise<void> {
+    const welcome = await this._network!.connect(this._roomCode!, 'Player');
+
+    // Apply the welcome snapshot to initialise our state and views.
+    this._applySnapshot(welcome.snapshot);
+
+    // Find our hero in the snapshot.
+    const ourHero = this._state.heroes.find((h) => h.id === welcome.playerId);
+    if (!ourHero) throw new Error('welcome did not include our hero');
+    this._playerState = ourHero;
+
+    // Create hero views for all heroes in the initial snapshot.
+    for (const hs of this._state.heroes) {
+      const color = hs.id === welcome.playerId ? 0x4488cc : 0xcc3333;
+      const view = new HeroView(hs.id, color, heightAt);
+      view.sync(hs, 0);
+      this._heroViews.set(hs.id, view);
+      this._scene.add(view.mesh);
+      const vSrc = this._createHeroVisionSource(hs, view);
+      this._heroVisionAdapters.set(hs.id, vSrc);
+      this._fog.addSource(vSrc);
+    }
+    this._playerView = this._heroViews.get(welcome.playerId)!;
+    this._fog.recomputeNow();
+
+    console.log(`[Game] network mode ready, playerId=${welcome.playerId}, ${this._state.heroes.length} heroes`);
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────────
+
+  /** Apply a server snapshot to the local state and view layer. */
+  private _applySnapshot(snap: Snapshot | MatchState): void {
+    // ── Heroes: add new, remove gone ──
+    const newIds = new Set(snap.heroes.map((h: HeroState) => h.id));
+
+    // Remove views for heroes that left.
+    for (const [id, view] of this._heroViews) {
+      if (!newIds.has(id)) {
+        const vSrc = this._heroVisionAdapters.get(id);
+        if (vSrc) this._fog.removeSource(vSrc);
+        this._heroVisionAdapters.delete(id);
+        view.dispose();
+        this._heroViews.delete(id);
+      }
+    }
+
+    // Add views for new heroes.
+    const heightAt = this._heightAt.bind(this);
+    for (const hs of snap.heroes) {
+      if (!this._heroViews.has(hs.id)) {
+        const isOurs = hs.id === this._playerId;
+        const color = isOurs ? 0x4488cc : 0xcc3333;
+        const view = new HeroView(hs.id, color, heightAt);
+        view.sync(hs, 0);
+        this._heroViews.set(hs.id, view);
+        this._scene.add(view.mesh);
+        const vSrc = this._createHeroVisionSource(hs, view);
+        this._heroVisionAdapters.set(hs.id, vSrc);
+        this._fog.addSource(vSrc);
+      }
+    }
+
+    // Update state.
+    this._state.heroes = snap.heroes;
+    this._state.projectiles = snap.projectiles;
+    this._state.wards = snap.wards;
+    if ('tick' in snap) this._state.tick = snap.tick;
+
+    // Keep player state reference in sync.
+    const ourHero = snap.heroes.find((h: HeroState) => h.id === this._playerId);
+    if (ourHero) this._playerState = ourHero;
+  }
+
+  private _isPlayerNearShop(): boolean {
+    const s = this._world.shop.pos;
+    const p = this._playerState.pos;
+    return Math.hypot(s.x - p.x, s.z - p.z) <= this._world.shop.interactRadius;
+  }
+
+  private _heightAt(x: number, z: number): number {
+    return this._terrain.heightAt(x, z);
+  }
 
   /** Copy the original pathing map into the nav grid (rows flip: wpm row 0 = south). */
   private _applyPathingToNav(): void {
@@ -292,99 +452,266 @@ export class Game {
     }
   }
 
-  private _createHero(pathfinder: Pathfinder, x: number, z: number, team: number): Hero {
-    const heightAt = (hx: number, hz: number) => this._terrain.heightAt(hx, hz);
-    const hero = new Hero(pathfinder, this._navGrid, 60, heightAt, team);
-    hero.mesh.position.set(x, heightAt(x, z) + Hero.GROUND_OFFSET, z);
-    this._scene.add(hero.mesh);
-    return hero;
-  }
-
   private _onResize(): void {
     this._renderer.resize(window.innerWidth, window.innerHeight);
     this._camera.resize(window.innerWidth, window.innerHeight);
   }
 
+  // ── Vision adapters ─────────────────────────────────────────────────
+
+  private _createHeroVisionSource(state: HeroState, view: HeroView): VisionSource {
+    return {
+      get position() { return view.mesh.position; },
+      get sightRadius() { return HERO.sightRadius; },
+      get active() { return state.alive; },
+      get team() { return state.team; },
+    };
+  }
+
+  private _createWardVisionSource(state: { life: number; team: number }, view: WardView): VisionSource {
+    return {
+      get position() { return view.mesh.position; },
+      get sightRadius() { return WARD.sightRadius; },
+      get active() { return state.life > 0; },
+      get team() { return state.team; },
+    };
+  }
+
+  // ── Update loop ─────────────────────────────────────────────────────
+
   private update(delta: number): void {
-    // Camera: edge-panning unlocks; the camera stays where the player left it
-    // until Space re-locks it onto the hero (League-style).
+    const dt = Math.min(delta, 0.1);
+
+    if (this._networkMode) {
+      this._updateNetwork(dt);
+    } else {
+      this._updateOffline(dt);
+    }
+  }
+
+  private _updateOffline(dt: number): void {
+    // ── Camera ──
+    this._updateCamera(dt);
+
+    // ── Drain input queue ──
+    const inputs: HeroInput[] = [];
+    for (const cmd of this._pendingCommands) {
+      inputs.push({ heroId: this._playerId, cmd });
+    }
+    this._pendingCommands = [];
+
+    // ── Step the simulation ──
+    const events = stepMatch(this._state, inputs, dt, this._world);
+
+    // ── Process events ──
+    for (const ev of events) this._handleEvent(ev, dt);
+
+    // ── Sync views ──
+    this._syncAllViews(dt);
+
+    // ── Fog ──
+    this._fog.update(dt);
+    this._fogLayer.update(dt);
+    this._applyFogVisibility();
+
+    // ── Misc ──
+    this._floatingText.update(dt, this._camera.camera);
+    this._water.update(dt);
+  }
+
+  private _updateNetwork(dt: number): void {
+    // ── Camera ──
+    this._updateCamera(dt);
+
+    // ── Send pending inputs to server ──
+    for (const cmd of this._pendingCommands) {
+      this._network?.sendInput(cmd);
+    }
+    this._pendingCommands = [];
+
+    // ── Drain snapshots and apply the latest ──
+    const snaps = this._network?.drainSnapshots() ?? [];
+    for (const snap of snaps) {
+      this._applySnapshot(snap);
+    }
+
+    // ── Drain events ──
+    const evts = this._network?.drainEvents() ?? [];
+    for (const evMsg of evts) {
+      this._handleEvent(evMsg.event, dt);
+    }
+
+    // ── Sync views ──
+    this._syncAllViews(dt);
+
+    // ── Fog ──
+    this._fog.update(dt);
+    this._fogLayer.update(dt);
+    this._applyFogVisibility();
+
+    // ── Misc ──
+    this._floatingText.update(dt, this._camera.camera);
+    this._water.update(dt);
+  }
+
+  private _updateCamera(dt: number): void {
     const pan = this._input.edgePan;
     if (pan.length() > 0) {
       this._cameraLocked = false;
-      const speed = 900 * delta;
+      const speed = 900 * dt;
       this._camera.panScreen(pan.x * speed, pan.z * speed);
-    } else if (this._cameraLocked) {
-      this._camera.follow(this._hero.position);
+    } else if (this._cameraLocked && this._playerState) {
+      this._camera.follow(new THREE.Vector3(
+        this._playerState.pos.x,
+        this._heightAt(this._playerState.pos.x, this._playerState.pos.z),
+        this._playerState.pos.z,
+      ));
     }
-    // Keep the camera focus riding on the terrain surface.
     const focus = this._camera.focus;
-    this._camera.setFocusY(this._terrain.heightAt(focus.x, focus.z));
+    this._camera.setFocusY(this._heightAt(focus.x, focus.z));
+  }
 
-    for (const hero of this._heroes) {
-      hero.update(delta);
-      if (hero.isRespawnReady()) {
-        const pos = this._findRespawnPosition();
-        hero.respawn(pos);
+  private _syncAllViews(dt: number): void {
+    // Sync hero views
+    for (const hero of this._state.heroes) {
+      const view = this._heroViews.get(hero.id);
+      if (view) view.sync(hero, dt);
+    }
+    // Sync projectile views
+    this._syncProjectileViews();
+    // Sync ward views
+    this._syncWardViews();
+  }
+
+  // ── Event handling ──────────────────────────────────────────────────
+
+  private _handleEvent(ev: SimEvent, _dt: number): void {
+    switch (ev.type) {
+      case 'hit': {
+        // Floating damage number
+        const targetView = this._heroViews.get(ev.targetId);
+        if (targetView) {
+          this._floatingText.spawn(targetView.mesh.position, ev.damage);
+        }
+        // Hit flash on the target's view
+        targetView?.flashHit();
+        break;
+      }
+      case 'fire': {
+        // Muzzle flash on the shooter's view
+        const shooterView = this._heroViews.get(ev.heroId);
+        shooterView?.flashFire();
+        break;
+      }
+      case 'kill':
+      case 'respawn':
+      case 'purchase':
+      case 'levelUp':
+        // UI is driven by state inspection each render frame; events are
+        // informational for future network/audio hooks.
+        break;
+    }
+  }
+
+  // ── Projectile view sync ────────────────────────────────────────────
+
+  private _syncProjectileViews(): void {
+    const activeIds = new Set(this._state.projectiles.map((p) => p.id));
+
+    // Create views for new projectiles
+    for (const p of this._state.projectiles) {
+      if (!this._projectileViews.has(p.id)) {
+        const pv = this._projectilePool.pop();
+        if (pv) {
+          this._projectileViews.set(p.id, pv);
+        } else {
+          // Pool exhausted — create a new one on the fly
+          const fresh = new ProjectileView(p.id);
+          this._scene.add(fresh.mesh);
+          this._projectileViews.set(p.id, fresh);
+        }
       }
     }
-    this._projectiles.update(delta);
-    this._floatingText.update(delta, this._camera.camera);
-    this._water.update(delta);
 
-    // Wards: tick lifetime, remove expired ones
-    for (let i = this._wards.length - 1; i >= 0; i--) {
-      const ward = this._wards[i];
-      ward.update(delta);
-      if (ward.expired) {
-        this._scene.remove(ward.mesh);
-        this._fog.removeSource(ward);
-        this._wards.splice(i, 1);
-      }
-    }
-
-    // Fog of war: recompute team vision, ease the render layer, cull enemies
-    this._fog.update(delta);
-    this._fogLayer.update(delta);
-    this._applyFogVisibility();
-
-    // Passive gold income (1 tick per second per hero)
-    this._incomeAccumulator += delta;
-    while (this._incomeAccumulator >= 1.0) {
-      this._incomeAccumulator -= 1.0;
-      if (this._hero.isAlive) {
-        this._hero.addGold(this._hero.passiveIncome);
+    // Sync or hide each projectile view
+    for (const [id, pv] of this._projectileViews) {
+      if (activeIds.has(id)) {
+        const p = this._state.projectiles.find((sp) => sp.id === id)!;
+        pv.sync(p, this._heightAt.bind(this));
+      } else {
+        pv.hide();
+        this._projectileViews.delete(id);
+        this._projectilePool.push(pv);
       }
     }
   }
 
+  // ── Ward view sync ──────────────────────────────────────────────────
+
+  private _syncWardViews(): void {
+    const activeIds = new Set(this._state.wards.map((w) => w.id));
+
+    // Create views for new wards
+    for (const w of this._state.wards) {
+      if (!this._wardViews.has(w.id)) {
+        const wv = new WardView(w.id);
+        this._scene.add(wv.mesh);
+        this._wardViews.set(w.id, wv);
+        // Add vision source
+        const vSrc = this._createWardVisionSource(w, wv);
+        this._wardVisionAdapters.set(w.id, vSrc);
+        this._fog.addSource(vSrc);
+      }
+    }
+
+    // Sync or remove each ward view
+    for (const [id, wv] of this._wardViews) {
+      if (activeIds.has(id)) {
+        const w = this._state.wards.find((sw) => sw.id === id)!;
+        wv.sync(w, this._heightAt.bind(this));
+      } else {
+        // Remove vision source
+        const vSrc = this._wardVisionAdapters.get(id);
+        if (vSrc) {
+          this._fog.removeSource(vSrc);
+          this._wardVisionAdapters.delete(id);
+        }
+        wv.dispose();
+        this._wardViews.delete(id);
+      }
+    }
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────
+
   private _render(_interpolation: number): void {
     this._renderer.render(this._scene, this._camera.camera);
 
-    // Minimap — enemies only appear while inside our team's vision (WC3 rule)
-    const playerTeam = this._hero.team;
-    const markers = this._heroes
+    const p = this._playerState;
+    const playerTeam = p.team;
+
+    // Minimap markers
+    const markers = this._state.heroes
       .filter((h) =>
-        h.isAlive &&
-        (h.team === playerTeam || this._fog.isVisible(playerTeam, h.position.x, h.position.z)))
+        h.alive &&
+        (h.team === playerTeam || this._fog.isVisible(playerTeam, h.pos.x, h.pos.z)))
       .map((h) => ({
-        x: h.position.x,
-        z: h.position.z,
+        x: h.pos.x,
+        z: h.pos.z,
         color: h.team === playerTeam ? '#44aaff' : '#ff4444',
-        radius: h === this._hero ? 4 : 3,
+        radius: h.id === this._playerId ? 4 : 3,
       }));
 
     // Own wards
-    for (const ward of this._wards) {
-      if (ward.team === playerTeam) {
-        markers.push({ x: ward.position.x, z: ward.position.z, color: '#66ff88', radius: 2 });
+    for (const w of this._state.wards) {
+      if (w.team === playerTeam) {
+        markers.push({ x: w.pos.x, z: w.pos.z, color: '#66ff88', radius: 2 });
       }
     }
 
     // Shop marker
-    markers.push({
-      x: this._shop.position.x, z: this._shop.position.z,
-      color: '#ffcc44', radius: 4,
-    });
+    const sp = this._world.shop.pos;
+    markers.push({ x: sp.x, z: sp.z, color: '#ffcc44', radius: 4 });
 
     this._minimap.draw(markers, {
       cx: this._camera.target.x,
@@ -393,94 +720,85 @@ export class Game {
     });
 
     // Spell bar cooldowns
-    this._spellBar.update(
-      this._hero.ability?.cooldownProgress ?? 1,
-      this._hero.ability?.level ?? 1,
-      this._hero.skillPoints,
-    );
+    const cdProgress = p.abilityCooldown <= 0 ? 1
+      : 1 - p.abilityCooldown / ARROW.cooldownByLevel[Math.min(p.abilityLevel, 4)];
+    this._spellBar.update(cdProgress, p.abilityLevel, p.skillPoints);
 
     // Hero portrait
     this._portrait.update(
-      this._hero.xp,
-      Hero.xpForLevel(this._hero.level + 1),
-      Hero.xpForLevel(this._hero.level),
-      this._hero.level,
+      p.xp,
+      xpForLevel(p.level + 1),
+      xpForLevel(p.level),
+      p.level,
       '#4488cc',
     );
 
-    this._goldDisplay.update(this._hero.gold);
-    this._itemBar.update(this._hero.inventory, { sentry_wards: this._hero.wardCharges });
-    this._kdDisplay.update(this._hero.kills, this._hero.deaths);
+    this._goldDisplay.update(p.gold);
+    this._itemBar.update(p.inventory, { sentry_wards: p.wardCharges });
+    this._kdDisplay.update(p.kills, p.deaths);
 
     // Shop overlay — show when in range
-    if (this._shop.canInteract(this._hero.position)) {
-      this._shopOverlay.show(this._shop.items);
+    if (this._isPlayerNearShop()) {
+      this._shopOverlay.show(SHOP_ITEMS as ShopItem[]);
     } else {
       this._shopOverlay.hide();
     }
   }
 
-  /** Place a sentry ward at the hero's feet if a charge is available. */
-  private _placeWard(): void {
-    if (!this._hero.isAlive) return;
-    if (!this._hero.consumeWardCharge()) return;
-    const pos = this._hero.position;
-    const ward = new Ward(
-      this._hero.team,
-      new THREE.Vector3(pos.x, this._terrain.heightAt(pos.x, pos.z), pos.z),
-    );
-    this._wards.push(ward);
-    this._scene.add(ward.mesh);
-    this._fog.addSource(ward);
-  }
+  // ── Fog visibility ──────────────────────────────────────────────────
 
-  /**
-   * Show/hide units by the player team's fog (WC3-style pop-in): teammates
-   * are always drawn; enemy heroes, wards, and arrows only inside vision.
-   */
   private _applyFogVisibility(): void {
-    const team = this._hero.team;
-    for (const h of this._heroes) {
-      if (h.team === team) continue;
-      h.mesh.visible = h.isAlive && this._fog.isVisible(team, h.position.x, h.position.z);
+    const team = this._playerState.team;
+
+    // Enemy heroes
+    for (const hero of this._state.heroes) {
+      if (hero.team === team) continue;
+      const view = this._heroViews.get(hero.id);
+      if (view) {
+        view.mesh.visible = hero.alive && this._fog.isVisible(team, hero.pos.x, hero.pos.z);
+      }
     }
-    for (const p of this._projectiles.active) {
-      p.mesh.visible =
-        !p.owner || p.owner.team === team ||
-        this._fog.isVisible(team, p.position.x, p.position.z);
+
+    // Enemy projectiles
+    for (const p of this._state.projectiles) {
+      const pv = this._projectileViews.get(p.id);
+      if (pv && p.team !== team) {
+        pv.mesh.visible = this._fog.isVisible(team, p.pos.x, p.pos.z);
+      }
     }
-    for (const ward of this._wards) {
-      ward.mesh.visible =
-        ward.team === team ||
-        this._fog.isVisible(team, ward.position.x, ward.position.z);
+
+    // Enemy wards
+    for (const w of this._state.wards) {
+      if (w.team === team) continue;
+      const wv = this._wardViews.get(w.id);
+      if (wv) {
+        wv.mesh.visible = this._fog.isVisible(team, w.pos.x, w.pos.z);
+      }
     }
   }
 
-  /**
-   * Random walkable position inside the active arena, restricted to the
-   * arena's main walkable area (anchored at the shop) so heroes never spawn
-   * on isolated pockets like cliff tops or islets.
-   */
+  // ── Spawn helpers ───────────────────────────────────────────────────
+
   private _findRespawnPosition(): THREE.Vector3 {
-    const anchor = this._shop.position;
+    const arena = this._arena;
+    const anchor = this._world.shop.pos;
     for (let attempt = 0; attempt < 500; attempt++) {
-      const wx = this._arena.minX + Math.random() * this._arena.width;
-      const wz = this._arena.minZ + Math.random() * this._arena.height;
+      const wx = arena.minX + Math.random() * arena.width;
+      const wz = arena.minZ + Math.random() * arena.height;
       const { gx, gz } = this._navGrid.worldToGrid(wx, wz);
       if (this._navGrid.isWalkable(gx, gz) &&
           this._pathfinder.isReachable(wx, wz, anchor.x, anchor.z)) {
         const { wx: cx, wz: cz } = this._navGrid.gridToWorld(gx, gz);
-        return new THREE.Vector3(cx, this._terrain.heightAt(cx, cz) + Hero.GROUND_OFFSET, cz);
+        return new THREE.Vector3(cx, this._heightAt(cx, cz), cz);
       }
     }
     return new THREE.Vector3(
-      this._arena.centerX,
-      this._terrain.heightAt(this._arena.centerX, this._arena.centerZ) + Hero.GROUND_OFFSET,
-      this._arena.centerZ,
+      arena.centerX,
+      this._heightAt(arena.centerX, arena.centerZ),
+      arena.centerZ,
     );
   }
 
-  /** Nearest walkable cell center to a world position (spiral search). */
   private _findWalkableNear(wx: number, wz: number): THREE.Vector3 {
     const start = this._navGrid.worldToGrid(wx, wz);
     for (let radius = 0; radius < 64; radius++) {
@@ -491,11 +809,11 @@ export class Game {
           const gz = start.gz + dz;
           if (this._navGrid.isWalkable(gx, gz)) {
             const { wx: cx, wz: cz } = this._navGrid.gridToWorld(gx, gz);
-            return new THREE.Vector3(cx, this._terrain.heightAt(cx, cz), cz);
+            return new THREE.Vector3(cx, this._heightAt(cx, cz), cz);
           }
         }
       }
     }
-    return new THREE.Vector3(wx, this._terrain.heightAt(wx, wz), wz);
+    return new THREE.Vector3(wx, this._heightAt(wx, wz), wz);
   }
 }
