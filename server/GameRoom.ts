@@ -96,9 +96,14 @@ export class GameRoom extends DurableObject<Env> {
         this._players.set(ws, info);
         this._playerSockets.set(playerId, ws);
 
-        // Spawn hero on a random walkable position.
+        // Spawn hero on a random walkable position. Assign the lowest free
+        // team id (FFA = one team per player) so a leave-then-join never hands
+        // a newcomer a team that's still in use by an existing player.
         const spawn = findRespawnPosition(this._world);
-        const hero = createHeroState(playerId, this._players.size - 1, spawn);
+        const used = new Set(this._state.heroes.map((h) => h.team));
+        let team = 0;
+        while (used.has(team)) team++;
+        const hero = createHeroState(playerId, team, spawn);
         this._state.heroes.push(hero);
 
         // Start the tick loop if this is the first player.
@@ -121,7 +126,6 @@ export class GameRoom extends DurableObject<Env> {
 
       case 'input': {
         const info = this._players.get(ws);
-        console.log('[GameRoom] input from', info?.playerId ?? 'unknown', 'cmd:', msg.cmd?.type);
         if (!info) return;
         this._pendingInputs.push({ heroId: info.playerId, cmd: msg.cmd });
         break;
@@ -173,9 +177,6 @@ export class GameRoom extends DurableObject<Env> {
     // Drain pending inputs.
     const inputs = this._pendingInputs;
     this._pendingInputs = [];
-    if (inputs.length > 0) {
-      console.log('[GameRoom] tick', this._state.tick, 'processing', inputs.length, 'inputs');
-    }
 
     // Step the simulation.
     const events = stepMatch(this._state, inputs, 1 / TICK_RATE, this._world);

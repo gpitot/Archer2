@@ -27,7 +27,7 @@ import { HeroPortrait } from '../ui/HeroPortrait';
 import { SpellBar } from '../ui/SpellBar';
 
 // ── Sim layer ──
-import { HeroState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
+import { HeroState, ProjectileState, WardState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
 import { stepMatch, xpForLevel, heroSpeed } from '../sim/stepMatch';
 import { SimWorld } from '../sim/world';
 import { buildSimWorld, buildObstaclesFromSolids } from '../sim/buildWorld';
@@ -80,11 +80,12 @@ export class Game {
   private _roomCode: string | null = null;
 
   // ── Prediction & reconciliation ──
-  /** Server-authoritative position we're lerping toward. */
-  private _reconcileTarget: Vec2 | null = null;
-  private _reconcileTimer = 0;
-  private static readonly RECONCILE_DURATION = 0.2; // 200 ms
-  private static readonly SNAP_THRESHOLD = 64; // 2 cells → snap instead of lerp
+  // Own-hero position is predicted locally and only *snapped* to the server
+  // on large desync (below). Small drift is left alone on purpose: with
+  // click-to-move both sides path the same NavGrid deterministically, so the
+  // client is simply a little ahead of the server, and lerping back would
+  // rubber-band the hero toward stale state.
+  private static readonly SNAP_THRESHOLD = 64; // 2 cells → snap to server
 
   // ── Interpolation buffer ──
   private _snapshots: Snapshot[] = [];
@@ -235,7 +236,7 @@ export class Game {
 
     if (this._networkMode && this._network) {
       // ── Network mode: connect to server, wait for welcome ──
-      await this._initNetwork(heightAt, doodads.solids);
+      await this._initNetwork();
     } else {
       // ── Offline mode: create local heroes ──
       const heroSpawn = this._findRespawnPosition();
@@ -377,32 +378,18 @@ export class Game {
 
   // ── Network init ────────────────────────────────────────────────────
 
-  private async _initNetwork(
-    heightAt: (x: number, z: number) => number,
-    _solids: { x: number; z: number; halfW: number; halfD: number }[],
-  ): Promise<void> {
+  private async _initNetwork(): Promise<void> {
     const welcome = await this._network!.connect(this._roomCode!, 'Player');
 
     // Apply the welcome snapshot to initialise our state and views.
     this._playerId = welcome.playerId;
     this._applySnapshot(welcome.snapshot);
 
-    // Find our hero in the snapshot.
+    // Confirm our hero made it into the snapshot (`_applySnapshot` set
+    // `_playerState` from it).
     const ourHero = this._state.heroes.find((h) => h.id === welcome.playerId);
     if (!ourHero) throw new Error('welcome did not include our hero');
-    this._playerState = ourHero;
 
-    // Create hero views for all heroes in the initial snapshot.
-    for (const hs of this._state.heroes) {
-      const color = hs.id === welcome.playerId ? 0x4488cc : 0xcc3333;
-      const view = new HeroView(hs.id, color, heightAt);
-      view.sync(hs, 0);
-      this._heroViews.set(hs.id, view);
-      this._scene.add(view.mesh);
-      const vSrc = this._createHeroVisionSource(hs, view);
-      this._heroVisionAdapters.set(hs.id, vSrc);
-      this._fog.addSource(vSrc);
-    }
     this._playerView = this._heroViews.get(welcome.playerId)!;
     this._fog.recomputeNow();
 
@@ -411,103 +398,99 @@ export class Game {
 
   // ── Helpers ─────────────────────────────────────────────────────────
 
-  /** Apply a server snapshot to the local state and view layer. */
-  private _applySnapshot(snap: Snapshot | MatchState): void {
-    // ── Heroes: add new, remove gone ──
-    const newIds = new Set(snap.heroes.map((h: HeroState) => h.id));
+  /**
+   * Spawn HeroViews (and fog vision sources) for heroes that appeared and
+   * dispose those for heroes that left, so the view layer matches `heroes`.
+   * The vision source captures the passed state object, so callers must hand
+   * in the *persistent* `_state.heroes` entries — not transient snapshot
+   * objects — for `active`/`team` to keep tracking live state.
+   */
+  private _syncHeroViews(heroes: HeroState[]): void {
+    const ids = new Set(heroes.map((h) => h.id));
 
-    // Remove views for heroes that left.
     for (const [id, view] of this._heroViews) {
-      if (!newIds.has(id)) {
-        const vSrc = this._heroVisionAdapters.get(id);
-        if (vSrc) this._fog.removeSource(vSrc);
-        this._heroVisionAdapters.delete(id);
-        view.dispose();
-        this._heroViews.delete(id);
-      }
+      if (ids.has(id)) continue;
+      const vSrc = this._heroVisionAdapters.get(id);
+      if (vSrc) this._fog.removeSource(vSrc);
+      this._heroVisionAdapters.delete(id);
+      view.dispose();
+      this._heroViews.delete(id);
     }
 
-    // Add views for new heroes.
     const heightAt = this._heightAt.bind(this);
-    for (const hs of snap.heroes) {
-      if (!this._heroViews.has(hs.id)) {
-        const isOurs = hs.id === this._playerId;
-        const color = isOurs ? 0x4488cc : 0xcc3333;
-        const view = new HeroView(hs.id, color, heightAt);
-        view.sync(hs, 0);
-        this._heroViews.set(hs.id, view);
-        this._scene.add(view.mesh);
-        const vSrc = this._createHeroVisionSource(hs, view);
-        this._heroVisionAdapters.set(hs.id, vSrc);
-        this._fog.addSource(vSrc);
-      }
+    for (const hs of heroes) {
+      if (this._heroViews.has(hs.id)) continue;
+      const color = hs.id === this._playerId ? 0x4488cc : 0xcc3333;
+      const view = new HeroView(hs.id, color, heightAt);
+      view.sync(hs, 0);
+      this._heroViews.set(hs.id, view);
+      this._scene.add(view.mesh);
+      const vSrc = this._createHeroVisionSource(hs, view);
+      this._heroVisionAdapters.set(hs.id, vSrc);
+      this._fog.addSource(vSrc);
     }
+  }
 
-    // Update state.
-    this._state.heroes = snap.heroes;
-    this._state.projectiles = snap.projectiles;
-    this._state.wards = snap.wards;
-    if ('tick' in snap) this._state.tick = snap.tick;
+  // Snapshot entities are deep-copied into `_state` because
+  // `_interpolateEntities` mutates their `pos`, and the snapshot buffer it
+  // reads from as the interpolation source must stay pristine.
+  private _cloneProjectiles(src: ProjectileState[]): ProjectileState[] {
+    return src.map((p) => ({ ...p, pos: { x: p.pos.x, z: p.pos.z }, dir: { x: p.dir.x, z: p.dir.z } }));
+  }
 
-    // Keep player state reference in sync.
-    const ourHero = snap.heroes.find((h: HeroState) => h.id === this._playerId);
+  private _cloneWards(src: WardState[]): WardState[] {
+    return src.map((w) => ({ ...w, pos: { x: w.pos.x, z: w.pos.z } }));
+  }
+
+  /**
+   * Adopt a full snapshot as the initial local state (welcome handshake).
+   * Deep-copies everything so nothing aliases the snapshot, then builds views.
+   */
+  private _applySnapshot(snap: Snapshot): void {
+    this._state.heroes = snap.heroes.map((h) => ({
+      ...h,
+      pos: { x: h.pos.x, z: h.pos.z },
+      path: h.path.map((p) => ({ ...p })),
+    }));
+    this._state.projectiles = this._cloneProjectiles(snap.projectiles);
+    this._state.wards = this._cloneWards(snap.wards);
+    this._state.tick = snap.tick;
+
+    const ourHero = this._state.heroes.find((h) => h.id === this._playerId);
     if (ourHero) this._playerState = ourHero;
+
+    this._syncHeroViews(this._state.heroes);
   }
 
   // ── Network prediction helpers ──────────────────────────────────────
 
   /**
-   * Apply server-authoritative state from the latest snapshot to remote
-   * entities.  The local player's hero is NOT overwritten — that's handled
-   * by reconciliation.
+   * Apply server-authoritative state from the latest snapshot. Remote heroes
+   * adopt the server's non-position state (position is set by interpolation);
+   * the local player's hero is left to prediction + snap reconciliation.
    */
   private _applyServerState(snap: Snapshot): void {
-    // Manage hero views (spawn / despawn).
     const snapIds = new Set(snap.heroes.map((h) => h.id));
-    console.log('[apply] snap has heroes:', [...snapIds].join(','), 'my id:', this._playerId, 'state heroes:', this._state.heroes.map(h => h.id).join(','));
-    for (const [id, view] of this._heroViews) {
-      if (!snapIds.has(id)) {
-        const vSrc = this._heroVisionAdapters.get(id);
-        if (vSrc) this._fog.removeSource(vSrc);
-        this._heroVisionAdapters.delete(id);
-        view.dispose();
-        this._heroViews.delete(id);
-      }
-    }
-    const heightAt = this._heightAt.bind(this);
-    for (const hs of snap.heroes) {
-      if (!this._heroViews.has(hs.id)) {
-        const isOurs = hs.id === this._playerId;
-        const color = isOurs ? 0x4488cc : 0xcc3333;
-        const view = new HeroView(hs.id, color, heightAt);
-        view.sync(hs, 0);
-        this._heroViews.set(hs.id, view);
-        this._scene.add(view.mesh);
-        const vSrc = this._createHeroVisionSource(hs, view);
-        this._heroVisionAdapters.set(hs.id, vSrc);
-        this._fog.addSource(vSrc);
-      }
-    }
 
-    // Copy remote hero state (everything except our own hero's position).
+    // Update persistent remote hero state (skip our own — prediction owns it).
     for (const sh of snap.heroes) {
       if (sh.id === this._playerId) continue;
       let local = this._state.heroes.find((h) => h.id === sh.id);
       if (!local) {
-        // New peer joined — add to state.
-        local = { ...sh };
+        // New peer — clone so this state object never aliases the buffer.
+        local = { ...sh, pos: { x: sh.pos.x, z: sh.pos.z }, path: [] };
         this._state.heroes.push(local);
       }
       this._copyHeroState(local, sh);
     }
-
-    // Remove heroes that left.
     this._state.heroes = this._state.heroes.filter((h) =>
       h.id === this._playerId || snapIds.has(h.id),
     );
 
-    this._state.projectiles = snap.projectiles;
-    this._state.wards = snap.wards;
+    // Match views to the persistent hero list, then adopt server entities.
+    this._syncHeroViews(this._state.heroes);
+    this._state.projectiles = this._cloneProjectiles(snap.projectiles);
+    this._state.wards = this._cloneWards(snap.wards);
     this._state.tick = snap.tick;
 
     // Adopt cosmetic projectiles: when a server projectile owned by us
@@ -522,9 +505,10 @@ export class Game {
   }
 
   /**
-   * Reconcile the player's predicted hero with the server snapshot.
-   * Stores a lerp target for small drift; snaps for large drift.
-   * Non-position state (HP, gold, …) is always taken from the server.
+   * Reconcile the player's predicted hero with the server snapshot. Non-
+   * position state (HP, gold, …) is always taken from the server; position is
+   * left to local prediction and only snapped on large desync (see
+   * SNAP_THRESHOLD).
    */
   private _reconcileFromSnapshot(snap: Snapshot): void {
     const serverHero = snap.heroes.find((h) => h.id === this._playerId);
@@ -534,9 +518,8 @@ export class Game {
     // Always adopt server authority for non-position state.
     this._copyHeroState(localHero, serverHero);
 
-    // Position: only snap on large desync.  Don't lerp for small drift —
-    // local prediction is authoritative until the server explicitly
-    // disagrees by more than the snap threshold.
+    // Position: only snap on large desync. Local prediction is authoritative
+    // until the server disagrees by more than the snap threshold.
     const dist = distance(localHero.pos, serverHero.pos);
     if (dist > Game.SNAP_THRESHOLD) {
       localHero.pos = { x: serverHero.pos.x, z: serverHero.pos.z };
@@ -544,8 +527,6 @@ export class Game {
       localHero.targetFacing = serverHero.targetFacing;
       localHero.path = serverHero.path.map((p) => ({ ...p }));
       localHero.moving = serverHero.moving;
-      this._reconcileTarget = null;
-      this._reconcileTimer = 0;
     }
   }
 
@@ -578,23 +559,14 @@ export class Game {
   private _predictMovement(inputs: HeroInput[], dt: number): void {
     if (inputs.length === 0 && !this._playerState?.moving) return;
 
-    console.log('[pred] looking for', this._playerId, 'in heroes:', this._state.heroes.map(h => h.id));
     const player = this._state.heroes.find((h) => h.id === this._playerId);
-    if (!player || !player.alive) {
-      console.log('[pred] SKIP player=', !!player, 'alive=', player?.alive);
-      return;
-    }
+    if (!player || !player.alive) return;
 
     const temp = createMatchState();
     temp.heroes = [player];
     temp.projectiles = [];
     temp.wards = [];
     const tempInputs = inputs.filter((i) => i.heroId === this._playerId);
-
-    if (tempInputs.length > 0) {
-      console.log('[pred] inputs:', tempInputs.map(i => i.cmd.type).join(','),
-        'player at', player.pos.x.toFixed(0), player.pos.z.toFixed(0));
-    }
 
     stepMatch(temp, tempInputs, dt, this._world);
 
@@ -603,28 +575,6 @@ export class Game {
     player.targetFacing = temp.heroes[0].targetFacing;
     player.path = temp.heroes[0].path.map((p) => ({ ...p }));
     player.moving = temp.heroes[0].moving;
-
-    if (player.moving) {
-      console.log('[pred] moving, path len', player.path.length,
-        'pos', player.pos.x.toFixed(0), player.pos.z.toFixed(0));
-    }
-  }
-
-  /** Lerp own hero toward the reconcile target. */
-  private _applyReconciliation(dt: number): void {
-    if (!this._reconcileTarget || this._reconcileTimer <= 0) return;
-
-    const player = this._state.heroes.find((h) => h.id === this._playerId);
-    if (!player) return;
-
-    const t = clamp(dt / this._reconcileTimer, 0, 1);
-    player.pos.x += (this._reconcileTarget.x - player.pos.x) * t;
-    player.pos.z += (this._reconcileTarget.z - player.pos.z) * t;
-    this._reconcileTimer -= dt;
-
-    if (this._reconcileTimer <= 0) {
-      this._reconcileTarget = null;
-    }
   }
 
   /**
@@ -634,36 +584,56 @@ export class Game {
   private _interpolateEntities(): void {
     if (this._snapshots.length < 2) return;
 
-    const prev = this._snapshots[this._snapshots.length - 2];
+    // Render INTERP_DELAY behind the newest snapshot, using its tick as the
+    // clock. At a 130 ms delay with 66 ms snapshot spacing, the render time
+    // lands ~2 snapshots back, so we must search the buffer for the pair that
+    // straddles it — not just the last two (which are always too new).
     const latest = this._snapshots[this._snapshots.length - 1];
+    const renderTime = latest.tick / 30 - Game.INTERP_DELAY;
+
+    // Default to the oldest adjacent pair; overwrite if a straddling pair is
+    // found. Clamped `t` then extrapolates gracefully during buffer warm-up.
+    let prev = this._snapshots[0];
+    let next = this._snapshots[1];
+    for (let i = 0; i < this._snapshots.length - 1; i++) {
+      const a = this._snapshots[i];
+      const b = this._snapshots[i + 1];
+      if (a.tick / 30 <= renderTime && renderTime <= b.tick / 30) {
+        prev = a;
+        next = b;
+        break;
+      }
+      // renderTime is newer than everything buffered — use the newest pair.
+      if (i === this._snapshots.length - 2) {
+        prev = a;
+        next = b;
+      }
+    }
 
     const prevTime = prev.tick / 30;
-    const latestTime = latest.tick / 30;
-    const renderTime = latestTime - Game.INTERP_DELAY;
-
-    if (renderTime <= prevTime) return; // not enough data yet
-
-    const t = clamp((renderTime - prevTime) / (latestTime - prevTime), 0, 1);
+    const nextTime = next.tick / 30;
+    const span = nextTime - prevTime;
+    const t = span > 0 ? clamp((renderTime - prevTime) / span, 0, 1) : 0;
 
     // Interpolate remote hero positions.
     for (const hero of this._state.heroes) {
       if (hero.id === this._playerId) continue;
       const prevH = prev.heroes.find((h) => h.id === hero.id);
-      const latestH = latest.heroes.find((h) => h.id === hero.id);
-      if (!prevH || !latestH) continue;
-      hero.pos.x = prevH.pos.x + (latestH.pos.x - prevH.pos.x) * t;
-      hero.pos.z = prevH.pos.z + (latestH.pos.z - prevH.pos.z) * t;
+      const nextH = next.heroes.find((h) => h.id === hero.id);
+      if (!prevH || !nextH) continue;
+      hero.pos.x = prevH.pos.x + (nextH.pos.x - prevH.pos.x) * t;
+      hero.pos.z = prevH.pos.z + (nextH.pos.z - prevH.pos.z) * t;
       // lerp angle
-      hero.facing = _lerpAngle(prevH.facing, latestH.facing, t);
+      hero.facing = _lerpAngle(prevH.facing, nextH.facing, t);
     }
 
     // Interpolate projectile positions.
     for (const proj of this._state.projectiles) {
       const prevP = prev.projectiles.find((p) => p.id === proj.id);
-      const latestP = latest.projectiles.find((p) => p.id === proj.id);
-      if (!prevP || !latestP) continue;
-      proj.pos.x = prevP.pos.x + (latestP.pos.x - prevP.pos.x) * t;
-      proj.pos.z = prevP.pos.z + (latestP.pos.z - prevP.pos.z) * t;
+      const nextP = next.projectiles.find((p) => p.id === proj.id);
+      if (!prevP || !nextP) continue;
+      proj.pos.x = prevP.pos.x + (nextP.pos.x - prevP.pos.x) * t;
+      proj.pos.z = prevP.pos.z + (nextP.pos.z - prevP.pos.z) * t;
     }
   }
 
@@ -673,6 +643,11 @@ export class Game {
   private _spawnCosmeticProjectile(cmd: Command & { type: 'fire' }): void {
     const player = this._playerState;
     if (!player || !player.alive) return;
+    // Mirror the server's fire guard (stepMatch.fireArrow) so we don't show a
+    // ghost arrow for a shot the server will reject — on cooldown or with the
+    // ability unlearned. Checked before prediction ticks the cooldown for this
+    // shot, so it reflects whether the shot is currently allowed.
+    if (player.abilityCooldown > 0 || player.abilityLevel < 1) return;
 
     const dirX = cmd.aimX - player.pos.x;
     const dirZ = cmd.aimZ - player.pos.z;
@@ -825,7 +800,6 @@ export class Game {
     for (const cmd of this._pendingCommands) {
       this._network?.sendInput(cmd);
       localInputs.push({ heroId: this._playerId, cmd });
-      console.log('[net] sent cmd:', cmd.type);
       if (cmd.type === 'fire') {
         this._spawnCosmeticProjectile(cmd);
       }
@@ -834,7 +808,6 @@ export class Game {
 
     // ── Drain snapshots into buffer ──
     const snaps = this._network?.drainSnapshots() ?? [];
-    if (snaps.length > 0) console.log('[net] got', snaps.length, 'snapshots, latest tick', snaps[snaps.length-1].tick);
     for (const snap of snaps) {
       this._snapshots.push(snap);
       this._reconcileFromSnapshot(snap);
@@ -857,10 +830,8 @@ export class Game {
     }
 
     // ── Local prediction: move own hero with pending inputs ──
+    // (Snap-based reconciliation already happened per-snapshot above.)
     this._predictMovement(localInputs, dt);
-
-    // ── Reconcile: lerp own hero toward server position ──
-    this._applyReconciliation(dt);
 
     // ── Tick cosmetic projectiles ──
     this._tickCosmeticProjectiles(dt);
