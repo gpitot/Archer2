@@ -5,10 +5,13 @@ import { createScene } from '../rendering/Scene';
 import { createLighting } from '../rendering/Lighting';
 import { IsometricCamera } from '../rendering/Camera';
 import { Minimap } from '../rendering/Minimap';
-import { Terrain } from '../world/Terrain';
-import { createObstacles, DEFAULT_OBSTACLES } from '../world/Obstacles';
 import { Shop, ShopItem } from '../world/Shop';
 import { ObstacleRegistry } from '../world/ObstacleRegistry';
+import { MapData, loadMapData, ArenaRect, ARENA_TERRAIN1, PATH_CELL_SIZE } from '../world/wc3/MapData';
+import { Wc3Terrain } from '../world/Wc3Terrain';
+import { Water } from '../world/Water';
+import { Doodads } from '../world/Doodads';
+import { isCellWalkable } from '../world/wc3/WpmParser';
 import { NavGrid } from '../navigation/NavGrid';
 import { Pathfinder } from '../navigation/Pathfinder';
 import { Hero } from '../entities/Hero';
@@ -27,21 +30,29 @@ import { GoldDisplay } from '../ui/GoldDisplay';
 import { HeroPortrait } from '../ui/HeroPortrait';
 import { SpellBar } from '../ui/SpellBar';
 
-const ARENA_SIZE = 4000;
-const HALF = ARENA_SIZE / 2;
-const CELL_SIZE = 20;
 const FOG_CELL_SIZE = 40;
+
+/** Ground surface abstraction; Phase 2 swaps the flat stand-in for Wc3Terrain. */
+interface GroundProvider {
+  mesh: THREE.Object3D;
+  heightAt(x: number, z: number): number;
+}
 
 export class Game {
   private _loop: GameLoop;
   private _renderer!: Renderer;
   private _scene!: THREE.Scene;
   private _camera!: IsometricCamera;
-  private _terrain!: Terrain;
+  private _map!: MapData;
+  /** Gameplay is confined to one arena of the map, like the original. */
+  private _arena: ArenaRect = ARENA_TERRAIN1;
+  private _terrain!: GroundProvider;
+  private _water!: Water;
   private _hero!: Hero;
   private _heroes: Hero[] = [];
   private _input!: InputManager;
   private _navGrid!: NavGrid;
+  private _pathfinder!: Pathfinder;
   private _projectiles!: ProjectilePool;
   private _floatingText = new FloatingTextManager();
   private _obstacleRegistry!: ObstacleRegistry;
@@ -68,8 +79,12 @@ export class Game {
     this._loop.renderCb = this._render.bind(this);
   }
 
-  init(): void {
+  async init(): Promise<void> {
     (window as any).__game = this;
+
+    // ── Original map data (terrain, pathing, doodads) ──
+    this._map = await loadMapData();
+    const bounds = this._map.bounds;
 
     // ── Renderer ──
     this._renderer = new Renderer();
@@ -80,31 +95,47 @@ export class Game {
     this._scene = createScene();
     createLighting(this._scene);
 
-    // ── Terrain (smooth heightfield) ──
-    this._terrain = new Terrain(ARENA_SIZE);
+    // ── Terrain (original map heightfield, procedural WC3-style textures) ──
+    this._terrain = new Wc3Terrain(this._map);
     this._scene.add(this._terrain.mesh);
     const heightAt = (x: number, z: number) => this._terrain.heightAt(x, z);
 
-    // ── Navigation ──
-    this._navGrid = new NavGrid(ARENA_SIZE / CELL_SIZE, ARENA_SIZE / CELL_SIZE, CELL_SIZE, -HALF, -HALF);
-    this._terrain.applyToNav(this._navGrid); // block cells too steep to climb
+    // ── Water (original per-tilepoint water levels) ──
+    this._water = new Water(this._map);
+    this._scene.add(this._water.group);
+
+    // ── Navigation (authoritative walkability from the original pathing map) ──
+    this._navGrid = new NavGrid(
+      this._map.pathing.width,
+      this._map.pathing.height,
+      PATH_CELL_SIZE,
+      bounds.minX,
+      bounds.minZ,
+    );
+    this._applyPathingToNav();
     const pathfinder = new Pathfinder(this._navGrid);
+    this._pathfinder = pathfinder;
 
-    // ── Obstacles ──
+    // ── Doodads (trees/rocks/bushes at original positions) ──
     this._obstacleRegistry = new ObstacleRegistry();
-    const obstacleGroup = createObstacles(DEFAULT_OBSTACLES, this._navGrid, this._obstacleRegistry, heightAt);
-    this._scene.add(obstacleGroup);
+    const doodads = new Doodads(this._map, heightAt, this._obstacleRegistry);
+    this._scene.add(doodads.group);
 
-    // ── Fog of war (WC3-style: high ground blocks sight, trees occlude) ──
-    this._fog = new FogOfWar(ARENA_SIZE, FOG_CELL_SIZE, heightAt);
-    for (const def of DEFAULT_OBSTACLES) {
-      this._fog.addSightBlocker(def.x, def.z, def.halfWidth, def.halfDepth, def.height);
+    // ── Fog of war over the active arena (WC3-style) ──
+    this._fog = new FogOfWar(this._arena, FOG_CELL_SIZE, heightAt);
+    // Tree walls occlude vision like the original; only arena doodads matter.
+    for (const s of doodads.solids) {
+      if (s.x >= this._arena.minX && s.x <= this._arena.maxX &&
+          s.z >= this._arena.minZ && s.z <= this._arena.maxZ) {
+        this._fog.addSightBlocker(s.x, s.z, s.halfW, s.halfD, s.height);
+      }
     }
     this._fogLayer = new FogLayer(this._fog, 0); // player team's view
     this._fogLayer.applyTo(this._terrain.mesh);
-    this._fogLayer.applyTo(obstacleGroup);
+    this._fogLayer.applyTo(this._water.group);
+    this._fogLayer.applyTo(doodads.group);
 
-    // ── Shop (bottom-right of arena) ──
+    // ── Shop (near the arena center, snapped to walkable ground) ──
     const bootsItem: ShopItem = {
       id: 'boots',
       name: 'Boots of Speed',
@@ -120,8 +151,9 @@ export class Game {
       stackable: true,
       apply: (hero) => hero.addWardCharges(5),
     };
-    this._shop = new Shop(new THREE.Vector3(400, 0, -900), [bootsItem, wardsItem]);
-    this._shop.mesh.position.y = heightAt(400, -900);
+    const shopPos = this._findWalkableNear(this._arena.centerX, this._arena.centerZ);
+    this._shop = new Shop(shopPos, [bootsItem, wardsItem]);
+    this._shop.mesh.position.y = heightAt(shopPos.x, shopPos.z);
     this._scene.add(this._shop.mesh);
     this._fogLayer.applyTo(this._shop.mesh);
 
@@ -133,11 +165,13 @@ export class Game {
       onClose: () => {},
     });
 
-    // ── Heroes ──
-    this._hero = this._createHero(pathfinder, 0, -300, 0);
+    // ── Heroes (spawn on random walkable arena ground) ──
+    const heroSpawn = this._findRespawnPosition();
+    this._hero = this._createHero(pathfinder, heroSpawn.x, heroSpawn.z, 0);
     this._heroes.push(this._hero);
 
-    const dummy = this._createHero(pathfinder, 200, -100, 1);
+    const dummySpawn = this._findWalkableNear(heroSpawn.x + 400, heroSpawn.z + 200);
+    const dummy = this._createHero(pathfinder, dummySpawn.x, dummySpawn.z, 1);
     const dummyBody = dummy.mesh.getObjectByName('heroBody') as THREE.Mesh;
     (dummyBody.material as THREE.MeshStandardMaterial).color.set(0xcc3333);
     this._heroes.push(dummy);
@@ -153,8 +187,9 @@ export class Game {
     // ── Ability ──
     this._hero.ability = new ArrowAbility(this._hero, this._projectiles);
 
-    // ── Camera ──
+    // ── Camera (bounds confined to the arena, like the original) ──
     this._camera = new IsometricCamera();
+    this._camera.setBounds(this._arena.minX, this._arena.minZ, this._arena.maxX, this._arena.maxZ);
     this._camera.setTarget(this._hero.position);
     this._camera.setFocusY(this._hero.position.y);
 
@@ -232,8 +267,8 @@ export class Game {
     // ── K/D display ──
     this._kdDisplay = new KDDisplay();
 
-    // ── Minimap ──
-    this._minimap = new Minimap(ARENA_SIZE, this._navGrid, 200, 8, (x, z) => this._terrain.heightAt(x, z));
+    // ── Minimap (active arena, baked from original tile data) ──
+    this._minimap = new Minimap(this._map, this._arena, 200, 8);
     this._minimap.setFog(this._fog, this._hero.team);
     this._minimap.onClick = (wx, wz) => {
       this._cameraLocked = false;
@@ -245,6 +280,17 @@ export class Game {
   }
 
   get hero(): Hero { return this._hero; }
+
+  /** Copy the original pathing map into the nav grid (rows flip: wpm row 0 = south). */
+  private _applyPathingToNav(): void {
+    const pathing = this._map.pathing;
+    for (let gz = 0; gz < pathing.height; gz++) {
+      const row = pathing.height - 1 - gz;
+      for (let gx = 0; gx < pathing.width; gx++) {
+        this._navGrid.setWalkable(gx, gz, isCellWalkable(pathing, gx, row));
+      }
+    }
+  }
 
   private _createHero(pathfinder: Pathfinder, x: number, z: number, team: number): Hero {
     const heightAt = (hx: number, hz: number) => this._terrain.heightAt(hx, hz);
@@ -283,6 +329,7 @@ export class Game {
     }
     this._projectiles.update(delta);
     this._floatingText.update(delta, this._camera.camera);
+    this._water.update(delta);
 
     // Wards: tick lifetime, remove expired ones
     for (let i = this._wards.length - 1; i >= 0; i--) {
@@ -409,16 +456,46 @@ export class Game {
     }
   }
 
+  /**
+   * Random walkable position inside the active arena, restricted to the
+   * arena's main walkable area (anchored at the shop) so heroes never spawn
+   * on isolated pockets like cliff tops or islets.
+   */
   private _findRespawnPosition(): THREE.Vector3 {
-    const gw = ARENA_SIZE / CELL_SIZE;
-    for (let attempt = 0; attempt < 200; attempt++) {
-      const gx = Math.floor(Math.random() * gw);
-      const gz = Math.floor(Math.random() * gw);
-      if (this._navGrid.isWalkable(gx, gz)) {
-        const { wx, wz } = this._navGrid.gridToWorld(gx, gz);
-        return new THREE.Vector3(wx, this._terrain.heightAt(wx, wz) + Hero.GROUND_OFFSET, wz);
+    const anchor = this._shop.position;
+    for (let attempt = 0; attempt < 500; attempt++) {
+      const wx = this._arena.minX + Math.random() * this._arena.width;
+      const wz = this._arena.minZ + Math.random() * this._arena.height;
+      const { gx, gz } = this._navGrid.worldToGrid(wx, wz);
+      if (this._navGrid.isWalkable(gx, gz) &&
+          this._pathfinder.isReachable(wx, wz, anchor.x, anchor.z)) {
+        const { wx: cx, wz: cz } = this._navGrid.gridToWorld(gx, gz);
+        return new THREE.Vector3(cx, this._terrain.heightAt(cx, cz) + Hero.GROUND_OFFSET, cz);
       }
     }
-    return new THREE.Vector3(0, this._terrain.heightAt(0, 0) + Hero.GROUND_OFFSET, 0);
+    return new THREE.Vector3(
+      this._arena.centerX,
+      this._terrain.heightAt(this._arena.centerX, this._arena.centerZ) + Hero.GROUND_OFFSET,
+      this._arena.centerZ,
+    );
+  }
+
+  /** Nearest walkable cell center to a world position (spiral search). */
+  private _findWalkableNear(wx: number, wz: number): THREE.Vector3 {
+    const start = this._navGrid.worldToGrid(wx, wz);
+    for (let radius = 0; radius < 64; radius++) {
+      for (let dz = -radius; dz <= radius; dz++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== radius) continue;
+          const gx = start.gx + dx;
+          const gz = start.gz + dz;
+          if (this._navGrid.isWalkable(gx, gz)) {
+            const { wx: cx, wz: cz } = this._navGrid.gridToWorld(gx, gz);
+            return new THREE.Vector3(cx, this._terrain.heightAt(cx, cz), cz);
+          }
+        }
+      }
+    }
+    return new THREE.Vector3(wx, this._terrain.heightAt(wx, wz), wz);
   }
 }

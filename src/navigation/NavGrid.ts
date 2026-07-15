@@ -11,6 +11,13 @@ export class NavGrid {
   readonly originX: number;
   readonly originZ: number;
 
+  /** Bumped on every walkability change so consumers can cache derived data. */
+  private _version = 0;
+
+  get version(): number {
+    return this._version;
+  }
+
   constructor(width: number, height: number, cellSize = 1, originX = 0, originZ = 0) {
     this.width = width;
     this.height = height;
@@ -50,7 +57,10 @@ export class NavGrid {
 
   setWalkable(gx: number, gz: number, walkable: boolean): void {
     if (!this.isInBounds(gx, gz)) return;
-    this.cells[gz][gx] = walkable;
+    if (this.cells[gz][gx] !== walkable) {
+      this.cells[gz][gx] = walkable;
+      this._version++;
+    }
   }
 
   blockRegion(wx: number, wz: number, halfWidth: number, halfDepth: number): void {

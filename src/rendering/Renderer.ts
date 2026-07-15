@@ -11,7 +11,7 @@ export class Renderer {
     this._renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this._renderer.shadowMap.enabled = false;
     this._renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this._renderer.toneMappingExposure = 1.0;
+    this._renderer.toneMappingExposure = 1.35;
   }
 
   get domElement(): HTMLCanvasElement {

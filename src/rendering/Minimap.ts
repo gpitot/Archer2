@@ -1,5 +1,7 @@
-import * as THREE from 'three';
-import { NavGrid } from '../navigation/NavGrid';
+import { MapData, ArenaRect, PATH_CELL_SIZE } from '../world/wc3/MapData';
+import { FLAG_WATER } from '../world/wc3/W3EParser';
+import { isCellWalkable } from '../world/wc3/WpmParser';
+import { TILE_BASE_COLORS, WATER_SHALLOW, WATER_DEEP } from '../world/wc3/TilePalette';
 import { FogOfWar, FOG_EXPLORED, FOG_VISIBLE } from '../vision/FogOfWar';
 
 interface MinimapMarker {
@@ -11,19 +13,20 @@ interface MinimapMarker {
 
 /**
  * 2D canvas minimap rendered as an overlay in the bottom-right corner.
- * Top-down flat representation — terrain is a simple grass green,
- * blocked cells are darkened.
+ *
+ * Shows the active arena rect (like WC3's camera-bounds-driven minimap),
+ * baked from the original tile data: ground tile colors, cliff-layer
+ * shading, water, blocked pathing cells, and tree doodads.
  */
 export class Minimap {
   readonly canvas: HTMLCanvasElement;
   private _ctx: CanvasRenderingContext2D;
 
-  private _width: number;
-  private _mapSizePx: number;
-  private _arenaSize: number;
-  private _halfArena: number;
-  private _navGrid: NavGrid;
-  private _terrainImage: ImageData | null = null;
+  private _view: ArenaRect;
+  private _pxW: number;
+  private _pxH: number;
+  private _pad: number;
+  private _baked: HTMLCanvasElement;
 
   // Fog-of-war overlay (small offscreen canvas scaled up with smoothing)
   private _fog: FogOfWar | null = null;
@@ -35,27 +38,18 @@ export class Minimap {
   /** Called with world (x, z) when minimap is clicked. */
   onClick: ((wx: number, wz: number) => void) | null = null;
 
-  private _heightAt: (x: number, z: number) => number;
+  constructor(map: MapData, view: ArenaRect, size = 200, padding = 8) {
+    this._view = view;
+    this._pad = padding;
 
-  constructor(
-    arenaSize: number,
-    navGrid: NavGrid,
-    size = 200,
-    padding = 8,
-    heightAt: (x: number, z: number) => number = () => 0,
-  ) {
-    this._arenaSize = arenaSize;
-    this._halfArena = arenaSize / 2;
-    this._navGrid = navGrid;
-    this._heightAt = heightAt;
-
-    this._width = size + padding * 2;
-    this._mapSizePx = size;
-    const pad = padding;
+    // Fit the view rect into a size×size box, preserving aspect.
+    const scale = size / Math.max(view.width, view.height);
+    this._pxW = Math.round(view.width * scale);
+    this._pxH = Math.round(view.height * scale);
 
     this.canvas = document.createElement('canvas');
-    this.canvas.width = this._width;
-    this.canvas.height = this._width;
+    this.canvas.width = this._pxW + padding * 2;
+    this.canvas.height = this._pxH + padding * 2;
     this.canvas.style.cssText = `
       position: fixed;
       bottom: 16px;
@@ -68,22 +62,20 @@ export class Minimap {
       cursor: pointer;
     `;
     document.body.appendChild(this.canvas);
-
     this._ctx = this.canvas.getContext('2d')!;
 
-    // Click → world coords
     this.canvas.addEventListener('click', (e) => {
       const rect = this.canvas.getBoundingClientRect();
-      const px = e.clientX - rect.left - pad;
-      const py = e.clientY - rect.top - pad;
-      if (px < 0 || px > size || py < 0 || py > size) return;
-      const wx = (px / size) * this._arenaSize - this._halfArena;
-      // Invert Y: canvas py=0 = top = +Z (north)
-      const wz = -((size - py) / size * this._arenaSize - this._halfArena);
+      const px = e.clientX - rect.left - padding;
+      const py = e.clientY - rect.top - padding;
+      if (px < 0 || px > this._pxW || py < 0 || py > this._pxH) return;
+      // Canvas top = north = min Z
+      const wx = this._view.minX + (px / this._pxW) * this._view.width;
+      const wz = this._view.minZ + (py / this._pxH) * this._view.height;
       this.onClick?.(wx, wz);
     });
 
-    this._bakeTerrain();
+    this._baked = this._bakeTerrain(map);
   }
 
   /** Attach a fog-of-war overlay drawn from the given team's point of view. */
@@ -91,59 +83,100 @@ export class Minimap {
     this._fog = fog;
     this._fogTeam = team;
     this._fogCanvas = document.createElement('canvas');
-    this._fogCanvas.width = fog.cells;
-    this._fogCanvas.height = fog.cells;
+    this._fogCanvas.width = fog.cellsX;
+    this._fogCanvas.height = fog.cellsZ;
     this._fogCtx = this._fogCanvas.getContext('2d')!;
-    this._fogImage = this._fogCtx.createImageData(fog.cells, fog.cells);
+    this._fogImage = this._fogCtx.createImageData(fog.cellsX, fog.cellsZ);
   }
 
-  private _bakeTerrain(): void {
-    const size = this._mapSizePx;
-    this._terrainImage = this._ctx.createImageData(size, size);
+  /**
+   * Bake the arena's tile data into an offscreen canvas at one pixel per
+   * pathing cell, later drawn scaled onto the display canvas.
+   */
+  private _bakeTerrain(map: MapData): HTMLCanvasElement {
+    const { terrain, pathing, doodads } = map;
+    const view = this._view;
 
-    for (let py = 0; py < size; py++) {
-      for (let px = 0; px < size; px++) {
-        const wx = (px / size) * this._arenaSize - this._halfArena;
-        const wz = (py / size) * this._arenaSize - this._halfArena;
-        const { gx, gz } = this._navGrid.worldToGrid(wx, wz);
-        const blocked = !this._navGrid.isWalkable(gx, gz);
+    const cols = Math.max(1, Math.round(view.width / PATH_CELL_SIZE));
+    const rows = Math.max(1, Math.round(view.height / PATH_CELL_SIZE));
+    const off = document.createElement('canvas');
+    off.width = cols;
+    off.height = rows;
+    const ctx = off.getContext('2d')!;
+    const img = ctx.createImageData(cols, rows);
 
-        const idx = (py * size + px) * 4;
-        if (blocked) {
-          this._terrainImage!.data[idx] = 32;
-          this._terrainImage!.data[idx + 1] = 40;
-          this._terrainImage!.data[idx + 2] = 24;
+    for (let py = 0; py < rows; py++) {
+      for (let px = 0; px < cols; px++) {
+        // Pixel center in world space (canvas top = min Z = north)
+        const wx = view.minX + (px + 0.5) * PATH_CELL_SIZE;
+        const wz = view.minZ + (py + 0.5) * PATH_CELL_SIZE;
+
+        // Nearest tilepoint (tilepoint rows run south → north)
+        const ti = Math.min(Math.max(Math.round((wx - terrain.offsetX) / 128), 0), terrain.width - 1);
+        const tj = Math.min(Math.max(Math.round((-wz - terrain.offsetY) / 128), 0), terrain.height - 1);
+        const k = tj * terrain.width + ti;
+
+        const base = TILE_BASE_COLORS[terrain.groundTiles[terrain.texture[k]]] ?? [255, 0, 255];
+        const shade = 0.75 + 0.13 * (terrain.layer[k] - 1);
+        let r = base[0] * shade;
+        let g = base[1] * shade;
+        let b = base[2] * shade;
+
+        const depth = terrain.finalWaterHeight[k] - terrain.finalHeight[k];
+        if ((terrain.flags[k] & FLAG_WATER) !== 0 && depth > 0) {
+          const deep = Math.min(depth / 128, 1);
+          r = WATER_SHALLOW[0] + (WATER_DEEP[0] - WATER_SHALLOW[0]) * deep;
+          g = WATER_SHALLOW[1] + (WATER_DEEP[1] - WATER_SHALLOW[1]) * deep;
+          b = WATER_SHALLOW[2] + (WATER_DEEP[2] - WATER_SHALLOW[2]) * deep;
         } else {
-          // Grass green, brightened by elevation for readability.
-          const shade = THREE.MathUtils.clamp(this._heightAt(wx, wz) / 300, 0, 1);
-          this._terrainImage!.data[idx] = 34 + shade * 150;
-          this._terrainImage!.data[idx + 1] = 90 + shade * 90;
-          this._terrainImage!.data[idx + 2] = 30 + shade * 120;
+          // Pathing cell (data row 0 = south)
+          const col = Math.floor((wx - terrain.offsetX) / PATH_CELL_SIZE);
+          const row = Math.floor((-wz - terrain.offsetY) / PATH_CELL_SIZE);
+          if (!isCellWalkable(pathing, col, row)) {
+            r *= 0.55; g *= 0.55; b *= 0.55;
+          }
         }
-        this._terrainImage!.data[idx + 3] = 255;
+
+        const o = (py * cols + px) * 4;
+        img.data[o] = r;
+        img.data[o + 1] = g;
+        img.data[o + 2] = b;
+        img.data[o + 3] = 255;
       }
     }
+    ctx.putImageData(img, 0, 0);
+
+    // Tree doodads as dark dots
+    ctx.fillStyle = 'rgb(20,46,24)';
+    for (const d of doodads) {
+      const wx = d.x;
+      const wz = -d.y;
+      if (wx < view.minX || wx > view.maxX || wz < view.minZ || wz > view.maxZ) continue;
+      const px = Math.floor(((wx - view.minX) / view.width) * cols);
+      const py = Math.floor(((wz - view.minZ) / view.height) * rows);
+      ctx.fillRect(px, py, 1, 1);
+    }
+
+    return off;
   }
 
   private _worldToPixel(wx: number, wz: number): [number, number] {
-    const px = ((wx + this._halfArena) / this._arenaSize) * this._mapSizePx;
-    // Canvas Y=0 is top, so invert Z: +Z (north) → top, -Z (south) → bottom
-    const py = this._mapSizePx - ((-wz + this._halfArena) / this._arenaSize) * this._mapSizePx;
+    const px = ((wx - this._view.minX) / this._view.width) * this._pxW;
+    const py = ((wz - this._view.minZ) / this._view.height) * this._pxH;
     return [px, py];
   }
 
   draw(markers: MinimapMarker[], cameraView?: { cx: number; cz: number; halfW: number }): void {
     const ctx = this._ctx;
-    const pad = (this._width - this._mapSizePx) / 2;
+    const pad = this._pad;
 
-    ctx.clearRect(0, 0, this._width, this._width);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // Baked terrain
-    if (this._terrainImage) {
-      ctx.putImageData(this._terrainImage, pad, pad);
-    }
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(this._baked, pad, pad, this._pxW, this._pxH);
 
     // Fog-of-war overlay: hidden = near-black, explored = dimmed, visible = clear.
+    // The fog grid covers the same arena rect as the view, row 0 = min Z = top.
     if (this._fog && this._fogCtx && this._fogImage && this._fogCanvas) {
       const states = this._fog.team(this._fogTeam);
       const data = this._fogImage.data;
@@ -156,16 +189,15 @@ export class Minimap {
         data[i * 4 + 2] = 0;
         data[i * 4 + 3] = alpha;
       }
-      // Fog rows run -Z → +Z like minimap rows, so no flip is needed.
       this._fogCtx.putImageData(this._fogImage, 0, 0);
       ctx.imageSmoothingEnabled = true;
-      ctx.drawImage(this._fogCanvas, pad, pad, this._mapSizePx, this._mapSizePx);
+      ctx.drawImage(this._fogCanvas, pad, pad, this._pxW, this._pxH);
     }
 
     // Camera view rectangle (axis-aligned — matches top-down world)
     if (cameraView) {
       const [cx, cz] = this._worldToPixel(cameraView.cx, cameraView.cz);
-      const hw = (cameraView.halfW / this._arenaSize) * this._mapSizePx;
+      const hw = (cameraView.halfW / this._view.width) * this._pxW;
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
       ctx.lineWidth = 1;
       ctx.strokeRect(pad + cx - hw, pad + cz - hw, hw * 2, hw * 2);
@@ -174,6 +206,7 @@ export class Minimap {
     // Hero markers
     for (const m of markers) {
       const [px, py] = this._worldToPixel(m.x, m.z);
+      if (px < -4 || px > this._pxW + 4 || py < -4 || py > this._pxH + 4) continue;
       ctx.beginPath();
       ctx.arc(pad + px, pad + py, m.radius, 0, Math.PI * 2);
       ctx.fillStyle = m.color;
@@ -186,7 +219,7 @@ export class Minimap {
     // Border
     ctx.strokeStyle = 'rgba(255,255,255,0.2)';
     ctx.lineWidth = 1;
-    ctx.strokeRect(pad, pad, this._mapSizePx, this._mapSizePx);
+    ctx.strokeRect(pad, pad, this._pxW, this._pxH);
   }
 
   destroy(): void {

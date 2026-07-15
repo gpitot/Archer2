@@ -1,15 +1,16 @@
 import * as THREE from 'three';
 
 export function createLighting(scene: THREE.Scene): void {
-  // Sky/ground hemisphere fill so slopes read even in shade.
-  const hemi = new THREE.HemisphereLight(0xbdd7ff, 0x4a5a38, 0.7);
+  // Cool sky / mossy ground hemisphere — moody Ashenvale ambience.
+  const hemi = new THREE.HemisphereLight(0x9db8dc, 0x3d4a30, 1.1);
   scene.add(hemi);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.25);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.35);
   scene.add(ambient);
 
-  // Key light from the NW, angled so hills cast readable shading.
-  const dir = new THREE.DirectionalLight(0xfff2d8, 0.9);
-  dir.position.set(-800, 1400, 600);
+  // Warm key light from the south-west so cliff walls and canopies get
+  // readable directional shading.
+  const dir = new THREE.DirectionalLight(0xffe0b0, 1.9);
+  dir.position.set(-900, 1500, 700);
   scene.add(dir);
 }

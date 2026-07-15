@@ -5,6 +5,14 @@ export const FOG_HIDDEN = 0; // never seen — black mask
 export const FOG_EXPLORED = 1; // seen before — terrain remembered, units hidden
 export const FOG_VISIBLE = 2; // currently in sight
 
+/** World-space rectangle a fog grid covers. */
+export interface FogBounds {
+  minX: number;
+  minZ: number;
+  width: number;
+  height: number;
+}
+
 /**
  * Anything that grants vision: heroes, wards, (later) buildings and allies.
  * Structural — Hero and Ward satisfy this without importing the interface.
@@ -23,11 +31,12 @@ export interface VisionSource {
 /**
  * Warcraft-3-style fog of war.
  *
- * The arena is divided into a coarse grid. Each *team* owns a visibility map
- * (hidden / explored / visible) that is the union of what all of that team's
- * vision sources can see — so teammates and their wards automatically share
- * vision. A cell is in sight of a source when it is inside the source's
- * sight radius AND the heightfield line-of-sight test passes:
+ * The playable area is divided into a coarse grid. Each *team* owns a
+ * visibility map (hidden / explored / visible) that is the union of what all
+ * of that team's vision sources can see — so teammates and their wards
+ * automatically share vision. A cell is in sight of a source when it is
+ * inside the source's sight radius AND the heightfield line-of-sight test
+ * passes:
  *
  *  - **High ground advantage**: the sight line runs from the source's eye
  *    (ground + EYE_HEIGHT) to the target cell (ground + TARGET_HEIGHT).
@@ -49,13 +58,15 @@ export class FogOfWar {
   /** Seconds between visibility recomputes. */
   readonly recomputeInterval = 0.15;
 
-  /** Cells per side. */
-  readonly cells: number;
+  readonly cellsX: number;
+  readonly cellsZ: number;
   readonly cellSize: number;
-  /** World coordinate of the grid's min corner (x and z). */
-  readonly worldOrigin: number;
-  /** World size covered by the grid. */
-  readonly worldSize: number;
+  /** World coordinate of the grid's min corner. */
+  readonly originX: number;
+  readonly originZ: number;
+  /** World extent covered by the grid. */
+  readonly worldWidth: number;
+  readonly worldHeight: number;
 
   private _groundH: Float32Array; // terrain height per cell
   private _blockH: Float32Array; // sight-blocking height per cell (terrain + doodads)
@@ -64,26 +75,29 @@ export class FogOfWar {
   private _timer = 0; // time until next recompute; 0 → recompute on next update
 
   constructor(
-    arenaSize: number,
+    bounds: FogBounds,
     cellSize: number,
     heightAt: (x: number, z: number) => number,
   ) {
     this.cellSize = cellSize;
-    this.cells = Math.round(arenaSize / cellSize);
-    this.worldSize = this.cells * cellSize;
-    this.worldOrigin = -this.worldSize / 2;
+    this.cellsX = Math.max(1, Math.round(bounds.width / cellSize));
+    this.cellsZ = Math.max(1, Math.round(bounds.height / cellSize));
+    this.worldWidth = this.cellsX * cellSize;
+    this.worldHeight = this.cellsZ * cellSize;
+    this.originX = bounds.minX;
+    this.originZ = bounds.minZ;
 
-    const n = this.cells * this.cells;
+    const n = this.cellsX * this.cellsZ;
     this._groundH = new Float32Array(n);
     this._blockH = new Float32Array(n);
-    for (let cz = 0; cz < this.cells; cz++) {
-      for (let cx = 0; cx < this.cells; cx++) {
+    for (let cz = 0; cz < this.cellsZ; cz++) {
+      for (let cx = 0; cx < this.cellsX; cx++) {
         const h = heightAt(
-          this.worldOrigin + (cx + 0.5) * cellSize,
-          this.worldOrigin + (cz + 0.5) * cellSize,
+          this.originX + (cx + 0.5) * cellSize,
+          this.originZ + (cz + 0.5) * cellSize,
         );
-        this._groundH[cz * this.cells + cx] = h;
-        this._blockH[cz * this.cells + cx] = h;
+        this._groundH[cz * this.cellsX + cx] = h;
+        this._blockH[cz * this.cellsX + cx] = h;
       }
     }
   }
@@ -92,13 +106,13 @@ export class FogOfWar {
 
   /** Raise the sight-blocking height over a rectangular footprint (tree/rock). */
   addSightBlocker(wx: number, wz: number, halfWidth: number, halfDepth: number, height: number): void {
-    const minX = this._clampCell(Math.floor((wx - halfWidth - this.worldOrigin) / this.cellSize));
-    const maxX = this._clampCell(Math.floor((wx + halfWidth - this.worldOrigin) / this.cellSize));
-    const minZ = this._clampCell(Math.floor((wz - halfDepth - this.worldOrigin) / this.cellSize));
-    const maxZ = this._clampCell(Math.floor((wz + halfDepth - this.worldOrigin) / this.cellSize));
+    const minX = this._clampCellX(Math.floor((wx - halfWidth - this.originX) / this.cellSize));
+    const maxX = this._clampCellX(Math.floor((wx + halfWidth - this.originX) / this.cellSize));
+    const minZ = this._clampCellZ(Math.floor((wz - halfDepth - this.originZ) / this.cellSize));
+    const maxZ = this._clampCellZ(Math.floor((wz + halfDepth - this.originZ) / this.cellSize));
     for (let cz = minZ; cz <= maxZ; cz++) {
       for (let cx = minX; cx <= maxX; cx++) {
-        const idx = cz * this.cells + cx;
+        const idx = cz * this.cellsX + cx;
         this._blockH[idx] = Math.max(this._blockH[idx], this._groundH[idx] + height);
       }
     }
@@ -120,7 +134,7 @@ export class FogOfWar {
   team(team: number): Uint8Array {
     let map = this._teams.get(team);
     if (!map) {
-      map = new Uint8Array(this.cells * this.cells); // FOG_HIDDEN
+      map = new Uint8Array(this.cellsX * this.cellsZ); // FOG_HIDDEN
       this._teams.set(team, map);
     }
     return map;
@@ -128,10 +142,10 @@ export class FogOfWar {
 
   /** Visibility state of a world position for a team. */
   stateAt(team: number, wx: number, wz: number): number {
-    const cx = Math.floor((wx - this.worldOrigin) / this.cellSize);
-    const cz = Math.floor((wz - this.worldOrigin) / this.cellSize);
-    if (cx < 0 || cx >= this.cells || cz < 0 || cz >= this.cells) return FOG_HIDDEN;
-    return this.team(team)[cz * this.cells + cx];
+    const cx = Math.floor((wx - this.originX) / this.cellSize);
+    const cz = Math.floor((wz - this.originZ) / this.cellSize);
+    if (cx < 0 || cx >= this.cellsX || cz < 0 || cz >= this.cellsZ) return FOG_HIDDEN;
+    return this.team(team)[cz * this.cellsX + cx];
   }
 
   isVisible(team: number, wx: number, wz: number): boolean {
@@ -174,16 +188,16 @@ export class FogOfWar {
 
   /** Mark every cell the source can see as visible. */
   private _sweep(map: Uint8Array, src: VisionSource): void {
-    const cx = this._clampCell(Math.floor((src.position.x - this.worldOrigin) / this.cellSize));
-    const cz = this._clampCell(Math.floor((src.position.z - this.worldOrigin) / this.cellSize));
-    const eyeH = this._groundH[cz * this.cells + cx] + FogOfWar.EYE_HEIGHT;
+    const cx = this._clampCellX(Math.floor((src.position.x - this.originX) / this.cellSize));
+    const cz = this._clampCellZ(Math.floor((src.position.z - this.originZ) / this.cellSize));
+    const eyeH = this._groundH[cz * this.cellsX + cx] + FogOfWar.EYE_HEIGHT;
 
     const rCells = Math.ceil(src.sightRadius / this.cellSize);
     const r2 = rCells * rCells;
-    const minX = this._clampCell(cx - rCells);
-    const maxX = this._clampCell(cx + rCells);
-    const minZ = this._clampCell(cz - rCells);
-    const maxZ = this._clampCell(cz + rCells);
+    const minX = this._clampCellX(cx - rCells);
+    const maxX = this._clampCellX(cx + rCells);
+    const minZ = this._clampCellZ(cz - rCells);
+    const maxZ = this._clampCellZ(cz + rCells);
 
     for (let tz = minZ; tz <= maxZ; tz++) {
       for (let tx = minX; tx <= maxX; tx++) {
@@ -193,7 +207,7 @@ export class FogOfWar {
         if (d2 > r2) continue;
         // Immediate surroundings are always seen, even inside a tree line.
         if (d2 <= 2 || this._lineOfSight(cx, cz, tx, tz, eyeH)) {
-          map[tz * this.cells + tx] = FOG_VISIBLE;
+          map[tz * this.cellsX + tx] = FOG_VISIBLE;
         }
       }
     }
@@ -209,19 +223,23 @@ export class FogOfWar {
     const steps = Math.max(Math.abs(dx), Math.abs(dz));
     if (steps <= 1) return true;
 
-    const targetH = this._groundH[tz * this.cells + tx] + FogOfWar.TARGET_HEIGHT;
+    const targetH = this._groundH[tz * this.cellsX + tx] + FogOfWar.TARGET_HEIGHT;
     const inv = 1 / steps;
     for (let i = 1; i < steps; i++) {
       const t = i * inv;
       const sx = Math.round(cx + dx * t);
       const sz = Math.round(cz + dz * t);
       const lineH = eyeH + (targetH - eyeH) * t;
-      if (this._blockH[sz * this.cells + sx] > lineH) return false;
+      if (this._blockH[sz * this.cellsX + sx] > lineH) return false;
     }
     return true;
   }
 
-  private _clampCell(c: number): number {
-    return THREE.MathUtils.clamp(c, 0, this.cells - 1);
+  private _clampCellX(c: number): number {
+    return THREE.MathUtils.clamp(c, 0, this.cellsX - 1);
+  }
+
+  private _clampCellZ(c: number): number {
+    return THREE.MathUtils.clamp(c, 0, this.cellsZ - 1);
   }
 }

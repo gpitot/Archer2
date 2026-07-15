@@ -28,10 +28,19 @@ export class IsometricCamera {
   private readonly _pitch = THREE.MathUtils.degToRad(56);
   private _offset = new THREE.Vector3();
 
+  // Focus clamp rectangle (WC3's SetCameraBoundsToRect equivalent).
+  private _bounds: { minX: number; minZ: number; maxX: number; maxZ: number } | null = null;
+
   constructor() {
     const aspect = window.innerWidth / window.innerHeight;
-    this.camera = new THREE.PerspectiveCamera(32, aspect, 1, 8000);
+    this.camera = new THREE.PerspectiveCamera(32, aspect, 1, 12000);
     this._recomputeOffset();
+    this._apply();
+  }
+
+  /** Confine the focus point to a world rect, like WC3 camera bounds. */
+  setBounds(minX: number, minZ: number, maxX: number, maxZ: number): void {
+    this._bounds = { minX, minZ, maxX, maxZ };
     this._apply();
   }
 
@@ -126,6 +135,10 @@ export class IsometricCamera {
   }
 
   private _apply(): void {
+    if (this._bounds) {
+      this._focus.x = THREE.MathUtils.clamp(this._focus.x, this._bounds.minX, this._bounds.maxX);
+      this._focus.z = THREE.MathUtils.clamp(this._focus.z, this._bounds.minZ, this._bounds.maxZ);
+    }
     this.camera.position.copy(this._focus).add(this._offset);
     this.camera.lookAt(this._focus);
   }
