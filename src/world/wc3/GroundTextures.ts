@@ -200,7 +200,7 @@ function paintGrassyDirt(ctx: Ctx, s: number, rnd: () => number): void {
 }
 
 function paintVines(ctx: Ctx, s: number, rnd: () => number): void {
-  ctx.fillStyle = rgb(52, 78, 44);
+  ctx.fillStyle = rgb(66, 96, 56);
   ctx.fillRect(0, 0, s, s);
   wrapped(ctx, s, (c) => {
     for (let i = 0; i < 26; i++) {
@@ -302,7 +302,7 @@ const PAINTERS: ((ctx: Ctx, s: number, rnd: () => number) => void)[] = [
   (c, s, r) => paintRock(c, s, r, [128, 124, 116]),        // 3 Arck
   (c, s, r) => paintGrassyDirt(c, s, r),                   // 4 Agrd
   (c, s, r) => paintVines(c, s, r),                        // 5 Avin
-  (c, s, r) => paintGrass(c, s, r, [44, 78, 56], true),    // 6 Adrg dark grass
+  (c, s, r) => paintGrass(c, s, r, [58, 98, 72], true),    // 6 Adrg dark grass
   (c, s, r) => paintLeaves(c, s, r),                       // 7 Alvd
   (c, s, r) => paintCliff(c, s, r, [125, 122, 114], true), // 8 CAgr
   (c, s, r) => paintCliff(c, s, r, [107, 79, 52], false),  // 9 CAdi

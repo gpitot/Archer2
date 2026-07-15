@@ -98,7 +98,16 @@ export class FogLayer {
         .replace('#include <common>', '#include <common>\nvarying vec3 vFowWorldPos;')
         .replace(
           '#include <project_vertex>',
-          '#include <project_vertex>\nvFowWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;',
+          [
+            '#include <project_vertex>',
+            // Instanced meshes (doodads) need the per-instance transform to
+            // land on their true world position in the fog map.
+            'vec4 fowLocal = vec4(transformed, 1.0);',
+            '#ifdef USE_INSTANCING',
+            '  fowLocal = instanceMatrix * fowLocal;',
+            '#endif',
+            'vFowWorldPos = (modelMatrix * fowLocal).xyz;',
+          ].join('\n'),
         );
 
       shader.fragmentShader = shader.fragmentShader

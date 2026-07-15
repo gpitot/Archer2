@@ -191,10 +191,10 @@ function buildStyleParts(style: Style): StylePart[] {
       return [{ name: 'rock', geometry: geo, material: mat(0x8a867c) }];
     }
     case 'bush': {
-      const a = new THREE.IcosahedronGeometry(20, 1);
+      const a = new THREE.IcosahedronGeometry(20, 0);
       a.scale(1, 0.72, 1);
       a.translate(0, 13, 0);
-      const b = new THREE.IcosahedronGeometry(13, 1);
+      const b = new THREE.IcosahedronGeometry(13, 0);
       b.scale(1, 0.75, 1);
       b.translate(14, 9, 6);
       return [
