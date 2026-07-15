@@ -86,6 +86,44 @@ export async function loadMapData(): Promise<MapData> {
   return { terrain, pathing, doodads, bounds };
 }
 
+// ── Arenas ──────────────────────────────────────────────────────
+
+/**
+ * Axis-aligned world-space rectangle (Three.js coords). The original map
+ * script defines one per selectable arena and confines camera bounds and
+ * spawns to the host's pick.
+ */
+export interface ArenaRect {
+  minX: number;
+  minZ: number;
+  maxX: number;
+  maxZ: number;
+  centerX: number;
+  centerZ: number;
+  width: number;
+  height: number;
+}
+
+function arenaFromWc3(minx: number, miny: number, maxx: number, maxy: number): ArenaRect {
+  // z = −y flips the vertical min/max
+  const minZ = -maxy;
+  const maxZ = -miny;
+  return {
+    minX: minx, minZ, maxX: maxx, maxZ,
+    centerX: (minx + maxx) / 2,
+    centerZ: (minZ + maxZ) / 2,
+    width: maxx - minx,
+    height: maxZ - minZ,
+  };
+}
+
+/** "Terrain 1" (by Devrak) — north-west arena, the original default. */
+export const ARENA_TERRAIN1 = arenaFromWc3(-2784, -6720, 4416, 512);
+/** "Terrain 2" (by Rei) — north-east arena. */
+export const ARENA_TERRAIN2 = arenaFromWc3(6496, -8384, 16192, -96);
+/** Large southern arena (not host-selectable in 1.4d). */
+export const ARENA_SOUTH = arenaFromWc3(4192, -21216, 16288, -9056);
+
 // ── Coordinate helpers ──────────────────────────────────────────
 
 /** WC3 (x, y) → Three.js (wx, wz). */

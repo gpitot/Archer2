@@ -8,6 +8,11 @@
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 import { resolve } from 'path';
+import { existsSync } from 'fs';
+
+// Use a system-provided Chromium when the Playwright-managed one is absent
+// (e.g. sandboxed CI/remote environments with a pre-installed browser).
+const FALLBACK_CHROMIUM = '/opt/pw-browsers/chromium';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const SCREENSHOT_PATH = resolve(ROOT, 'screenshot.png');
@@ -17,7 +22,7 @@ async function main() {
   console.log('[shot] Starting Vite dev server...');
   const server = await createServer({
     root: ROOT,
-    server: { port: 4173 },
+    server: { port: 4173, open: false },
   });
   await server.listen();
   const address = server.resolvedUrls!.local[0];
@@ -25,7 +30,14 @@ async function main() {
 
   // 2. Launch browser
   console.log('[shot] Launching headless Chromium...');
-  const browser = await chromium.launch({ headless: true });
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+  } catch (err) {
+    if (!existsSync(FALLBACK_CHROMIUM)) throw err;
+    console.log(`[shot]   (falling back to ${FALLBACK_CHROMIUM})`);
+    browser = await chromium.launch({ headless: true, executablePath: FALLBACK_CHROMIUM });
+  }
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 
   // Collect console messages

@@ -10,6 +10,9 @@ import { FogOfWar, FOG_EXPLORED, FOG_VISIBLE } from './FogOfWar';
  * color — hidden ground renders black, explored ground dimmed, visible ground
  * untouched, matching WC3's black mask / grey fog / clear terrain.
  *
+ * World positions outside the fog grid render black, which doubles as the
+ * WC3-style dark void beyond the active arena's camera bounds.
+ *
  * Brightness eases toward its target every frame so fog edges roll in and out
  * smoothly instead of popping on each recompute.
  */
@@ -27,17 +30,17 @@ export class FogLayer {
   private _uniforms: {
     uFogMap: { value: THREE.Texture };
     uFogOrigin: { value: THREE.Vector2 };
-    uFogSizeInv: { value: number };
+    uFogSizeInv: { value: THREE.Vector2 };
   };
 
   constructor(fog: FogOfWar, team: number) {
     this._fog = fog;
     this._team = team;
 
-    const n = fog.cells;
-    this._data = new Uint8Array(n * n); // starts fully hidden (black)
-    this._brightness = new Float32Array(n * n);
-    this.texture = new THREE.DataTexture(this._data, n, n, THREE.RedFormat, THREE.UnsignedByteType);
+    const n = fog.cellsX * fog.cellsZ;
+    this._data = new Uint8Array(n); // starts fully hidden (black)
+    this._brightness = new Float32Array(n);
+    this.texture = new THREE.DataTexture(this._data, fog.cellsX, fog.cellsZ, THREE.RedFormat, THREE.UnsignedByteType);
     this.texture.minFilter = THREE.LinearFilter;
     this.texture.magFilter = THREE.LinearFilter;
     this.texture.wrapS = THREE.ClampToEdgeWrapping;
@@ -47,8 +50,8 @@ export class FogLayer {
 
     this._uniforms = {
       uFogMap: { value: this.texture },
-      uFogOrigin: { value: new THREE.Vector2(fog.worldOrigin, fog.worldOrigin) },
-      uFogSizeInv: { value: 1 / fog.worldSize },
+      uFogOrigin: { value: new THREE.Vector2(fog.originX, fog.originZ) },
+      uFogSizeInv: { value: new THREE.Vector2(1 / fog.worldWidth, 1 / fog.worldHeight) },
     };
   }
 
@@ -106,7 +109,7 @@ export class FogLayer {
             'varying vec3 vFowWorldPos;',
             'uniform sampler2D uFogMap;',
             'uniform vec2 uFogOrigin;',
-            'uniform float uFogSizeInv;',
+            'uniform vec2 uFogSizeInv;',
           ].join('\n'),
         )
         .replace(
@@ -115,7 +118,9 @@ export class FogLayer {
             '#include <dithering_fragment>',
             'vec2 fowUv = (vFowWorldPos.xz - uFogOrigin) * uFogSizeInv;',
             'float fowBrightness = texture2D(uFogMap, fowUv).r;',
-            'gl_FragColor.rgb *= fowBrightness;',
+            // Outside the fog grid = beyond arena bounds → black void.
+            'vec2 fowIn = step(vec2(0.0), fowUv) * step(fowUv, vec2(1.0));',
+            'gl_FragColor.rgb *= fowBrightness * fowIn.x * fowIn.y;',
           ].join('\n'),
         );
     };
