@@ -24,3 +24,4 @@ dist
 .wrangler/tmp/dev-FR6Qhh/index.js.map
 .wrangler/tmp/dev-cK1jlQ/index.js
 .wrangler/tmp/dev-cK1jlQ/index.js.map
+.wrangler/*

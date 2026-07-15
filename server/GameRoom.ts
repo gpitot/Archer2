@@ -121,6 +121,7 @@ export class GameRoom extends DurableObject<Env> {
 
       case 'input': {
         const info = this._players.get(ws);
+        console.log('[GameRoom] input from', info?.playerId ?? 'unknown', 'cmd:', msg.cmd?.type);
         if (!info) return;
         this._pendingInputs.push({ heroId: info.playerId, cmd: msg.cmd });
         break;
@@ -172,6 +173,9 @@ export class GameRoom extends DurableObject<Env> {
     // Drain pending inputs.
     const inputs = this._pendingInputs;
     this._pendingInputs = [];
+    if (inputs.length > 0) {
+      console.log('[GameRoom] tick', this._state.tick, 'processing', inputs.length, 'inputs');
+    }
 
     // Step the simulation.
     const events = stepMatch(this._state, inputs, 1 / TICK_RATE, this._world);
