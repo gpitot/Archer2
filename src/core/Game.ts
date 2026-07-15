@@ -9,6 +9,7 @@ import { Shop, ShopItem } from '../world/Shop';
 import { ObstacleRegistry } from '../world/ObstacleRegistry';
 import { MapData, loadMapData, ArenaRect, ARENA_TERRAIN1, PATH_CELL_SIZE } from '../world/wc3/MapData';
 import { Wc3Terrain } from '../world/Wc3Terrain';
+import { Water } from '../world/Water';
 import { isCellWalkable } from '../world/wc3/WpmParser';
 import { NavGrid } from '../navigation/NavGrid';
 import { Pathfinder } from '../navigation/Pathfinder';
@@ -45,6 +46,7 @@ export class Game {
   /** Gameplay is confined to one arena of the map, like the original. */
   private _arena: ArenaRect = ARENA_TERRAIN1;
   private _terrain!: GroundProvider;
+  private _water!: Water;
   private _hero!: Hero;
   private _heroes: Hero[] = [];
   private _input!: InputManager;
@@ -97,6 +99,10 @@ export class Game {
     this._scene.add(this._terrain.mesh);
     const heightAt = (x: number, z: number) => this._terrain.heightAt(x, z);
 
+    // ── Water (original per-tilepoint water levels) ──
+    this._water = new Water(this._map);
+    this._scene.add(this._water.group);
+
     // ── Navigation (authoritative walkability from the original pathing map) ──
     this._navGrid = new NavGrid(
       this._map.pathing.width,
@@ -116,6 +122,7 @@ export class Game {
     this._fog = new FogOfWar(this._arena, FOG_CELL_SIZE, heightAt);
     this._fogLayer = new FogLayer(this._fog, 0); // player team's view
     this._fogLayer.applyTo(this._terrain.mesh);
+    this._fogLayer.applyTo(this._water.group);
 
     // ── Shop (near the arena center, snapped to walkable ground) ──
     const bootsItem: ShopItem = {
@@ -311,6 +318,7 @@ export class Game {
     }
     this._projectiles.update(delta);
     this._floatingText.update(delta, this._camera.camera);
+    this._water.update(delta);
 
     // Wards: tick lifetime, remove expired ones
     for (let i = this._wards.length - 1; i >= 0; i--) {
