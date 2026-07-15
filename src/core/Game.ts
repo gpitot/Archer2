@@ -8,6 +8,7 @@ import { Minimap } from '../rendering/Minimap';
 import { Shop, ShopItem } from '../world/Shop';
 import { ObstacleRegistry } from '../world/ObstacleRegistry';
 import { MapData, loadMapData, ArenaRect, ARENA_TERRAIN1, PATH_CELL_SIZE } from '../world/wc3/MapData';
+import { Wc3Terrain } from '../world/Wc3Terrain';
 import { isCellWalkable } from '../world/wc3/WpmParser';
 import { NavGrid } from '../navigation/NavGrid';
 import { Pathfinder } from '../navigation/Pathfinder';
@@ -91,8 +92,8 @@ export class Game {
     this._scene = createScene();
     createLighting(this._scene);
 
-    // ── Ground (flat stand-in until the WC3 terrain mesher lands) ──
-    this._terrain = this._createFlatGround();
+    // ── Terrain (original map heightfield, procedural WC3-style textures) ──
+    this._terrain = new Wc3Terrain(this._map);
     this._scene.add(this._terrain.mesh);
     const heightAt = (x: number, z: number) => this._terrain.heightAt(x, z);
 
@@ -261,19 +262,6 @@ export class Game {
   }
 
   get hero(): Hero { return this._hero; }
-
-  /** Flat stand-in ground over the full map bounds (replaced in Phase 2). */
-  private _createFlatGround(): GroundProvider {
-    const bounds = this._map.bounds;
-    const geo = new THREE.PlaneGeometry(bounds.width, bounds.height, 1, 1);
-    geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x2a4a34, roughness: 0.95, metalness: 0 });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.name = 'terrain';
-    mesh.position.set(bounds.centerX, 0, bounds.centerZ);
-    mesh.receiveShadow = true;
-    return { mesh, heightAt: () => 0 };
-  }
 
   /** Copy the original pathing map into the nav grid (rows flip: wpm row 0 = south). */
   private _applyPathingToNav(): void {

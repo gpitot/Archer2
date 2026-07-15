@@ -140,9 +140,10 @@ export class InputManager {
 
     this._raycaster.setFromCamera(mouse, this._camera);
 
-    // Prefer the actual terrain surface under the cursor.
+    // Prefer the actual terrain surface under the cursor. Recursive, since
+    // the terrain is a Group of chunk meshes.
     if (this._ground) {
-      const hits = this._raycaster.intersectObject(this._ground, false);
+      const hits = this._raycaster.intersectObject(this._ground, true);
       if (hits.length > 0) return hits[0].point.clone();
     }
 
