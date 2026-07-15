@@ -10,6 +10,7 @@ import { ObstacleRegistry } from '../world/ObstacleRegistry';
 import { MapData, loadMapData, ArenaRect, ARENA_TERRAIN1, PATH_CELL_SIZE } from '../world/wc3/MapData';
 import { Wc3Terrain } from '../world/Wc3Terrain';
 import { Water } from '../world/Water';
+import { Doodads } from '../world/Doodads';
 import { isCellWalkable } from '../world/wc3/WpmParser';
 import { NavGrid } from '../navigation/NavGrid';
 import { Pathfinder } from '../navigation/Pathfinder';
@@ -115,14 +116,24 @@ export class Game {
     const pathfinder = new Pathfinder(this._navGrid);
     this._pathfinder = pathfinder;
 
-    // ── Obstacles (doodads register here in a later phase) ──
+    // ── Doodads (trees/rocks/bushes at original positions) ──
     this._obstacleRegistry = new ObstacleRegistry();
+    const doodads = new Doodads(this._map, heightAt, this._obstacleRegistry);
+    this._scene.add(doodads.group);
 
     // ── Fog of war over the active arena (WC3-style) ──
     this._fog = new FogOfWar(this._arena, FOG_CELL_SIZE, heightAt);
+    // Tree walls occlude vision like the original; only arena doodads matter.
+    for (const s of doodads.solids) {
+      if (s.x >= this._arena.minX && s.x <= this._arena.maxX &&
+          s.z >= this._arena.minZ && s.z <= this._arena.maxZ) {
+        this._fog.addSightBlocker(s.x, s.z, s.halfW, s.halfD, s.height);
+      }
+    }
     this._fogLayer = new FogLayer(this._fog, 0); // player team's view
     this._fogLayer.applyTo(this._terrain.mesh);
     this._fogLayer.applyTo(this._water.group);
+    this._fogLayer.applyTo(doodads.group);
 
     // ── Shop (near the arena center, snapped to walkable ground) ──
     const bootsItem: ShopItem = {
