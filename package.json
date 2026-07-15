@@ -9,6 +9,10 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "shot": "pnpm tsx scripts/screenshot.ts",
+    "sim": "pnpm tsx scripts/sim.ts",
+    "test:sim": "pnpm tsx scripts/sim.ts",
+    "trace": "pnpm tsx scripts/trace.ts",
+    "drive": "pnpm tsx scripts/drive.ts",
     "build:navdata": "pnpm tsx scripts/build-navdata-compact.ts"
   },
   "keywords": [

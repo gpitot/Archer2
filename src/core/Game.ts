@@ -29,7 +29,7 @@ import { SpellBar } from '../ui/SpellBar';
 // ── Sim layer ──
 import { HeroState, ProjectileState, WardState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
 import { stepMatch, xpForLevel, heroSpeed } from '../sim/stepMatch';
-import { SimWorld } from '../sim/world';
+import { SimWorld, sphereHitsObstacle } from '../sim/world';
 import { buildSimWorld, buildObstaclesFromSolids } from '../sim/buildWorld';
 import { HERO, ARROW, WARD } from '../sim/rules';
 import { SHOP_ITEMS } from '../sim/shopItems';
@@ -43,6 +43,9 @@ import { NetworkClient } from '../net/NetworkClient';
 import { HeroView } from '../entities/HeroView';
 import { ProjectileView } from '../combat/ProjectileView';
 import { WardView } from '../entities/WardView';
+
+// ── Debug tooling ──
+import { ClientTrace } from '../testing/ClientTrace';
 
 const FOG_CELL_SIZE = 40;
 
@@ -91,7 +94,21 @@ export class Game {
   private _snapshots: Snapshot[] = [];
   private static readonly INTERP_DELAY = 0.130; // 130 ms
 
-  // ── Cosmetic projectiles (instant local feedback) ──
+  // ── Render clock ──
+  // Remote entities are rendered INTERP_DELAY behind the server tick
+  // timeline. The clock must advance with *local* time every frame — deriving
+  // it from the newest snapshot's tick freezes it between snapshot arrivals
+  // (15 Hz), which renders remote motion as freeze-then-teleport steps.
+  /** Accumulated local update time (seconds). */
+  private _localTime = 0;
+  /** Smoothed (serverTime − localTime); null until the first snapshot. */
+  private _serverTimeOffset: number | null = null;
+
+  // ── Own projectiles (fully client-rendered) ──
+  // Our arrows fly locally from the moment of input: straight line, same
+  // speed and obstacle collision as the sim, retired by the server's hit
+  // event. The server's copy of an own arrow is *never* rendered — switching
+  // mid-flight to its interp-delayed track would teleport the arrow backwards.
   private _cosmeticProjectiles: {
     view: ProjectileView;
     pos: Vec2;
@@ -99,7 +116,17 @@ export class Game {
     speed: number;
     traveled: number;
     maxRange: number;
+    /** Server projectile id claimed via our 'fire' event, once known. */
+    serverId: string | null;
   }[] = [];
+  /**
+   * Server ids of our own arrows, kept (even after the local arrow retires)
+   * so `_renderProjectiles` never shows the server's duplicate. An entry
+   * lives until the *render* timeline passes the projectile's last appearance
+   * (`seenTick`) — pruning on the arrival timeline would unhide it while the
+   * ~130 ms-delayed interpolation still has it in flight.
+   */
+  private _ownArrowIds = new Map<string, { seenTick: number | null; missedBatches: number }>();
 
   // ── Views ──
   private _heroViews = new Map<string, HeroView>();
@@ -121,6 +148,10 @@ export class Game {
 
   // ── Input ──
   private _input!: InputManager;
+
+  // ── Debug trace (?debug=1) ──
+  private _trace: ClientTrace | null = null;
+  private _debugReady = false;
 
   // ── UI ──
   private _floatingText = new FloatingTextManager();
@@ -147,6 +178,7 @@ export class Game {
     // ── Detect network mode from URL (?room=XXXX) ──
     const urlParams = new URLSearchParams(window.location.search);
     this._roomCode = urlParams.get('room');
+    if (urlParams.get('debug')) this._trace = new ClientTrace();
     if (this._roomCode) {
       this._networkMode = true;
       this._network = new NetworkClient();
@@ -366,6 +398,7 @@ export class Game {
 
     window.addEventListener('resize', this._onResize.bind(this));
     this._loop.start();
+    this._debugReady = true;
   }
 
   get heroState(): HeroState { return this._playerState; }
@@ -488,20 +521,11 @@ export class Game {
     );
 
     // Match views to the persistent hero list, then adopt server entities.
+    // (Projectiles are rebuilt every frame from the interpolation timeline in
+    // `_renderProjectiles`, not adopted here.)
     this._syncHeroViews(this._state.heroes);
-    this._state.projectiles = this._cloneProjectiles(snap.projectiles);
     this._state.wards = this._cloneWards(snap.wards);
     this._state.tick = snap.tick;
-
-    // Adopt cosmetic projectiles: when a server projectile owned by us
-    // appears, hand the oldest cosmetic view over to it.
-    for (const sp of snap.projectiles) {
-      if (sp.ownerId !== this._playerId) continue;
-      if (this._projectileViews.has(sp.id)) continue; // already adopted
-      if (this._cosmeticProjectiles.length === 0) continue;
-      const cosmetic = this._cosmeticProjectiles.shift()!;
-      this._projectileViews.set(sp.id, cosmetic.view);
-    }
   }
 
   /**
@@ -557,7 +581,14 @@ export class Game {
 
   /** Run local stepMatch for the player's hero only (instant movement feel). */
   private _predictMovement(inputs: HeroInput[], dt: number): void {
-    if (inputs.length === 0 && !this._playerState?.moving) return;
+    if (inputs.length === 0 && !this._playerState?.moving) {
+      // Prediction isn't stepping this frame, but predicted timers must still
+      // run — otherwise a stationary hero's cooldown stays stuck until the
+      // next move and the fire guard wrongly rejects follow-up shots.
+      const idle = this._state.heroes.find((h) => h.id === this._playerId);
+      if (idle) idle.abilityCooldown = Math.max(0, idle.abilityCooldown - dt);
+      return;
+    }
 
     const player = this._state.heroes.find((h) => h.id === this._playerId);
     if (!player || !player.alive) return;
@@ -578,21 +609,14 @@ export class Game {
   }
 
   /**
-   * Interpolate remote entities between the last two snapshots so they
-   * appear smooth even when snapshots arrive at 15 Hz (66 ms gaps).
+   * Interpolate remote hero positions between the pair of snapshots that
+   * straddles `renderTime`, so 15 Hz snapshots render as smooth 60 fps motion.
    */
-  private _interpolateEntities(): void {
+  private _interpolateHeroes(renderTime: number): void {
     if (this._snapshots.length < 2) return;
 
-    // Render INTERP_DELAY behind the newest snapshot, using its tick as the
-    // clock. At a 130 ms delay with 66 ms snapshot spacing, the render time
-    // lands ~2 snapshots back, so we must search the buffer for the pair that
-    // straddles it — not just the last two (which are always too new).
-    const latest = this._snapshots[this._snapshots.length - 1];
-    const renderTime = latest.tick / 30 - Game.INTERP_DELAY;
-
     // Default to the oldest adjacent pair; overwrite if a straddling pair is
-    // found. Clamped `t` then extrapolates gracefully during buffer warm-up.
+    // found. Clamped `t` handles renderTime outside the buffered range.
     let prev = this._snapshots[0];
     let next = this._snapshots[1];
     for (let i = 0; i < this._snapshots.length - 1; i++) {
@@ -615,7 +639,6 @@ export class Game {
     const span = nextTime - prevTime;
     const t = span > 0 ? clamp((renderTime - prevTime) / span, 0, 1) : 0;
 
-    // Interpolate remote hero positions.
     for (const hero of this._state.heroes) {
       if (hero.id === this._playerId) continue;
       const prevH = prev.heroes.find((h) => h.id === hero.id);
@@ -626,15 +649,104 @@ export class Game {
       // lerp angle
       hero.facing = _lerpAngle(prevH.facing, nextH.facing, t);
     }
+  }
 
-    // Interpolate projectile positions.
-    for (const proj of this._state.projectiles) {
-      const prevP = prev.projectiles.find((p) => p.id === proj.id);
-      const nextP = next.projectiles.find((p) => p.id === proj.id);
-      if (!prevP || !nextP) continue;
-      proj.pos.x = prevP.pos.x + (nextP.pos.x - prevP.pos.x) * t;
-      proj.pos.z = prevP.pos.z + (nextP.pos.z - prevP.pos.z) * t;
+  /**
+   * Rebuild `_state.projectiles` for this frame from the snapshot just ahead
+   * of `renderTime`. Projectiles fly in straight lines at constant speed, so
+   * their position at renderTime is exact: walk back along `dir` from the
+   * snapshot position (clamped by `traveled`, i.e. never before the spawn
+   * point). This renders every projectile that reaches *any* snapshot for its
+   * full lifetime — including ones that would be missed when several
+   * snapshots arrive in one frame — with per-frame motion, not 15 Hz steps.
+   */
+  private _renderProjectiles(renderTime: number): void {
+    if (this._snapshots.length === 0) return;
+
+    let next = this._snapshots[this._snapshots.length - 1];
+    for (const s of this._snapshots) {
+      if (s.tick / 30 >= renderTime) {
+        next = s;
+        break;
+      }
     }
+    // If renderTime has outrun the buffer (network stall), `behind` is 0 and
+    // projectiles hold at their last known position rather than extrapolating.
+    const behind = Math.max(0, next.tick / 30 - renderTime);
+
+    // Release own-arrow ids the render timeline has fully passed.
+    for (const [id, rec] of this._ownArrowIds) {
+      if (rec.seenTick !== null && next.tick > rec.seenTick) this._ownArrowIds.delete(id);
+    }
+
+    this._state.projectiles = next.projectiles
+      .filter((sp) => !this._ownArrowIds.has(sp.id)) // own arrows render locally
+      .map((sp) => {
+        const back = Math.min(sp.speed * behind, sp.traveled);
+        return {
+          ...sp,
+          pos: { x: sp.pos.x - sp.dir.x * back, z: sp.pos.z - sp.dir.z * back },
+          dir: { x: sp.dir.x, z: sp.dir.z },
+          traveled: sp.traveled - back,
+        };
+      });
+  }
+
+  /**
+   * Note the last snapshot tick each own arrow was seen at (its release from
+   * `_ownArrowIds` happens in `_renderProjectiles`, on the render timeline).
+   * Ids never seen within a few batches died between broadcasts — they can't
+   * leak a duplicate, so drop them.
+   */
+  private _trackOwnArrowIds(snaps: Snapshot[]): void {
+    for (const [id, rec] of this._ownArrowIds) {
+      let seen = false;
+      for (const snap of snaps) {
+        if (snap.projectiles.some((p) => p.id === id)) {
+          rec.seenTick = snap.tick;
+          seen = true;
+        }
+      }
+      if (!seen && rec.seenTick === null && ++rec.missedBatches >= 6) {
+        this._ownArrowIds.delete(id);
+      }
+    }
+  }
+
+  /** Track our fire/hit events to link cosmetic arrows to server projectiles. */
+  private _handleOwnArrowEvent(ev: SimEvent): void {
+    if (ev.type === 'fire' && ev.heroId === this._playerId) {
+      const cosmetic = this._cosmeticProjectiles.find((c) => c.serverId === null);
+      // Only hide the server projectile when a local arrow actually claimed
+      // it — if the cosmetic guard suppressed the spawn, the interp-timeline
+      // projectile is the only visible copy and must stay rendered.
+      if (cosmetic) {
+        cosmetic.serverId = ev.projectileId;
+        this._ownArrowIds.set(ev.projectileId, { seenTick: null, missedBatches: 0 });
+      }
+      return;
+    }
+    // Our arrow hit someone: retire the local arrow closest to the impact.
+    // (Obstacle and max-range deaths are computed locally and need no event.)
+    if (ev.type === 'hit' && ev.sourceId === this._playerId) {
+      let best: (typeof this._cosmeticProjectiles)[number] | null = null;
+      let bestDist = 400; // ignore implausible matches (≈ max prediction lead)
+      for (const c of this._cosmeticProjectiles) {
+        const d = Math.hypot(c.pos.x - ev.x, c.pos.z - ev.z);
+        if (d < bestDist) {
+          best = c;
+          bestDist = d;
+        }
+      }
+      if (best) this._retireCosmetic(best);
+    }
+  }
+
+  private _retireCosmetic(c: (typeof this._cosmeticProjectiles)[number]): void {
+    const i = this._cosmeticProjectiles.indexOf(c);
+    if (i >= 0) this._cosmeticProjectiles.splice(i, 1);
+    c.view.hide();
+    this._projectilePool.push(c.view);
   }
 
   // ── Cosmetic projectiles ────────────────────────────────────────────
@@ -678,28 +790,37 @@ export class Game {
       speed: ARROW.speed,
       traveled: 0,
       maxRange: ARROW.rangeByLevel[Math.min(player.abilityLevel, 4)],
+      serverId: null,
     });
   }
 
-  /** Advance cosmetic projectiles and retire those that expire. */
+  /**
+   * Advance our local arrows and retire those that expire or hit an obstacle
+   * (mirroring stepProjectiles, so the local flight ends where the server's
+   * does). Hits on heroes are retired by the server's hit event instead —
+   * see `_handleOwnArrowEvent`.
+   */
   private _tickCosmeticProjectiles(dt: number): void {
     for (let i = this._cosmeticProjectiles.length - 1; i >= 0; i--) {
       const c = this._cosmeticProjectiles[i];
       c.traveled += c.speed * dt;
+      if (c.traveled >= c.maxRange) {
+        this._retireCosmetic(c);
+        continue;
+      }
       c.pos = {
         x: c.pos.x + c.dir.x * c.speed * dt,
         z: c.pos.z + c.dir.z * c.speed * dt,
       };
+      if (sphereHitsObstacle(this._world, c.pos, ARROW.collisionRadius)) {
+        this._retireCosmetic(c);
+        continue;
+      }
       c.view.mesh.position.set(
         c.pos.x,
         this._heightAt(c.pos.x, c.pos.z) + ARROW.flyHeight,
         c.pos.z,
       );
-      if (c.traveled >= c.maxRange) {
-        c.view.hide();
-        this._projectilePool.push(c.view);
-        this._cosmeticProjectiles.splice(i, 1);
-      }
     }
   }
 
@@ -789,11 +910,14 @@ export class Game {
     // ── Misc ──
     this._floatingText.update(dt, this._camera.camera);
     this._water.update(dt);
+
+    this._recordTraceFrame([], events);
   }
 
   private _updateNetwork(dt: number): void {
     // ── Camera ──
     this._updateCamera(dt);
+    this._localTime += dt;
 
     // ── Send inputs to server (also keep for local prediction) ──
     const localInputs: HeroInput[] = [];
@@ -806,35 +930,58 @@ export class Game {
     }
     this._pendingCommands = [];
 
-    // ── Drain snapshots into buffer ──
+    // ── Drain snapshots into buffer, sync the render clock ──
     const snaps = this._network?.drainSnapshots() ?? [];
     for (const snap of snaps) {
       this._snapshots.push(snap);
       this._reconcileFromSnapshot(snap);
+      // Track (serverTime − localTime) with a light EMA: smooths arrival
+      // jitter, hard-resets on gross desync (join, tab suspend).
+      const sample = snap.tick / 30 - this._localTime;
+      if (this._serverTimeOffset === null || Math.abs(sample - this._serverTimeOffset) > 0.5) {
+        this._serverTimeOffset = sample;
+      } else {
+        this._serverTimeOffset += (sample - this._serverTimeOffset) * 0.1;
+      }
     }
-    // Keep last ~330 ms of snapshots (5 at 15 Hz).
-    while (this._snapshots.length > 5) this._snapshots.shift();
 
     // ── Apply server state for remote entities ──
     if (snaps.length > 0) {
       this._applyServerState(snaps[snaps.length - 1]);
+      this._trackOwnArrowIds(snaps);
     }
 
-    // ── Interpolate remote entities between last two snapshots ──
-    this._interpolateEntities();
+    // Render clock: advances every frame with local time (never frozen
+    // between snapshot arrivals), offset onto the server tick timeline.
+    const renderTime = this._serverTimeOffset === null
+      ? null
+      : this._localTime + this._serverTimeOffset - Game.INTERP_DELAY;
 
-    // ── Drain events ──
+    // Prune snapshots that fell behind the straddling pair.
+    if (renderTime !== null) {
+      while (this._snapshots.length > 2 && this._snapshots[1].tick / 30 <= renderTime) {
+        this._snapshots.shift();
+      }
+    }
+
+    // ── Drain events (own-arrow bookkeeping first: it may retire arrows) ──
     const evts = this._network?.drainEvents() ?? [];
     for (const evMsg of evts) {
+      this._handleOwnArrowEvent(evMsg.event);
       this._handleEvent(evMsg.event, dt);
     }
+    const frameEvents = evts.map((e) => e.event);
+
+    // ── Interpolate remote heroes ──
+    if (renderTime !== null) this._interpolateHeroes(renderTime);
 
     // ── Local prediction: move own hero with pending inputs ──
     // (Snap-based reconciliation already happened per-snapshot above.)
     this._predictMovement(localInputs, dt);
 
-    // ── Tick cosmetic projectiles ──
+    // ── Own arrows fly locally; remote projectiles come off the interp timeline ──
     this._tickCosmeticProjectiles(dt);
+    if (renderTime !== null) this._renderProjectiles(renderTime);
 
     // ── Sync views ──
     this._syncAllViews(dt);
@@ -847,6 +994,70 @@ export class Game {
     // ── Misc ──
     this._floatingText.update(dt, this._camera.camera);
     this._water.update(dt);
+
+    this._recordTraceFrame(snaps.map((s) => s.tick), frameEvents);
+  }
+
+  // ── Debug trace & driver API (?debug=1, used by scripts/drive.ts) ────
+
+  /** Record one trace line: sim positions and view-mesh positions side by side. */
+  private _recordTraceFrame(snapTicks: number[], events: SimEvent[]): void {
+    if (!this._trace) return;
+    const r = (v: number) => +v.toFixed(2);
+    this._trace.record({
+      tick: this._state.tick,
+      snapTicks: snapTicks.length > 0 ? snapTicks : undefined,
+      heroes: this._state.heroes.map((h) => {
+        const view = this._heroViews.get(h.id);
+        return {
+          id: h.id, x: r(h.pos.x), z: r(h.pos.z),
+          vx: r(view?.mesh.position.x ?? NaN), vz: r(view?.mesh.position.z ?? NaN),
+          hp: h.hp, alive: h.alive,
+        };
+      }),
+      projectiles: this._state.projectiles.map((p) => {
+        const view = this._projectileViews.get(p.id);
+        return {
+          id: p.id, x: r(p.pos.x), z: r(p.pos.z),
+          vx: r(view?.mesh.position.x ?? NaN), vz: r(view?.mesh.position.z ?? NaN),
+          traveled: r(p.traveled), visible: view?.mesh.visible ?? false,
+        };
+      }),
+      cosmetic: this._cosmeticProjectiles.map((c) => ({
+        id: c.view.projectileId,
+        x: r(c.pos.x), z: r(c.pos.z),
+        vx: r(c.view.mesh.position.x), vz: r(c.view.mesh.position.z),
+      })),
+      events: events.length > 0 ? events : undefined,
+    });
+  }
+
+  /** True once init() has finished (drivers poll this before issuing input). */
+  get debugReady(): boolean {
+    return this._debugReady;
+  }
+
+  /** Inject a command exactly as player input would (driver entry point). */
+  debugIssue(cmd: Command): void {
+    this._enqueueCommand(cmd);
+  }
+
+  /** JSON-safe snapshot of the current client state for drivers. */
+  debugState(): { tick: number; playerId: string; shop: Vec2; heroes: { id: string; x: number; z: number; hp: number; alive: boolean; abilityLevel: number; abilityCooldown: number }[] } {
+    return {
+      tick: this._state.tick,
+      playerId: this._playerId,
+      shop: { ...this._world.shop.pos },
+      heroes: this._state.heroes.map((h) => ({
+        id: h.id, x: h.pos.x, z: h.pos.z, hp: h.hp, alive: h.alive,
+        abilityLevel: h.abilityLevel, abilityCooldown: h.abilityCooldown,
+      })),
+    };
+  }
+
+  /** The recorded trace as JSONL (empty string when tracing is off). */
+  debugDumpTrace(): string {
+    return this._trace ? this._trace.dump() : '';
   }
 
   private _updateCamera(dt: number): void {
