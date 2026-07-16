@@ -109,8 +109,8 @@ export class Game {
   private _tickDt = 1 / 60;
   /**
    * How far behind the server tick timeline remote entities render. Sized
-   * from the welcome tick rate: snapshots arrive every tick, so ~3 intervals
-   * absorbs one dropped/late snapshot plus jitter (50 ms at 60 Hz).
+   * from the welcome snapshot rate: ~3 snapshot intervals absorbs one
+   * dropped/late snapshot plus jitter (150 ms at 20 Hz).
    */
   private _interpDelay = 0.05;
 
@@ -513,9 +513,11 @@ export class Game {
       throw new Error(`room is on map '${welcome.map}' — reload with ?map=${welcome.map}`);
     }
 
-    // All snapshot-timeline math derives from the server's tick rate.
+    // All snapshot-timeline math derives from the server's tick rate; the
+    // interpolation delay derives from the (lower) snapshot broadcast rate.
     this._tickDt = 1 / welcome.tickRate;
-    this._interpDelay = Math.max(0.05, 3 * this._tickDt);
+    const snapshotDt = 1 / (welcome.snapshotRate ?? welcome.tickRate);
+    this._interpDelay = Math.max(0.05, 3 * snapshotDt);
 
     // Apply the welcome snapshot to initialise our state and views.
     this._playerId = welcome.playerId;

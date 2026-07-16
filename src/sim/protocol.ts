@@ -6,8 +6,9 @@
  * drive both local prediction and network commands.
  *
  * v2: heroes are split across two messages so per-tick snapshots stay small.
- *  - `snapshot` (every tick): the "hot" fields — pos/facing/hp/alive/moving —
- *    plus projectiles, wards, and any sim events from that tick.
+ *  - `snapshot` (every SNAPSHOT_EVERY-th tick): the "hot" fields —
+ *    pos/facing/hp/alive/moving — plus projectiles, wards, and any sim
+ *    events since the previous snapshot.
  *  - `heroMeta` (low rate + on meta-changing events): the "cold" fields —
  *    economy, progression, inventory — which change rarely.
  * Values are quantized server-side before serialization.
@@ -90,6 +91,9 @@ export interface WelcomeMessage {
   type: 'welcome';
   playerId: string;
   tickRate: number;
+  /** Snapshot broadcast rate (Hz). The sim runs at `tickRate`; snapshots go
+   *  out every Nth tick, so clients size their interpolation delay from this. */
+  snapshotRate: number;
   /** Map this room is running. */
   map?: string;
   /** Initial full state so the client can start rendering immediately. */
@@ -104,7 +108,7 @@ export interface SnapshotMessage {
   heroes: SnapshotHero[];
   projectiles: ProjectileState[];
   wards: WardState[];
-  /** Sim events from this tick, if any (piggybacked to save a WS frame). */
+  /** Sim events since the previous snapshot, if any (piggybacked to save a WS frame). */
   events?: SimEvent[];
 }
 
