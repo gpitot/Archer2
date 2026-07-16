@@ -130,7 +130,7 @@ async function main(): Promise<void> {
 
     // Shooter learns Shoot Arrow (heroes start with one skill point); wait
     // for server confirmation via reconciliation.
-    await shooter.evaluate(() => (window as any).__game.debugIssue({ type: 'levelAbility' }));
+    await shooter.evaluate(() => (window as any).__game.debugIssue({ type: 'levelAbility', ability: 'arrow' }));
     await shooter.waitForFunction(() => {
       const g = (window as any).__game;
       const s = g.debugState();

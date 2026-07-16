@@ -10,7 +10,7 @@ export const name = 'arrow-hit';
 export function run(h: SimHarness): void {
   const { a: shooter, b: target } = h.spawnDuelists(400);
 
-  h.issue('p1', { type: 'levelAbility' });
+  h.issue('p1', { type: 'levelAbility', ability: 'arrow' });
   h.tick();
   expectTrue(shooter.abilityLevel === 1, 'ability learned from starting skill point');
 
@@ -19,9 +19,10 @@ export function run(h: SimHarness): void {
 
   const hit = expectEvent(events, 'hit');
   expectTrue(hit.type === 'hit' && hit.targetId === 'p2', 'hit landed on p2');
-  // A level-1 arrow does 200 damage vs 100 max hp — the hit is lethal.
+  // A level-1 arrow does 200 damage vs 625 max hp — non-lethal hit.
   expectTrue(hit.type === 'hit' && hit.damage === ARROW.damageByLevel[1], 'hit dealt level-1 arrow damage');
-  expectTrue(!target.alive, 'lethal hit killed the target');
+  expectTrue(target.alive, 'target survived non-lethal hit');
+  expectTrue(target.hp === 425, `target hp after hit: ${target.hp}`);
 
   // The sim's projectile must advance exactly ARROW.speed * dt every tick —
   // this is the smooth baseline the client view should match.

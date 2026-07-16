@@ -10,7 +10,7 @@ export const name = 'kill-respawn';
 export function run(h: SimHarness): void {
   const { a: shooter, b: victim } = h.spawnDuelists(400);
 
-  h.issue('p1', { type: 'levelAbility' });
+  h.issue('p1', { type: 'levelAbility', ability: 'arrow' });
   h.tick();
 
   // Fire whenever off cooldown until the victim dies (level 1 needs one hit).

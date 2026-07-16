@@ -8,7 +8,7 @@
 // ── Hero ──────────────────────────────────────────────────────────────
 export const HERO = {
   maxHp: 625,
-  baseSpeed: 480,
+  baseSpeed: 350,
   /** Fog-of-war sight radius (world units) — WC3 hero daytime sight. */
   sightRadius: 900,
   /** Collision radius used for projectile hit tests (0.45 × mesh scale of 60). */

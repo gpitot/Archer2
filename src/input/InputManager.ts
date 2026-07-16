@@ -2,8 +2,6 @@ import * as THREE from 'three';
 
 export type ClickHandler = (worldPos: THREE.Vector3) => void;
 export type KeyHandler = () => void;
-export type ScrollHandler = (deltaY: number) => void;
-
 /**
  * Captures mouse clicks (ground targeting), mouse movement (aim tracking),
  * and keyboard events (ability usage).
@@ -16,8 +14,6 @@ export class InputManager {
   private _ground: THREE.Object3D | null = null;
 
   private _clickHandlers: ClickHandler[] = [];
-  private _scrollHandlers: ScrollHandler[] = [];
-
   // Mouse aim
   private _aimPosition = new THREE.Vector3();
   private _hasAim = false;
@@ -39,7 +35,6 @@ export class InputManager {
 
     this._canvas.addEventListener('click', this._onClick.bind(this));
     this._canvas.addEventListener('mousemove', this._onMouseMove.bind(this));
-    this._canvas.addEventListener('wheel', this._onWheel.bind(this), { passive: true });
     window.addEventListener('keydown', this._onKeyDown.bind(this));
     window.addEventListener('keyup', this._onKeyUp.bind(this));
     // Track mouse on the whole window for edge panning
@@ -49,15 +44,6 @@ export class InputManager {
   /** Set the terrain mesh to raycast for click/aim. Falls back to the y=0 plane. */
   setGround(mesh: THREE.Object3D): void {
     this._ground = mesh;
-  }
-
-  /** Register a mouse-wheel handler (positive deltaY = scroll down). */
-  onScroll(handler: ScrollHandler): void {
-    this._scrollHandlers.push(handler);
-  }
-
-  private _onWheel(event: WheelEvent): void {
-    for (const h of this._scrollHandlers) h(event.deltaY);
   }
 
   // ── Mouse aim ──────────────────────────────────────────────────

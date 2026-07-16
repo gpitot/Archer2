@@ -45,6 +45,19 @@ export class ItemBar {
       const icon = document.createElement('span');
       slot.appendChild(icon);
 
+      // Hotkey number (top-left corner)
+      const hotkey = document.createElement('span');
+      hotkey.textContent = String(i + 1);
+      hotkey.style.cssText = `
+        position: absolute;
+        top: 0; left: 3px;
+        font-size: 8px;
+        color: #ffcc44;
+        text-shadow: 0 0 3px #000;
+        line-height: 1;
+      `;
+      slot.appendChild(hotkey);
+
       // Charge-count badge (bottom-right corner, e.g. remaining wards)
       const badge = document.createElement('span');
       badge.style.cssText = `

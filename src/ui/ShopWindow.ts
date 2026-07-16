@@ -13,6 +13,7 @@ export class ShopWindow {
   readonly el: HTMLDivElement;
   private _overlay: HTMLDivElement;
   private _itemEls: HTMLDivElement[] = [];
+  private _items: ShopItem[] = [];
   private _cb: ShopCallback;
   private _visible = false;
 
@@ -46,6 +47,7 @@ export class ShopWindow {
 
   /** Open with shop items. */
   open(items: ShopItem[], heroGold: number, inventory: readonly (string | null)[]): void {
+    this._items = items;
     // Build panel content
     this.el.innerHTML = '';
 
@@ -148,6 +150,55 @@ export class ShopWindow {
     this._overlay.style.display = 'block';
     this.el.style.display = 'block';
     this._visible = true;
+  }
+
+  /** Update gold/inventory state without rebuilding the entire panel. */
+  refresh(heroGold: number, inventory: readonly (string | null)[]): void {
+    if (!this._visible) return;
+    const items = this._items as ShopItem[];
+    for (let i = 0; i < this._itemEls.length; i++) {
+      const item = items[i];
+      const owned = inventory.includes(item.id);
+      const canBuy = !owned && heroGold >= item.cost;
+      const row = this._itemEls[i];
+      // Update background / opacity
+      if (owned) {
+        row.style.background = 'rgba(20,40,20,0.4)';
+        row.style.border = '1px solid rgba(80,160,80,0.3)';
+        row.style.opacity = '0.7';
+        row.style.cursor = 'default';
+        row.onclick = null;
+        row.onmouseenter = null;
+        row.onmouseleave = null;
+      } else if (canBuy) {
+        row.style.background = 'rgba(40,30,10,0.6)';
+        row.style.border = '1px solid rgba(255,200,60,0.3)';
+        row.style.opacity = '1';
+        row.style.cursor = 'pointer';
+        row.onclick = (e) => { e.stopPropagation(); this._cb.onBuy(i); this.close(); };
+        row.onmouseenter = () => { row.style.background = 'rgba(60,45,15,0.7)'; };
+        row.onmouseleave = () => { row.style.background = 'rgba(40,30,10,0.6)'; };
+      } else {
+        row.style.background = 'rgba(20,15,5,0.4)';
+        row.style.border = '1px solid rgba(80,60,30,0.2)';
+        row.style.opacity = '0.5';
+        row.style.cursor = 'default';
+        row.onclick = null;
+        row.onmouseenter = null;
+        row.onmouseleave = null;
+      }
+      // Update cost label
+      const costEl = row.lastElementChild as HTMLElement;
+      if (costEl) {
+        if (owned) {
+          costEl.textContent = 'Owned';
+          costEl.style.color = '#66aa44';
+        } else {
+          costEl.textContent = `${item.cost}g`;
+          costEl.style.color = canBuy ? '#ffcc44' : '#aa4444';
+        }
+      }
+    }
   }
 
   close(): void {

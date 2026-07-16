@@ -91,6 +91,7 @@ export type Command =
   | { type: 'fire'; aimX: number; aimZ: number }
   | { type: 'ward' }
   | { type: 'buy'; itemIndex: number }
+  | { type: 'useItem'; slot: number }
   | { type: 'levelAbility'; ability: 'arrow' | 'dodge' }
   | { type: 'dodge' };
 

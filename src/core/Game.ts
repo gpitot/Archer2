@@ -351,16 +351,21 @@ export class Game {
     // ── Input ──
     this._input = new InputManager(this._renderer.domElement, this._camera.camera);
     this._input.setGround(this._terrain.mesh);
-    this._input.onScroll((deltaY) => this._camera.zoom(deltaY * 0.6));
-
     this._input.onClick((pos) => {
-      // If click near shop, open shop instead of moving
+      // If click near shop and hero is also near shop, open the shop window.
+      // If click near shop but hero is far, move hero near the shop first.
       const shopWPt = this._world.shop.pos;
-      const dx = pos.x - shopWPt.x;
-      const dz = pos.z - shopWPt.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist < this._world.shop.interactRadius) {
-        this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory);
+      const heroDist = Math.hypot(this._playerState.pos.x - shopWPt.x, this._playerState.pos.z - shopWPt.z);
+      const clickDist = Math.hypot(pos.x - shopWPt.x, pos.z - shopWPt.z);
+      if (clickDist < this._world.shop.interactRadius) {
+        if (heroDist <= this._world.shop.interactRadius) {
+          this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory);
+          return;
+        }
+        // Hero is far — walk to a walkable spot near the shop, then open.
+        const nearShop = this._findWalkableNear(shopWPt.x, shopWPt.z);
+        this._enqueueCommand({ type: 'moveTo', x: nearShop.x, z: nearShop.z });
+        this._moveIndicators.spawn(new THREE.Vector3(nearShop.x, this._heightAt(nearShop.x, nearShop.z), nearShop.z));
         return;
       }
       this._enqueueCommand({ type: 'moveTo', x: pos.x, z: pos.z });
@@ -407,12 +412,14 @@ export class Game {
     // Space — re-center camera
     this._input.onKeyDown('Space', () => { this._cameraLocked = true; });
 
-    // Number keys 1–6 for quick buy
+    // Number keys 1–6: buy from shop when open, or use item in that slot
     for (let i = 1; i <= 6; i++) {
       this._input.onKeyDown(`Digit${i}`, () => {
         if (this._shopWindow.visible) {
           this._enqueueCommand({ type: 'buy', itemIndex: i - 1 });
           this._shopWindow.close();
+        } else {
+          this._enqueueCommand({ type: 'useItem', slot: i - 1 });
         }
       });
     }
@@ -1201,9 +1208,10 @@ export class Game {
         break;
       }
       case 'fire': {
-        // Muzzle flash on the shooter's view
+        // Muzzle flash + bow-release gesture on the shooter's view
         const shooterView = this._heroViews.get(ev.heroId);
         shooterView?.flashFire();
+        shooterView?.playShoot();
         break;
       }
       case 'kill':
@@ -1350,6 +1358,12 @@ export class Game {
       this._shopOverlay.show(SHOP_ITEMS as ShopItem[]);
     } else {
       this._shopOverlay.hide();
+      // Auto-close shop window if hero walks away from shop
+      if (this._shopWindow.visible) this._shopWindow.close();
+    }
+    // Refresh shop window while it's open so gold/inventory changes are reflected
+    if (this._shopWindow.visible) {
+      this._shopWindow.refresh(this._playerState.gold, this._playerState.inventory);
     }
   }
 

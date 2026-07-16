@@ -89,40 +89,42 @@ export function buildArcherMesh(teamColor?: number): THREE.Group {
   const tunic = teamColor != null ? blendColor(C.tunic, teamColor, 0.55) : C.tunic;
   const cape  = teamColor != null ? blendColor(C.cape,  teamColor, 0.55) : C.cape;
 
-  // ── Boots ──
+  // ── Legs (each leg is a group pivoted at the hip so it can swing) ──
   const bootH = 0.22;
   const bootR = 0.1;
   const footOffset = 0.1;
-  const lBoot = cyl(bootR, bootR * 0.85, bootH, 8, C.darkBrown);
-  lBoot.position.set(-footOffset, bootH / 2, 0);
-  root.add(lBoot);
-  const rBoot = cyl(bootR, bootR * 0.85, bootH, 8, C.darkBrown);
-  rBoot.position.set(footOffset, bootH / 2, 0);
-  root.add(rBoot);
-
-  // ── Legs ──
   const legLowerH = 0.35;
   const legUpperH = 0.35;
   const legR = 0.09;
   const legY0 = bootH;
-
-  const lLegL = cyl(legR * 0.95, legR, legLowerH, 8, C.pants);
-  lLegL.position.set(-footOffset, legY0 + legLowerH / 2, 0);
-  root.add(lLegL);
-  const rLegL = cyl(legR * 0.95, legR, legLowerH, 8, C.pants);
-  rLegL.position.set(footOffset, legY0 + legLowerH / 2, 0);
-  root.add(rLegL);
-
   const thighY0 = legY0 + legLowerH;
-  const lThigh = cyl(legR, legR * 0.9, legUpperH, 8, C.pants);
-  lThigh.position.set(-footOffset, thighY0 + legUpperH / 2, 0);
-  root.add(lThigh);
-  const rThigh = cyl(legR, legR * 0.9, legUpperH, 8, C.pants);
-  rThigh.position.set(footOffset, thighY0 + legUpperH / 2, 0);
-  root.add(rThigh);
+  const hipY = thighY0 + legUpperH;
+
+  function buildLeg(name: string, side: -1 | 1): THREE.Group {
+    const leg = new THREE.Group();
+    leg.name = name;
+    leg.position.set(side * footOffset, hipY, 0);
+
+    const boot = cyl(bootR, bootR * 0.85, bootH, 8, C.darkBrown);
+    boot.position.y = bootH / 2 - hipY;
+    leg.add(boot);
+
+    const lower = cyl(legR * 0.95, legR, legLowerH, 8, C.pants);
+    lower.position.y = legY0 + legLowerH / 2 - hipY;
+    leg.add(lower);
+
+    const thigh = cyl(legR, legR * 0.9, legUpperH, 8, C.pants);
+    thigh.position.y = thighY0 + legUpperH / 2 - hipY;
+    leg.add(thigh);
+
+    return leg;
+  }
+
+  root.add(buildLeg('legL', -1));
+  root.add(buildLeg('legR', 1));
 
   // ── Pelvis ──
-  const pelvisY = thighY0 + legUpperH;
+  const pelvisY = hipY;
   const pelvis = cyl(0.14, 0.13, 0.10, 8, C.pants);
   pelvis.position.y = pelvisY + 0.05;
   root.add(pelvis);
@@ -186,44 +188,56 @@ export function buildArcherMesh(teamColor?: number): THREE.Group {
   rTuft.rotation.z = -0.5;
   root.add(rTuft);
 
-  // ── Arms ──
+  // ── Arms (each arm is a group pivoted at the shoulder so it can swing) ──
   const shoulderY = torsoY0 + torsoH - 0.06;
   const shoulderX = 0.20;
   const upperArmLen = 0.32;
   const forearmLen = 0.30;
 
   // Left arm (bow arm — slightly forward)
+  const armL = new THREE.Group();
+  armL.name = 'armL';
+  armL.position.set(-shoulderX, shoulderY, 0);
+
   const lUpper = cyl(0.06, 0.055, upperArmLen, 8, tunic);
-  lUpper.position.set(-shoulderX, shoulderY - upperArmLen / 2, 0.04);
+  lUpper.position.set(0, -upperArmLen / 2, 0.04);
   lUpper.rotation.z = 0.45;
   lUpper.rotation.x = -0.15;
-  root.add(lUpper);
+  armL.add(lUpper);
 
   const lForearm = cyl(0.065, 0.06, forearmLen, 8, C.darkBrown); // bracer
-  lForearm.position.set(-shoulderX - 0.22, shoulderY - upperArmLen - forearmLen / 2 + 0.03, 0.08);
+  lForearm.position.set(-0.22, -upperArmLen - forearmLen / 2 + 0.03, 0.08);
   lForearm.rotation.z = 0.15;
-  root.add(lForearm);
+  armL.add(lForearm);
 
   const lHand = sphere(0.06, 6, C.skin);
-  lHand.position.set(-shoulderX - 0.27, shoulderY - upperArmLen - forearmLen + 0.06, 0.09);
+  lHand.position.set(-0.27, -upperArmLen - forearmLen + 0.06, 0.09);
   lHand.name = 'leftHand';
-  root.add(lHand);
+  armL.add(lHand);
+
+  root.add(armL);
 
   // Right arm (draw arm)
+  const armR = new THREE.Group();
+  armR.name = 'armR';
+  armR.position.set(shoulderX, shoulderY, 0);
+
   const rUpper = cyl(0.06, 0.055, upperArmLen, 8, tunic);
-  rUpper.position.set(shoulderX, shoulderY - upperArmLen / 2, -0.02);
+  rUpper.position.set(0, -upperArmLen / 2, -0.02);
   rUpper.rotation.z = -0.35;
-  root.add(rUpper);
+  armR.add(rUpper);
 
   const rForearm = cyl(0.065, 0.06, forearmLen, 8, C.darkBrown); // bracer
-  rForearm.position.set(shoulderX + 0.18, shoulderY - upperArmLen - forearmLen / 2 + 0.02, -0.01);
+  rForearm.position.set(0.18, -upperArmLen - forearmLen / 2 + 0.02, -0.01);
   rForearm.rotation.z = -0.1;
-  root.add(rForearm);
+  armR.add(rForearm);
 
   const rHand = sphere(0.06, 6, C.skin);
-  rHand.position.set(shoulderX + 0.22, shoulderY - upperArmLen - forearmLen + 0.05, 0.0);
+  rHand.position.set(0.22, -upperArmLen - forearmLen + 0.05, 0.0);
   rHand.name = 'rightHand';
-  root.add(rHand);
+  armR.add(rHand);
+
+  root.add(armR);
 
   // ── Hood / Cape ──
   const collarY = neckY + 0.02;
@@ -310,12 +324,12 @@ export function buildArcherMesh(teamColor?: number): THREE.Group {
   const stringMesh = tube(stringPts, 0.008, 4, 0xD0D0C0);
   bowGroup.add(stringMesh);
 
-  // Position bow at left hand
+  // Position bow at left hand (inside the arm group so it swings with it)
   const lHandPos = lHand.position.clone();
   bowGroup.position.copy(lHandPos).add(new THREE.Vector3(0.02, -0.02, 0.05));
   bowGroup.rotation.set(0.1, 0, -0.15);
   bowGroup.name = 'bow';
-  root.add(bowGroup);
+  armL.add(bowGroup);
 
   return root;
 }

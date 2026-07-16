@@ -89,6 +89,9 @@ function applyCommand(
     case 'buy':
       buy(hero, cmd.itemIndex, world, events);
       break;
+    case 'useItem':
+      useItem(hero, cmd.slot, state, events);
+      break;
     case 'levelAbility':
       spendSkillPoint(hero, cmd.ability);
       break;
@@ -179,6 +182,23 @@ function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]
   hero.gold -= item.cost;
   item.apply(hero);
   events.push({ type: 'purchase', heroId: hero.id, itemId: item.id });
+}
+
+/** Use the item in a specific inventory slot (hotkey 1–6). */
+function useItem(hero: HeroState, slot: number, state: MatchState, events: SimEvent[]): void {
+  if (!hero.alive) return;
+  if (slot < 0 || slot >= hero.inventory.length) return;
+  const itemId = hero.inventory[slot];
+  if (!itemId) return;
+
+  switch (itemId) {
+    case 'sentry_wards':
+      placeWard(state, hero);
+      break;
+    default:
+      // Passive items (e.g. boots) — nothing to do.
+      break;
+  }
 }
 
 function spendSkillPoint(hero: HeroState, ability: 'arrow' | 'dodge'): void {
