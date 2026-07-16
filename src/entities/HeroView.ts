@@ -2,41 +2,9 @@ import * as THREE from 'three';
 import { HeroState } from '../sim/state';
 import { HERO } from '../sim/rules';
 import { HealthBar } from './HealthBar';
+import { buildArcherMesh } from './ArcherMesh';
 
-const MESH_SCALE = 60;
-
-/** Build a flat disc + facing triangle + shadow for the hero. */
-function buildHeroCircle(radius: number, color: number): THREE.Group {
-  const group = new THREE.Group();
-
-  const bodyGeo = new THREE.CylinderGeometry(radius, radius, 0.15, 24);
-  const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.name = 'heroBody';
-  group.add(body);
-
-  const triShape = new THREE.Shape();
-  triShape.moveTo(0, -radius * 1.2);
-  triShape.lineTo(-radius * 0.35, -radius * 0.5);
-  triShape.lineTo(radius * 0.35, -radius * 0.5);
-  triShape.closePath();
-  const triGeo = new THREE.ShapeGeometry(triShape);
-  const triMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, side: THREE.DoubleSide });
-  const tri = new THREE.Mesh(triGeo, triMat);
-  tri.rotation.x = -Math.PI / 2;
-  tri.position.y = 0.08;
-  tri.name = 'heroFacing';
-  group.add(tri);
-
-  const shadowGeo = new THREE.CylinderGeometry(radius * 0.9, radius * 0.9, 0.05, 24);
-  const shadowMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 1, transparent: true, opacity: 0.25 });
-  const shadow = new THREE.Mesh(shadowGeo, shadowMat);
-  shadow.position.y = -0.1;
-  shadow.name = 'heroShadow';
-  group.add(shadow);
-
-  return group;
-}
+const MESH_SCALE = 52.5;
 
 /**
  * Render-only view of a hero. Owns the Three.js mesh, health bar, and the
@@ -59,16 +27,26 @@ export class HeroView {
     private _heightAt: (x: number, z: number) => number,
   ) {
     this.heroId = heroId;
-    this.mesh = buildHeroCircle(0.45, color);
+    this.mesh = buildArcherMesh(color);
     this.mesh.scale.setScalar(MESH_SCALE);
     this._bodyMat = (this.mesh.getObjectByName('heroBody') as THREE.Mesh).material as THREE.MeshStandardMaterial;
 
+    // Hitbox ring at feet
+    const ringGeo = new THREE.TorusGeometry(HERO.bodyRadius / MESH_SCALE, 0.08, 8, 64);
+    const ringMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.25, depthTest: false });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.05;
+    ring.renderOrder = 0;
+    this.mesh.add(ring);
+
     this._healthBar = new HealthBar(HERO.maxHp);
+    this._healthBar.sprite.position.set(0, 2.5, 0); // above archer's head
     this.mesh.add(this._healthBar.sprite);
 
     // Muzzle-flash glow, pulsed on fire.
     this._flashGlow = new THREE.PointLight(0xff6600, 0, 5);
-    this._flashGlow.position.set(0, 0.7, 0);
+    this._flashGlow.position.set(0, 1.5, 0);
     this.mesh.add(this._flashGlow);
   }
 
@@ -113,6 +91,15 @@ export class HeroView {
     } else if (this._bodyMat.transparent) {
       this._bodyMat.transparent = false;
       this._bodyMat.opacity = 1;
+    }
+
+    // Dodge visual — purple tint while dodging
+    if (state.dodgeActive) {
+      this._bodyMat.emissive?.set(0x8833cc);
+      this._bodyMat.emissiveIntensity = 0.7;
+    } else if (!state.invulnerable && this._hitFlashTimer <= 0) {
+      this._bodyMat.emissive?.set(0x000000);
+      this._bodyMat.emissiveIntensity = 0;
     }
 
     // Decay the cosmetic flashes.

@@ -23,9 +23,14 @@ export class SpellBar {
       pointer-events: none;
     `;
 
-    const keys = ['Q', 'W', 'E', 'R'] as const;
-    for (const key of keys) {
-      const slot = new SpellSlot(key);
+    const keys: { key: string; active: boolean }[] = [
+      { key: 'Q', active: true },
+      { key: 'W', active: true },
+      { key: 'E', active: false },
+      { key: 'R', active: false },
+    ];
+    for (const { key, active } of keys) {
+      const slot = new SpellSlot(key, active);
       this._slots.push(slot);
       this.container.appendChild(slot.el);
     }
@@ -34,10 +39,26 @@ export class SpellBar {
   }
 
   /** Update cooldown, level, and skill points. */
-  update(cooldownProgress: number, abilityLevel: number, skillPoints: number): void {
+  update(
+    cooldownProgress: number,
+    abilityLevel: number,
+    skillPoints: number,
+    dodgeCooldownProgress: number,
+    dodgeLevel: number,
+  ): void {
+    // Q — Arrow
+    const qOnCd = cooldownProgress < 1;
     this._slots[0].setCooldown(cooldownProgress);
     this._slots[0].setLevel(abilityLevel);
     this._slots[0].setCanLevel(skillPoints > 0 && abilityLevel < 4);
+    this._slots[0].setOnCooldown(qOnCd);
+
+    // W — Dodge
+    const wOnCd = dodgeCooldownProgress < 1;
+    this._slots[1].setCooldown(dodgeCooldownProgress);
+    this._slots[1].setLevel(dodgeLevel);
+    this._slots[1].setCanLevel(skillPoints > 0 && dodgeLevel < 4);
+    this._slots[1].setOnCooldown(wOnCd);
   }
 
   destroy(): void {
@@ -50,18 +71,19 @@ class SpellSlot {
   private _cooldown: HTMLDivElement;
   private _keyLabel: HTMLDivElement;
   private _levelDots: HTMLDivElement;
+  private _isActive: boolean;
 
-  constructor(key: string) {
+  constructor(key: string, active: boolean) {
     const size = 56;
-    const isActive = key === 'Q';
+    this._isActive = active;
 
     this.el = document.createElement('div');
     this.el.style.cssText = `
       width: ${size}px;
       height: ${size}px;
-      border: 2px solid ${isActive ? 'rgba(180,160,100,0.8)' : 'rgba(80,80,80,0.5)'};
+      border: 2px solid ${this._isActive ? 'rgba(180,160,100,0.8)' : 'rgba(80,80,80,0.5)'};
       border-radius: 4px;
-      background: ${isActive ? 'rgba(20,18,10,0.85)' : 'rgba(20,20,20,0.7)'};
+      background: ${this._isActive ? 'rgba(20,18,10,0.85)' : 'rgba(20,20,20,0.7)'};
       position: relative;
       overflow: hidden;
     `;
@@ -75,13 +97,13 @@ class SpellSlot {
       align-items: center;
       justify-content: center;
       font-size: 20px;
-      color: ${isActive ? '#cc9944' : '#444'};
+      color: ${this._isActive ? '#cc9944' : '#444'};
       opacity: 0.6;
     `;
-    icon.textContent = key === 'Q' ? '➹' : '·';
+    icon.textContent = key === 'Q' ? '➹' : key === 'W' ? '↯' : '·';
     this.el.appendChild(icon);
 
-    // Cooldown overlay
+    // Cooldown overlay (sweeps from top to bottom, WC3-style blue tint)
     this._cooldown = document.createElement('div');
     this._cooldown.style.cssText = `
       position: absolute;
@@ -89,7 +111,7 @@ class SpellSlot {
       left: 0;
       right: 0;
       height: 0%;
-      background: rgba(0,0,0,0.65);
+      background: rgba(15,22,40,0.78);
       transition: none;
       pointer-events: none;
     `;
@@ -104,7 +126,7 @@ class SpellSlot {
       font-family: sans-serif;
       font-size: 11px;
       font-weight: bold;
-      color: ${isActive ? '#cc9944' : '#555'};
+      color: ${this._isActive ? '#cc9944' : '#555'};
       text-shadow: 0 0 4px rgba(0,0,0,0.8);
     `;
     this._keyLabel.textContent = key;
@@ -126,7 +148,7 @@ class SpellSlot {
         width: 5px;
         height: 5px;
         border-radius: 1px;
-        background: ${isActive ? '#888' : '#333'};
+        background: ${this._isActive ? '#888' : '#333'};
       `;
       this._levelDots.appendChild(dot);
     }
@@ -136,6 +158,20 @@ class SpellSlot {
   setCooldown(progress: number): void {
     const pct = Math.round((1 - progress) * 100);
     this._cooldown.style.height = `${pct}%`;
+  }
+
+  /** Mute the border, glow, and key label when on cooldown. */
+  setOnCooldown(onCd: boolean): void {
+    if (!this._isActive) return;
+    if (onCd) {
+      this.el.style.borderColor = 'rgba(55,55,65,0.55)';
+      this.el.style.boxShadow = 'none';
+      this._keyLabel.style.color = '#666';
+    } else {
+      this.el.style.borderColor = 'rgba(180,160,100,0.8)';
+      this.el.style.boxShadow = 'none';
+      this._keyLabel.style.color = '#cc9944';
+    }
   }
 
   /** Highlight dots up to `level` (0 = none, 1–4 = filled). */

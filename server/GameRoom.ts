@@ -26,7 +26,7 @@ import {
 } from '../src/sim/protocol';
 
 // ── Compact navdata (auto-generated) ─────────────────────────────────
-import { NAVDATA } from './navdata';
+import { NAVDATA, NavdataMapName } from './navdata';
 
 // ── Env interface for the DO ─────────────────────────────────────────
 export interface Env {
@@ -55,6 +55,7 @@ const q4 = (n: number) => Math.round(n * 10000) / 10000;
 
 export class GameRoom extends DurableObject<Env> {
   private _world!: SimWorld;
+  private _mapName: NavdataMapName = 'arena';
   private _state!: MatchState;
   private _tickTimer: ReturnType<typeof setInterval> | null = null;
   private _pendingInputs: HeroInput[] = [];
@@ -69,7 +70,7 @@ export class GameRoom extends DurableObject<Env> {
    */
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this._buildWorld();
+    this._buildWorld('arena');
     this._state = createMatchState();
   }
 
@@ -106,6 +107,17 @@ export class GameRoom extends DurableObject<Env> {
           ws.close(1013, 'room full');
           return;
         }
+        // The first joiner picks the room's map; later joiners must match.
+        const requestedMap: NavdataMapName = msg.map === 'test' ? 'test' : 'arena';
+        if (this._players.size === 0) {
+          if (requestedMap !== this._mapName) {
+            this._buildWorld(requestedMap);
+            this._state = createMatchState();
+          }
+        } else if (requestedMap !== this._mapName) {
+          ws.close(1013, `room is on map '${this._mapName}'`);
+          return;
+        }
         const playerId = `p${this._nextPlayerId++}`;
         const info: PlayerInfo = { playerId, name: msg.name };
         this._players.set(ws, info);
@@ -129,6 +141,7 @@ export class GameRoom extends DurableObject<Env> {
           type: 'welcome',
           playerId,
           tickRate: TICK_RATE,
+          map: this._mapName,
           snapshot: this._currentSnapshot(),
           meta: this._heroMetas(),
         };
@@ -270,6 +283,10 @@ export class GameRoom extends DurableObject<Env> {
       wardCharges: h.wardCharges,
       abilityLevel: h.abilityLevel,
       abilityCooldown: q(h.abilityCooldown),
+      dodgeActive: h.dodgeActive,
+      dodgeTimer: q(h.dodgeTimer),
+      dodgeCooldown: q(h.dodgeCooldown),
+      dodgeLevel: h.dodgeLevel,
     }));
   }
 
@@ -284,13 +301,13 @@ export class GameRoom extends DurableObject<Env> {
 
   // ── World construction (compact navdata) ──────────────────────────
 
-  private _buildWorld(): void {
-    const ng = NAVDATA.navGrid;
+  private _buildWorld(mapName: NavdataMapName): void {
+    const data = NAVDATA[mapName];
+    const ng = data.navGrid;
 
     // Decode bit-packed walkable cells.
     const cellsBase64 = ng.cellsBase64;
     const bytes = Uint8Array.from(atob(cellsBase64), (c) => c.charCodeAt(0));
-    const numCells = ng.width * ng.height;
 
     const navGrid = new NavGrid(ng.width, ng.height, ng.cellSize, ng.originX, ng.originZ);
     // Navdata stores cells south-to-north (WPM order); NavGrid stores north-to-south.
@@ -305,18 +322,19 @@ export class GameRoom extends DurableObject<Env> {
     const pathfinder = new Pathfinder(navGrid);
 
     // Obstacles.
-    const obstacles: ObstacleAABB[] = NAVDATA.obstacles.map((o) => ({ ...o }));
+    const obstacles: ObstacleAABB[] = data.obstacles.map((o) => ({ ...o }));
 
     // Arena.
-    const arena: Rect = { ...NAVDATA.arenas.terrain1 };
+    const arena: Rect = { ...data.arena };
 
     // Shop.
     const shop: Shop = {
-      pos: { x: NAVDATA.shopPos.x, z: NAVDATA.shopPos.z },
+      pos: { x: data.shopPos.x, z: data.shopPos.z },
       interactRadius: 120,
       items: SHOP_ITEMS,
     };
 
+    this._mapName = mapName;
     this._world = { navGrid, pathfinder, obstacles, arena, shop };
   }
 }

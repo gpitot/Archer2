@@ -13,6 +13,13 @@ export const TREE_TYPE_IDS: ReadonlySet<string> = new Set(['ATtr', 'LTlt', 'YTpb
 /** Half-extent of an unscaled tree footprint, world units (matches the tree AABB). */
 export const TREE_HALF_EXTENT = 48;
 
+/**
+ * Half-extent of a tree's *sight-blocking* footprint. Narrower than the
+ * pathing footprint so a lone tree shadows roughly its visual canopy width
+ * instead of a multi-cell wall of fog.
+ */
+export const TREE_SIGHT_HALF_EXTENT = 32;
+
 /** World-space (XZ) footprint of one tree. */
 export interface TreeFootprint {
   x: number;

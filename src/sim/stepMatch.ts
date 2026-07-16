@@ -12,6 +12,7 @@ import * as V from './math';
 import {
   ARROW,
   BOUNTY_TABLE,
+  DODGE,
   HERO,
   KILL_GOLD,
   KILL_XP_TABLE,
@@ -89,7 +90,10 @@ function applyCommand(
       buy(hero, cmd.itemIndex, world, events);
       break;
     case 'levelAbility':
-      spendSkillPoint(hero);
+      spendSkillPoint(hero, cmd.ability);
+      break;
+    case 'dodge':
+      activateDodge(hero);
       break;
   }
 }
@@ -177,10 +181,21 @@ function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]
   events.push({ type: 'purchase', heroId: hero.id, itemId: item.id });
 }
 
-function spendSkillPoint(hero: HeroState): void {
-  if (hero.skillPoints <= 0 || hero.abilityLevel >= ARROW.maxLevel) return;
+function spendSkillPoint(hero: HeroState, ability: 'arrow' | 'dodge'): void {
+  if (hero.skillPoints <= 0) return;
+  if (ability === 'arrow' && hero.abilityLevel >= ARROW.maxLevel) return;
+  if (ability === 'dodge' && hero.dodgeLevel >= DODGE.maxLevel) return;
   hero.skillPoints--;
-  hero.abilityLevel++;
+  if (ability === 'arrow') hero.abilityLevel++;
+  else hero.dodgeLevel++;
+}
+
+function activateDodge(hero: HeroState): void {
+  if (!hero.alive) return;
+  if (hero.dodgeActive || hero.dodgeCooldown > 0 || hero.dodgeLevel < 1) return;
+  hero.dodgeActive = true;
+  hero.dodgeTimer = DODGE.durationByLevel[hero.dodgeLevel];
+  hero.dodgeCooldown = DODGE.cooldownByLevel[hero.dodgeLevel];
 }
 
 // ── Hero step ─────────────────────────────────────────────────────────
@@ -198,6 +213,15 @@ function stepHero(hero: HeroState, dt: number): void {
 
   if (hero.abilityCooldown > 0) {
     hero.abilityCooldown = Math.max(0, hero.abilityCooldown - dt);
+  }
+
+  if (hero.dodgeActive) {
+    hero.dodgeTimer -= dt;
+    if (hero.dodgeTimer <= 0) hero.dodgeActive = false;
+  }
+
+  if (hero.dodgeCooldown > 0) {
+    hero.dodgeCooldown = Math.max(0, hero.dodgeCooldown - dt);
   }
 
   if (hero.invulnerable) {
@@ -295,6 +319,7 @@ function hitHero(state: MatchState, p: ProjectileState): HeroState | null {
   for (const hero of state.heroes) {
     if (hero.id === p.ownerId) continue;
     if (!hero.alive || hero.invulnerable) continue;
+    if (hero.dodgeActive) continue; // pass through dodging heroes
     if (V.distanceSq(p.pos, hero.pos) < r2) return hero;
   }
   return null;

@@ -5,7 +5,9 @@
  *  - rolling terrain on the same cliff layer never blocks vision
  *  - tree lines hide what's behind them, but a hugged tree's cells show
  *  - visible cells decay to explored; wards grant remote vision
- *  - sight radii match WC3 (hero 1800 day, observer ward 1600)
+ *  - ramps: from the base most of the ramp is lit and the plateau is dark;
+ *    a hero gains high-ground vision near the crest (WC3-style)
+ *  - an isolated tree casts a narrow shadow (footprint ≤ 2 cells per axis)
  *
  * Usage: pnpm tsx scripts/test-fog.ts
  */
@@ -13,6 +15,7 @@ import { chromium } from 'playwright';
 import { createServer } from 'vite';
 import { resolve } from 'path';
 import { HERO, WARD } from '../src/sim/rules';
+import { FLAG_RAMP, TILE_SIZE } from '../src/world/wc3/W3EParser';
 
 const ROOT = resolve(import.meta.dirname, '..');
 
@@ -23,8 +26,10 @@ function check(name: string, ok: boolean): void {
 }
 
 async function main() {
-  check('HERO.sightRadius is WC3 daytime 1800', HERO.sightRadius === 1800);
-  check('WARD.sightRadius is WC3 observer ward 1600', WARD.sightRadius === 1600);
+  // Sight radii are gameplay tuning (WC3 defaults: hero 1800 day, ward 1600);
+  // log them and derive test distances from the live values.
+  console.log(`HERO.sightRadius=${HERO.sightRadius} WARD.sightRadius=${WARD.sightRadius}`);
+  check('sight radii are sane', HERO.sightRadius >= 400 && WARD.sightRadius >= 400);
 
   const server = await createServer({ root: ROOT, server: { port: 4176 } });
   await server.listen();
@@ -148,7 +153,7 @@ async function main() {
   }
 
   // ── 3. Same-layer rolling ground never blocks ──
-  const rolling = await page.evaluate(() => {
+  const rolling = await page.evaluate((lineLen) => {
     const g = (window as any).__game;
     const fog = g._fog;
     const nav = g._navGrid;
@@ -157,8 +162,9 @@ async function main() {
       const c = nav.worldToGrid(x, z);
       return nav.isWalkable(c.gx, c.gz);
     };
-    // Find a walkable source and a clear same-layer cell line 1200-1600u long
-    // with the biggest terrain bump along it (proves noise doesn't block).
+    // Find a walkable source and a clear same-layer cell line ~80% of the
+    // sight radius long with the biggest terrain bump along it (proves noise
+    // doesn't block).
     let best: any = null;
     for (let cz = 2; cz < fog.cellsZ - 2; cz += 4) {
       for (let cx = 2; cx < fog.cellsX - 2; cx += 4) {
@@ -167,7 +173,7 @@ async function main() {
         if (!walkable(wx, wz)) continue;
         const L = fog._cellLayer[cz * fog.cellsX + cx];
         for (const [dx, dz] of [[1, 0], [0, 1], [1, 1]]) {
-          const n = Math.floor(1400 / cs / Math.hypot(dx, dz));
+          const n = Math.floor(lineLen / cs / Math.hypot(dx, dz));
           const tx = cx + dx * n;
           const tz = cz + dz * n;
           if (tx >= fog.cellsX - 1 || tz >= fog.cellsZ - 1) continue;
@@ -206,7 +212,7 @@ async function main() {
       best.src.x, g._terrain.heightAt(best.src.x, best.src.z) + 0.5, best.src.z);
     fog.recomputeNow();
     return { ...best, visible: fog.isVisible(0, best.dst.x, best.dst.z) };
-  });
+  }, HERO.sightRadius * 0.8);
   console.log('\n=== Same-layer rolling ground ===');
   console.log(rolling);
   check('found a clear same-layer sight line', rolling !== null);
@@ -332,7 +338,172 @@ async function main() {
     check('warded area stays visible without the hero nearby', wards.wardSpotVisible);
   }
 
-  // ── 6. Screenshot for visual inspection ──
+  // ── 6. Ramp vision: base sees up the ramp; high vision gained near crest ──
+  const ramp = await page.evaluate(({ FLAG_RAMP, TILE_SIZE }) => {
+    const g = (window as any).__game;
+    const T = g._map.terrain;
+    const fog = g._fog;
+    const nav = g._navGrid;
+    const a = g._arena;
+    const walkable = (x: number, z: number) => {
+      const c = nav.worldToGrid(x, z);
+      return nav.isWalkable(c.gx, c.gz);
+    };
+    const tp = (x: number, z: number) => {
+      const hs = g._playerState;
+      hs.pos.x = x; hs.pos.z = z;
+      g._heroViews.get(hs.id).mesh.position.set(x, g._terrain.heightAt(x, z) + 0.5, z);
+    };
+
+    // Find a ramp tile with walkable, path-connected low/high approaches
+    // (same pattern as test-terrain.ts).
+    const iA = Math.floor((a.minX - T.offsetX) / TILE_SIZE);
+    const iB = Math.floor((a.maxX - T.offsetX) / TILE_SIZE);
+    const jA = Math.floor((-a.maxZ - T.offsetY) / TILE_SIZE);
+    const jB = Math.floor((-a.minZ - T.offsetY) / TILE_SIZE);
+    let pick: any = null;
+    for (let j = jA; j <= jB && !pick; j++) {
+      for (let i = iA; i <= iB && !pick; i++) {
+        const kSW = j * T.width + i;
+        const ks = [kSW, kSW + 1, kSW + T.width + 1, kSW + T.width];
+        const layers = ks.map((k: number) => T.layer[k]);
+        const minL = Math.min(...layers);
+        const maxL = Math.max(...layers);
+        const ramps = ks.filter((k: number) => (T.flags[k] & FLAG_RAMP) !== 0).length;
+        if (minL === maxL || ramps < 2) continue;
+        const cx = T.offsetX + (i + 0.5) * TILE_SIZE;
+        const cz = -(T.offsetY + (j + 0.5) * TILE_SIZE);
+        const probes: { x: number; z: number }[] = [];
+        for (const [dx, dz] of [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5],
+                                [2.5, 0], [-2.5, 0], [0, 2.5], [0, -2.5]]) {
+          probes.push({ x: cx + dx * TILE_SIZE, z: cz + dz * TILE_SIZE });
+        }
+        const lo = probes.find((p) => walkable(p.x, p.z) && g._terrain.layerAt(p.x, p.z) === minL);
+        if (!lo) continue;
+        const loH = g._terrain.heightAt(lo.x, lo.z);
+        const hi = probes.find((p) =>
+          walkable(p.x, p.z) &&
+          g._terrain.layerAt(p.x, p.z) === maxL &&
+          g._terrain.heightAt(p.x, p.z) - loH >= 90);
+        if (!hi) continue;
+        const path = g._world.pathfinder.findSmoothedPath(lo.x, lo.z, hi.x, hi.z);
+        if (path && path.length > 1) pick = { lo, hi, mid: { x: cx, z: cz }, maxL };
+      }
+    }
+    if (!pick) return null;
+
+    // From the base: the ramp's own middle is lit, the plateau past it dark.
+    tp(pick.lo.x, pick.lo.z);
+    fog.recomputeNow();
+    const fromBase = {
+      midRampVisible: fog.isVisible(0, pick.mid.x, pick.mid.z),
+      plateauVisible: fog.isVisible(0, pick.hi.x, pick.hi.z),
+    };
+
+    // Walk the path to the first point whose *vision* layer is the upper one
+    // (the crest threshold); from there the plateau must be lit.
+    const path = g._world.pathfinder.findSmoothedPath(pick.lo.x, pick.lo.z, pick.hi.x, pick.hi.z);
+    let crest: { x: number; z: number } | null = null;
+    outer:
+    for (let s = 1; s < path.length; s++) {
+      const ax = path[s - 1].wx; const az = path[s - 1].wz;
+      const bx = path[s].wx; const bz = path[s].wz;
+      const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 8));
+      for (let q = 1; q <= n; q++) {
+        const x = ax + ((bx - ax) * q) / n;
+        const z = az + ((bz - az) * q) / n;
+        if (g._terrain.visionLayerAt(x, z) === pick.maxL) { crest = { x, z }; break outer; }
+      }
+    }
+    if (!crest) return { fromBase, crest: null };
+    tp(crest.x, crest.z);
+    fog.recomputeNow();
+    return {
+      fromBase,
+      crest: {
+        distToPlateauProbe: Math.hypot(crest.x - pick.hi.x, crest.z - pick.hi.z),
+        plateauVisible: fog.isVisible(0, pick.hi.x, pick.hi.z),
+      },
+    };
+  }, { FLAG_RAMP, TILE_SIZE });
+  console.log('\n=== Ramp vision ===');
+  console.log(JSON.stringify(ramp, null, 2));
+  check('found a walkable ramp with low/high approaches', ramp !== null);
+  if (ramp) {
+    check('mid-ramp is visible from the base', ramp.fromBase.midRampVisible);
+    check('plateau past the ramp is hidden from the base', !ramp.fromBase.plateauVisible);
+    check('vision layer flips to upper before the top (crest found)', ramp.crest !== null);
+    if (ramp.crest) {
+      check('plateau visible once the hero crests the ramp', ramp.crest.plateauVisible);
+    }
+  }
+
+  // ── 7. Isolated tree: small footprint, narrow shadow ──
+  const lone = await page.evaluate(() => {
+    const g = (window as any).__game;
+    const fog = g._fog;
+    const nav = g._navGrid;
+    const cs = fog.cellSize;
+    const W = fog.cellsX;
+    const walkable = (x: number, z: number) => {
+      const c = nav.worldToGrid(x, z);
+      return nav.isWalkable(c.gx, c.gz);
+    };
+    const cellW = (cx: number, cz: number) => ({
+      x: fog.originX + (cx + 0.5) * cs,
+      z: fog.originZ + (cz + 0.5) * cs,
+    });
+
+    // Find a blocked cluster fitting in 2×2 cells whose 13×13 neighborhood is
+    // otherwise clear and on one layer, with walkable ground 5 cells west.
+    for (let cz = 8; cz < fog.cellsZ - 8; cz++) {
+      for (let cx = 8; cx < W - 8; cx++) {
+        if (!fog._blocked[cz * W + cx]) continue;
+        if (fog._blocked[cz * W + cx - 1] || fog._blocked[(cz - 1) * W + cx]) continue;
+        const L = fog._cellLayer[cz * W + cx];
+        let ok = true;
+        let w = 0;
+        let h = 0;
+        for (let dz = -6; dz <= 7 && ok; dz++) {
+          for (let dx = -6; dx <= 7 && ok; dx++) {
+            const b = fog._blocked[(cz + dz) * W + (cx + dx)];
+            const inCluster = dx >= 0 && dx <= 1 && dz >= 0 && dz <= 1;
+            if (b && !inCluster) ok = false;
+            if (fog._cellLayer[(cz + dz) * W + (cx + dx)] !== L) ok = false;
+            if (b && inCluster) { w = Math.max(w, dx + 1); h = Math.max(h, dz + 1); }
+          }
+        }
+        if (!ok) continue;
+        const hero = cellW(cx - 5, cz);
+        if (!walkable(hero.x, hero.z)) continue;
+
+        const hs = g._playerState;
+        hs.pos.x = hero.x; hs.pos.z = hero.z;
+        g._heroViews.get(hs.id).mesh.position.set(
+          hero.x, g._terrain.heightAt(hero.x, hero.z) + 0.5, hero.z);
+        fog.recomputeNow();
+        const behind = cellW(cx + 4, cz);
+        const offA = cellW(cx + 4, cz - 4);
+        const offB = cellW(cx + 4, cz + 4);
+        return {
+          clusterW: w,
+          clusterH: h,
+          behindHidden: !fog.isVisible(0, behind.x, behind.z),
+          offsetsVisible: fog.isVisible(0, offA.x, offA.z) && fog.isVisible(0, offB.x, offB.z),
+        };
+      }
+    }
+    return null;
+  });
+  console.log('\n=== Isolated tree shadow ===');
+  console.log(lone);
+  check('found an isolated tree (blocked cluster ≤ 2×2 cells)', lone !== null);
+  if (lone) {
+    check('cell directly behind the tree is hidden', lone.behindHidden);
+    check('cells offset past the tree stay visible (narrow shadow)', lone.offsetsVisible);
+  }
+
+  // ── 8. Screenshot for visual inspection ──
   await page.evaluate(() => {
     const g = (window as any).__game;
     g._cameraLocked = true;

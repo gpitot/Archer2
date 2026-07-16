@@ -3,7 +3,7 @@ import { MapData } from './wc3/MapData';
 import { DoodadPlacement } from './wc3/DooParser';
 import { isCellWalkable } from './wc3/WpmParser';
 import { ObstacleRegistry } from './ObstacleRegistry';
-import { TREE_HALF_EXTENT } from '../sim/treeFootprints';
+import { TREE_SIGHT_HALF_EXTENT } from '../sim/treeFootprints';
 
 /** Doodad footprint (fog sight blocking and/or projectile collision). */
 export interface SolidDoodad {
@@ -96,8 +96,10 @@ export class Doodads {
 
       const isTree = TREE_STYLES.includes(style);
       if (isTree || (solid && style === 'rock')) {
-        const halfW = (isTree ? TREE_HALF_EXTENT : 40) * d.scaleX;
-        const halfD = (isTree ? TREE_HALF_EXTENT : 40) * d.scaleY;
+        // Trees use their narrower sight extent here: this footprint only
+        // feeds sightBlockers (pathing is stamped from treeFootprints).
+        const halfW = (isTree ? TREE_SIGHT_HALF_EXTENT : 40) * d.scaleX;
+        const halfD = (isTree ? TREE_SIGHT_HALF_EXTENT : 40) * d.scaleY;
         const height = (isTree ? 170 : 50) * d.scaleZ;
         const footprint = { x: wx, z: wz, halfW, halfD, height };
         this.sightBlockers.push(footprint);

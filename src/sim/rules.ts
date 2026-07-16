@@ -7,10 +7,10 @@
 
 // ── Hero ──────────────────────────────────────────────────────────────
 export const HERO = {
-  maxHp: 100,
+  maxHp: 625,
   baseSpeed: 480,
   /** Fog-of-war sight radius (world units) — WC3 hero daytime sight. */
-  sightRadius: 1800,
+  sightRadius: 900,
   /** Collision radius used for projectile hit tests (0.45 × mesh scale of 60). */
   bodyRadius: 27,
   maxLevel: 10,
@@ -48,7 +48,7 @@ export const ARROW = {
   /** Damage per ability level (index 0 = unlearned). */
   damageByLevel: [0, 200, 266, 333, 400],
   /** Max flight range per ability level. */
-  rangeByLevel: [0, 1000, 1666, 2333, 3000],
+  rangeByLevel: [0, 800, 1333, 1866, 2400],
   /** Cooldown per ability level (seconds). */
   cooldownByLevel: [0, 2.25, 2.0, 1.75, 1.5],
   maxLevel: 4,
@@ -59,6 +59,15 @@ export const ARROW = {
   spawnOffset: 48,
   /** Height above terrain the arrow rides (presentation only). */
   flyHeight: 22,
+} as const;
+
+// ── Dodge ability (W) ────────────────────────────────────────────────
+export const DODGE = {
+  /** Dodge window duration per level. */
+  durationByLevel: [0, 0.8, 1.0, 1.25, 1.5],
+  /** Cooldown per level (seconds). */
+  cooldownByLevel: [0, 8, 7, 6, 5],
+  maxLevel: 4,
 } as const;
 
 // ── Wards ─────────────────────────────────────────────────────────────

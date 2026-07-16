@@ -23,6 +23,7 @@ import {
 import { stepMatch } from '../../src/sim/stepMatch';
 import { buildSimWorldFromNavdata } from '../../src/sim/buildWorld';
 import { SimWorld, sphereHitsObstacle, findWalkableNear } from '../../src/sim/world';
+import { buildTestSimWorld } from '../../src/world/testMap';
 import { Vec2 } from '../../src/sim/math';
 import { ARROW } from '../../src/sim/rules';
 
@@ -63,11 +64,16 @@ export class SimHarness {
   private _seed: number;
   private _ticks = 0;
 
-  constructor(opts: { seed?: number } = {}) {
+  constructor(opts: { seed?: number; map?: 'arena' | 'test' } = {}) {
     this._seed = opts.seed ?? 42;
-    const navdataPath = path.resolve(ROOT, 'assets', 'navdata.json');
-    const navdata = JSON.parse(fs.readFileSync(navdataPath, 'utf-8'));
-    this.world = buildSimWorldFromNavdata(navdata);
+    if (opts.map === 'test') {
+      // The tiny generated debug map — built in-process, no navdata needed.
+      this.world = buildTestSimWorld();
+    } else {
+      const navdataPath = path.resolve(ROOT, 'assets', 'navdata.json');
+      const navdata = JSON.parse(fs.readFileSync(navdataPath, 'utf-8'));
+      this.world = buildSimWorldFromNavdata(navdata);
+    }
     this.state = createMatchState();
   }
 

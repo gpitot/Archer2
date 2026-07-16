@@ -22,6 +22,15 @@ const C = {
   headGrey: 0x909090,
 };
 
+function blendColor(base: number, tint: number, factor: number): number {
+  const r0 = (base >> 16) & 0xff, g0 = (base >> 8) & 0xff, b0 = base & 0xff;
+  const r1 = (tint >> 16) & 0xff, g1 = (tint >> 8) & 0xff, b1 = tint & 0xff;
+  const r = Math.round(r0 + (r1 - r0) * factor);
+  const g = Math.round(g0 + (g1 - g0) * factor);
+  const b = Math.round(b0 + (b1 - b0) * factor);
+  return (r << 16) | (g << 8) | b;
+}
+
 function mat(color: number, rough = 0.7, metal = 0.0): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal, flatShading: true });
 }
@@ -73,8 +82,12 @@ function tube(
 
 // ── Builder ──────────────────────────────────────────────────────
 
-export function buildArcherMesh(): THREE.Group {
+export function buildArcherMesh(teamColor?: number): THREE.Group {
   const root = new THREE.Group();
+
+  // Blend team color into tunic/cape/hood if provided.
+  const tunic = teamColor != null ? blendColor(C.tunic, teamColor, 0.55) : C.tunic;
+  const cape  = teamColor != null ? blendColor(C.cape,  teamColor, 0.55) : C.cape;
 
   // ── Boots ──
   const bootH = 0.22;
@@ -128,7 +141,7 @@ export function buildArcherMesh(): THREE.Group {
   // ── Torso (heroBody — used for hit flash & dummy coloring) ──
   const torsoY0 = beltY + 0.07;
   const torsoH = 0.48;
-  const torso = cyl(0.14, 0.13, torsoH, 8, C.tunic);
+  const torso = cyl(0.14, 0.13, torsoH, 8, tunic);
   torso.position.y = torsoY0 + torsoH / 2;
   torso.name = 'heroBody';
   root.add(torso);
@@ -180,7 +193,7 @@ export function buildArcherMesh(): THREE.Group {
   const forearmLen = 0.30;
 
   // Left arm (bow arm — slightly forward)
-  const lUpper = cyl(0.06, 0.055, upperArmLen, 8, C.tunic);
+  const lUpper = cyl(0.06, 0.055, upperArmLen, 8, tunic);
   lUpper.position.set(-shoulderX, shoulderY - upperArmLen / 2, 0.04);
   lUpper.rotation.z = 0.45;
   lUpper.rotation.x = -0.15;
@@ -197,7 +210,7 @@ export function buildArcherMesh(): THREE.Group {
   root.add(lHand);
 
   // Right arm (draw arm)
-  const rUpper = cyl(0.06, 0.055, upperArmLen, 8, C.tunic);
+  const rUpper = cyl(0.06, 0.055, upperArmLen, 8, tunic);
   rUpper.position.set(shoulderX, shoulderY - upperArmLen / 2, -0.02);
   rUpper.rotation.z = -0.35;
   root.add(rUpper);
@@ -216,19 +229,19 @@ export function buildArcherMesh(): THREE.Group {
   const collarY = neckY + 0.02;
   // Thick folded collar (torus-like ring)
   const collarGeo = new THREE.TorusGeometry(0.16, 0.06, 6, 12);
-  const collar = new THREE.Mesh(collarGeo, mat(C.cape));
+  const collar = new THREE.Mesh(collarGeo, mat(cape));
   collar.position.y = collarY;
   collar.rotation.x = Math.PI / 2;
   collar.castShadow = true;
   root.add(collar);
 
   // Cape drape on the back (two angled boxes)
-  const cape1 = box(0.20, 0.25, 0.04, C.cape);
+  const cape1 = box(0.20, 0.25, 0.04, cape);
   cape1.position.set(0, collarY - 0.08, -0.18);
   cape1.rotation.x = 0.4;
   root.add(cape1);
 
-  const cape2 = box(0.18, 0.20, 0.04, C.cape);
+  const cape2 = box(0.18, 0.20, 0.04, cape);
   cape2.position.set(0, collarY - 0.22, -0.24);
   cape2.rotation.x = 0.55;
   root.add(cape2);
@@ -303,18 +316,6 @@ export function buildArcherMesh(): THREE.Group {
   bowGroup.rotation.set(0.1, 0, -0.15);
   bowGroup.name = 'bow';
   root.add(bowGroup);
-
-  // ── Ground shadow ──
-  const shadowGeo = new THREE.CircleGeometry(0.22, 12);
-  const shadowMat = new THREE.MeshBasicMaterial({
-    color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false,
-  });
-  const shadow = new THREE.Mesh(shadowGeo, shadowMat);
-  shadow.rotation.x = -Math.PI / 2;
-  shadow.position.y = 0.01;
-  shadow.renderOrder = 1;
-  shadow.name = 'heroShadow';
-  root.add(shadow);
 
   return root;
 }

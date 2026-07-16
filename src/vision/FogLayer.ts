@@ -2,13 +2,28 @@ import * as THREE from 'three';
 import { FogOfWar, FOG_EXPLORED, FOG_VISIBLE } from './FogOfWar';
 
 /**
+ * Upsampling factor of the render texture over the fog grid. The LoL-style
+ * recipe: compute vision coarse, then upsample + blur for rendering only.
+ */
+const UPSAMPLE = 4;
+
+/** Separable Gaussian kernel applied to the upsampled target field. */
+const BLUR_KERNEL = [1 / 16, 4 / 16, 6 / 16, 4 / 16, 1 / 16];
+const BLUR_RADIUS = 2;
+
+/**
  * Renders one team's fog into the 3D scene.
  *
- * The fog map is uploaded as a small brightness texture (bilinear-filtered so
- * cell edges blend) and injected into world materials via `onBeforeCompile`:
- * each fragment samples the texture at its world XZ and multiplies its final
- * color — hidden ground renders black, explored ground dimmed, visible ground
- * untouched, matching WC3's black mask / grey fog / clear terrain.
+ * The fog map is uploaded as a brightness texture and injected into world
+ * materials via `onBeforeCompile`: each fragment samples the texture at its
+ * world XZ and multiplies its final color — hidden ground renders black,
+ * explored ground dimmed, visible ground untouched, matching WC3's black
+ * mask / grey fog / clear terrain.
+ *
+ * The texture is UPSAMPLE× finer than the fog grid: whenever the fog
+ * recomputes, the coarse states are bilinearly upsampled and Gaussian-blurred
+ * (blur the upscaled image, not the source — LoL's documented approach) so
+ * fog borders are soft curves instead of cell-quantized steps.
  *
  * World positions outside the fog grid render black, which doubles as the
  * WC3-style dark void beyond the active arena's camera bounds.
@@ -24,8 +39,14 @@ export class FogLayer {
 
   private _fog: FogOfWar;
   private _team: number;
+  private _hiX: number;
+  private _hiZ: number;
+  private _targetCoarse: Float32Array;
+  private _targetHi: Float32Array;
+  private _blurTmp: Float32Array;
   private _brightness: Float32Array;
   private _data: Uint8Array;
+  private _lastVersion = -1;
   private _patched = new WeakSet<THREE.Material>();
   private _uniforms: {
     uFogMap: { value: THREE.Texture };
@@ -37,10 +58,15 @@ export class FogLayer {
     this._fog = fog;
     this._team = team;
 
-    const n = fog.cellsX * fog.cellsZ;
+    this._hiX = fog.cellsX * UPSAMPLE;
+    this._hiZ = fog.cellsZ * UPSAMPLE;
+    const n = this._hiX * this._hiZ;
     this._data = new Uint8Array(n); // starts fully hidden (black)
     this._brightness = new Float32Array(n);
-    this.texture = new THREE.DataTexture(this._data, fog.cellsX, fog.cellsZ, THREE.RedFormat, THREE.UnsignedByteType);
+    this._targetHi = new Float32Array(n);
+    this._blurTmp = new Float32Array(n);
+    this._targetCoarse = new Float32Array(fog.cellsX * fog.cellsZ);
+    this.texture = new THREE.DataTexture(this._data, this._hiX, this._hiZ, THREE.RedFormat, THREE.UnsignedByteType);
     this.texture.minFilter = THREE.LinearFilter;
     this.texture.magFilter = THREE.LinearFilter;
     this.texture.wrapS = THREE.ClampToEdgeWrapping;
@@ -57,17 +83,81 @@ export class FogLayer {
 
   /** Ease brightness toward the current fog states and upload the texture. */
   update(delta: number): void {
-    const states = this._fog.team(this._team);
+    if (this._fog.version !== this._lastVersion) {
+      this._lastVersion = this._fog.version;
+      this._rebuildTarget();
+    }
+    const target = this._targetHi;
     const k = 1 - Math.exp(-delta * 10);
-    for (let i = 0; i < states.length; i++) {
-      const target =
-        states[i] === FOG_VISIBLE ? 1 :
-        states[i] === FOG_EXPLORED ? FogLayer.EXPLORED_BRIGHTNESS : 0;
-      const b = this._brightness[i] + (target - this._brightness[i]) * k;
+    for (let i = 0; i < target.length; i++) {
+      const b = this._brightness[i] + (target[i] - this._brightness[i]) * k;
       this._brightness[i] = b;
       this._data[i] = (b * 255) | 0;
     }
     this.texture.needsUpdate = true;
+  }
+
+  /** Coarse states → brightness targets → 4× bilinear upsample → blur. */
+  private _rebuildTarget(): void {
+    const states = this._fog.team(this._team);
+    const coarse = this._targetCoarse;
+    for (let i = 0; i < states.length; i++) {
+      coarse[i] =
+        states[i] === FOG_VISIBLE ? 1 :
+        states[i] === FOG_EXPLORED ? FogLayer.EXPLORED_BRIGHTNESS : 0;
+    }
+
+    // Bilinear upsample, treating coarse texel centers as the sample points.
+    const nX = this._fog.cellsX;
+    const nZ = this._fog.cellsZ;
+    const hiX = this._hiX;
+    const hiZ = this._hiZ;
+    const hi = this._targetHi;
+    const inv = 1 / UPSAMPLE;
+    for (let hz = 0; hz < hiZ; hz++) {
+      let v = (hz + 0.5) * inv - 0.5;
+      v = Math.min(Math.max(v, 0), nZ - 1);
+      const j = Math.min(Math.floor(v), Math.max(nZ - 2, 0));
+      const fv = v - j;
+      const row0 = j * nX;
+      const row1 = Math.min(j + 1, nZ - 1) * nX;
+      for (let hx = 0; hx < hiX; hx++) {
+        let u = (hx + 0.5) * inv - 0.5;
+        u = Math.min(Math.max(u, 0), nX - 1);
+        const i = Math.min(Math.floor(u), Math.max(nX - 2, 0));
+        const fu = u - i;
+        const i1 = Math.min(i + 1, nX - 1);
+        const top = coarse[row0 + i] * (1 - fu) + coarse[row0 + i1] * fu;
+        const bot = coarse[row1 + i] * (1 - fu) + coarse[row1 + i1] * fu;
+        hi[hz * hiX + hx] = top * (1 - fv) + bot * fv;
+      }
+    }
+
+    // Separable Gaussian, clamp-extended at the borders (zero-padding would
+    // darken the arena edge; the shader's outside-grid cutoff stays the void
+    // mask). Horizontal hi→tmp, vertical tmp→hi.
+    const tmp = this._blurTmp;
+    for (let hz = 0; hz < hiZ; hz++) {
+      const row = hz * hiX;
+      for (let hx = 0; hx < hiX; hx++) {
+        let sum = 0;
+        for (let o = -BLUR_RADIUS; o <= BLUR_RADIUS; o++) {
+          const sx = Math.min(Math.max(hx + o, 0), hiX - 1);
+          sum += hi[row + sx] * BLUR_KERNEL[o + BLUR_RADIUS];
+        }
+        tmp[row + hx] = sum;
+      }
+    }
+    for (let hz = 0; hz < hiZ; hz++) {
+      for (let hx = 0; hx < hiX; hx++) {
+        let sum = 0;
+        for (let o = -BLUR_RADIUS; o <= BLUR_RADIUS; o++) {
+          const sz = Math.min(Math.max(hz + o, 0), hiZ - 1);
+          sum += tmp[sz * hiX + hx] * BLUR_KERNEL[o + BLUR_RADIUS];
+        }
+        hi[hz * hiX + hx] = sum;
+      }
+    }
   }
 
   /**

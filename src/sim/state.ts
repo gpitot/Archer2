@@ -43,6 +43,10 @@ export interface HeroState {
 
   // Items / abilities
   speedBonus: number;
+  dodgeActive: boolean;
+  dodgeTimer: number;
+  dodgeCooldown: number;
+  dodgeLevel: number;
   inventory: Inventory;
   wardCharges: number;
   abilityLevel: number;
@@ -87,7 +91,8 @@ export type Command =
   | { type: 'fire'; aimX: number; aimZ: number }
   | { type: 'ward' }
   | { type: 'buy'; itemIndex: number }
-  | { type: 'levelAbility' };
+  | { type: 'levelAbility'; ability: 'arrow' | 'dodge' }
+  | { type: 'dodge' };
 
 /** A command tagged with the hero it applies to, queued for the next tick. */
 export interface HeroInput {
@@ -133,6 +138,10 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     wardCharges: 0,
     abilityLevel: 0,
     abilityCooldown: 0,
+    dodgeActive: false,
+    dodgeTimer: 0,
+    dodgeCooldown: 0,
+    dodgeLevel: 0,
   };
 }
 

@@ -20,6 +20,11 @@ import { Vec2 } from './math';
 export interface JoinMessage {
   type: 'join';
   name: string;
+  /**
+   * Map the client wants to play on ('arena' when absent). The first join
+   * decides the room's map; later joins with a different map are rejected.
+   */
+  map?: string;
 }
 
 export interface InputMessage {
@@ -70,6 +75,10 @@ export interface HeroMeta {
   wardCharges: number;
   abilityLevel: number;
   abilityCooldown: number;
+  dodgeActive: boolean;
+  dodgeTimer: number;
+  dodgeCooldown: number;
+  dodgeLevel: number;
 }
 
 // ── Server → Client ──────────────────────────────────────────────────
@@ -78,6 +87,8 @@ export interface WelcomeMessage {
   type: 'welcome';
   playerId: string;
   tickRate: number;
+  /** Map this room is running. */
+  map?: string;
   /** Initial full state so the client can start rendering immediately. */
   snapshot: Snapshot;
   /** Cold fields for every hero in the snapshot. */

@@ -70,6 +70,10 @@ export class FogOfWar {
   private _teams = new Map<number, Uint8Array>();
   private _sources: VisionSource[] = [];
   private _timer = 0; // time until next recompute; 0 → recompute on next update
+  private _version = 0; // bumped on every recompute so renderers can cache
+
+  /** Debug flag: when true, all cells stay VISIBLE regardless of sources. */
+  debugAllVisible = false;
 
   constructor(
     bounds: FogBounds,
@@ -100,7 +104,12 @@ export class FogOfWar {
 
   // ── Setup ──────────────────────────────────────────────────────
 
-  /** Mark a rectangular footprint (tree/rock) as sight-blocking. */
+  /**
+   * Mark a rectangular footprint (tree/rock) as sight-blocking. Center-in
+   * stamping (like the nav grid): only cells whose *center* falls inside the
+   * footprint block, so a blocker shadows roughly its own width instead of
+   * every cell it merely grazes.
+   */
   addSightBlocker(wx: number, wz: number, halfWidth: number, halfDepth: number): void {
     const minX = this._clampCellX(Math.floor((wx - halfWidth - this.originX) / this.cellSize));
     const maxX = this._clampCellX(Math.floor((wx + halfWidth - this.originX) / this.cellSize));
@@ -108,7 +117,11 @@ export class FogOfWar {
     const maxZ = this._clampCellZ(Math.floor((wz + halfDepth - this.originZ) / this.cellSize));
     for (let cz = minZ; cz <= maxZ; cz++) {
       for (let cx = minX; cx <= maxX; cx++) {
-        this._blocked[cz * this.cellsX + cx] = 1;
+        const cxWorld = this.originX + (cx + 0.5) * this.cellSize;
+        const czWorld = this.originZ + (cz + 0.5) * this.cellSize;
+        if (Math.abs(cxWorld - wx) <= halfWidth && Math.abs(czWorld - wz) <= halfDepth) {
+          this._blocked[cz * this.cellsX + cx] = 1;
+        }
       }
     }
   }
@@ -151,6 +164,11 @@ export class FogOfWar {
     return this.stateAt(team, wx, wz) >= FOG_EXPLORED;
   }
 
+  /** Increments whenever visibility is recomputed — cheap change detection. */
+  get version(): number {
+    return this._version;
+  }
+
   // ── Update ─────────────────────────────────────────────────────
 
   update(delta: number): void {
@@ -169,12 +187,20 @@ export class FogOfWar {
   // ── Internal ───────────────────────────────────────────────────
 
   private _recompute(): void {
+    this._version++;
+
     // Currently-visible decays to explored; sources then re-light their cells.
     for (const map of this._teams.values()) {
       for (let i = 0; i < map.length; i++) {
         if (map[i] === FOG_VISIBLE) map[i] = FOG_EXPLORED;
       }
     }
+
+    if (this.debugAllVisible) {
+      for (const map of this._teams.values()) map.fill(FOG_VISIBLE);
+      return;
+    }
+
     for (const src of this._sources) {
       if (!src.active) continue;
       this._sweep(this.team(src.team), src);

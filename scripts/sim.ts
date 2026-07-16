@@ -17,6 +17,8 @@ const SCENARIOS_DIR = path.resolve(__dirname, '..', 'scenarios');
 
 interface Scenario {
   name: string;
+  /** Which map the harness should build ('arena' when absent). */
+  map?: 'arena' | 'test';
   run: (h: SimHarness) => void | Promise<void>;
 }
 
@@ -27,7 +29,7 @@ async function loadScenarios(filter: string[]): Promise<Scenario[]> {
     const stem = f.replace(/\.ts$/, '');
     if (filter.length > 0 && !filter.includes(stem)) continue;
     const mod = await import(path.resolve(SCENARIOS_DIR, f));
-    scenarios.push({ name: mod.name ?? stem, run: mod.run });
+    scenarios.push({ name: mod.name ?? stem, map: mod.map, run: mod.run });
   }
   return scenarios;
 }
@@ -42,7 +44,7 @@ async function main(): Promise<void> {
 
   let failed = 0;
   for (const s of scenarios) {
-    const h = new SimHarness();
+    const h = new SimHarness({ map: s.map });
     const started = performance.now();
     try {
       await s.run(h);

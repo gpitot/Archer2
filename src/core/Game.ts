@@ -7,7 +7,8 @@ import { IsometricCamera } from '../rendering/Camera';
 import { Minimap } from '../rendering/Minimap';
 import { Shop, ShopItem } from '../world/Shop';
 import { ObstacleRegistry } from '../world/ObstacleRegistry';
-import { MapData, loadMapData, ArenaRect, ARENA_TERRAIN1 } from '../world/wc3/MapData';
+import { MapData, ArenaRect, ARENA_TERRAIN1 } from '../world/wc3/MapData';
+import { MapName, loadMap, resolveMapName } from '../world/maps';
 import { Wc3Terrain } from '../world/Wc3Terrain';
 import { Water } from '../world/Water';
 import { Doodads } from '../world/Doodads';
@@ -22,6 +23,8 @@ import { ShopWindow } from '../ui/ShopWindow';
 import { FloatingTextManager } from '../ui/FloatingText';
 import { ShopOverlay } from '../ui/ShopOverlay';
 import { GoldDisplay } from '../ui/GoldDisplay';
+import { MoveIndicatorManager } from '../ui/MoveIndicator';
+import { DebugPanel } from '../ui/DebugPanel';
 import { HeroPortrait } from '../ui/HeroPortrait';
 import { SpellBar } from '../ui/SpellBar';
 
@@ -30,7 +33,7 @@ import { HeroState, ProjectileState, WardState, MatchState, Command, HeroInput, 
 import { stepMatch, xpForLevel, heroSpeed } from '../sim/stepMatch';
 import { SimWorld, sphereHitsObstacle } from '../sim/world';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
-import { HERO, ARROW, WARD } from '../sim/rules';
+import { HERO, ARROW, DODGE, WARD } from '../sim/rules';
 import { SHOP_ITEMS } from '../sim/shopItems';
 import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta } from '../sim/protocol';
 import { Vec2, distance, clamp } from '../sim/math';
@@ -57,6 +60,8 @@ interface GroundProvider {
   smoothHeightAt(x: number, z: number): number;
   /** Discrete WC3 cliff layer. */
   layerAt(x: number, z: number): number;
+  /** Cliff layer for vision — ramps stay on the lower layer until near the top. */
+  visionLayerAt(x: number, z: number): number;
 }
 
 export class Game {
@@ -66,7 +71,10 @@ export class Game {
   private _scene!: THREE.Scene;
   private _camera!: IsometricCamera;
   private _map!: MapData;
+  private _mapName: MapName = 'arena';
   private _arena: ArenaRect = ARENA_TERRAIN1;
+  /** Fixed spawn points from the map definition (test map); null → random. */
+  private _mapSpawns: { x: number; z: number }[] | null = null;
   private _terrain!: GroundProvider;
   private _water!: Water;
 
@@ -176,6 +184,8 @@ export class Game {
   private _shop!: Shop;
   private _shopOverlay!: ShopOverlay;
   private _shopWindow!: ShopWindow;
+  private _moveIndicators!: MoveIndicatorManager;
+  private _debugPanel: DebugPanel | null = null;
 
   constructor() {
     this._loop = new GameLoop(60);
@@ -195,8 +205,12 @@ export class Game {
       this._network = new NetworkClient();
     }
 
-    // ── Original map data (terrain, pathing, doodads) ──
-    this._map = await loadMapData();
+    // ── Map data (terrain, pathing, doodads) — ?map= selects the map ──
+    this._mapName = resolveMapName(urlParams.get('map'));
+    const loaded = await loadMap(this._mapName);
+    this._map = loaded.data;
+    this._arena = loaded.arena;
+    this._mapSpawns = loaded.spawns;
     const bounds = this._map.bounds;
 
     // ── Renderer ──
@@ -231,7 +245,7 @@ export class Game {
     this._scene.add(doodads.group);
 
     // ── Fog of war (WC3 rules: discrete cliff layers + tree blockers) ──
-    this._fog = new FogOfWar(this._arena, FOG_CELL_SIZE, (x, z) => this._terrain.layerAt(x, z));
+    this._fog = new FogOfWar(this._arena, FOG_CELL_SIZE, (x, z) => this._terrain.visionLayerAt(x, z));
     for (const s of doodads.sightBlockers) {
       if (s.x >= this._arena.minX && s.x <= this._arena.maxX &&
           s.z >= this._arena.minZ && s.z <= this._arena.maxZ) {
@@ -280,13 +294,18 @@ export class Game {
       await this._initNetwork();
     } else {
       // ── Offline mode: create local heroes ──
-      const heroSpawn = this._findRespawnPosition();
+      // Maps with fixed spawns (test map) place the heroes deterministically.
+      const heroSpawn = this._mapSpawns
+        ? this._findWalkableNear(this._mapSpawns[0].x, this._mapSpawns[0].z)
+        : this._findRespawnPosition();
       const playerState = createHeroState('player', 0, { x: heroSpawn.x, z: heroSpawn.z });
       this._state.heroes.push(playerState);
       this._playerId = 'player';
       this._playerState = playerState;
 
-      const dummySpawn = this._findWalkableNear(heroSpawn.x + 400, heroSpawn.z + 200);
+      const dummySpawn = this._mapSpawns && this._mapSpawns.length > 1
+        ? this._findWalkableNear(this._mapSpawns[1].x, this._mapSpawns[1].z)
+        : this._findWalkableNear(heroSpawn.x + 400, heroSpawn.z + 200);
       const dummyState = createHeroState('dummy', 1, { x: dummySpawn.x, z: dummySpawn.z });
       this._state.heroes.push(dummyState);
 
@@ -345,12 +364,13 @@ export class Game {
         return;
       }
       this._enqueueCommand({ type: 'moveTo', x: pos.x, z: pos.z });
+      this._moveIndicators.spawn(pos);
     });
 
-    // Q — Shoot Arrow (Ctrl+Q to spend skill point)
+    // Q — Shoot Arrow (Shift+Q to spend skill point)
     this._input.onKeyDown('KeyQ', () => {
-      if (this._input.isKeyDown('ControlLeft') || this._input.isKeyDown('ControlRight')) {
-        this._enqueueCommand({ type: 'levelAbility' });
+      if (this._input.isKeyDown('ShiftLeft') || this._input.isKeyDown('ShiftRight')) {
+        this._enqueueCommand({ type: 'levelAbility', ability: 'arrow' });
       } else {
         const aim = this._input.aimPosition;
         this._enqueueCommand({
@@ -361,8 +381,14 @@ export class Game {
       }
     });
 
-    // W — Place a sentry ward
-    this._input.onKeyDown('KeyW', () => this._enqueueCommand({ type: 'ward' }));
+    // W — Dodge (Shift+W to level up)
+    this._input.onKeyDown('KeyW', () => {
+      if (this._input.isKeyDown('ShiftLeft') || this._input.isKeyDown('ShiftRight')) {
+        this._enqueueCommand({ type: 'levelAbility', ability: 'dodge' });
+      } else {
+        this._enqueueCommand({ type: 'dodge' });
+      }
+    });
 
     // B — Open shop when near
     this._input.onKeyDown('KeyB', () => {
@@ -397,6 +423,18 @@ export class Game {
     this._goldDisplay = new GoldDisplay();
     this._itemBar = new ItemBar();
     this._kdDisplay = new KDDisplay();
+    this._moveIndicators = new MoveIndicatorManager(this._scene);
+
+    // ── Debug panel (local dev only) ──
+    if (!this._networkMode) {
+      this._debugPanel = new DebugPanel(
+        () => this._toggleFog(),
+        () => this._debugLevelUp(),
+        () => this._debugAddGold(),
+        this._mapName === 'test' ? 'arena' : 'test',
+        () => this._swapMap(),
+      );
+    }
 
     this._minimap = new Minimap(this._map, this._arena, 200, 8);
     this._minimap.setFog(this._fog, this._playerState.team);
@@ -427,7 +465,10 @@ export class Game {
   // ── Network init ────────────────────────────────────────────────────
 
   private async _initNetwork(): Promise<void> {
-    const welcome = await this._network!.connect(this._roomCode!, 'Player');
+    const welcome = await this._network!.connect(this._roomCode!, 'Player', this._mapName);
+    if (welcome.map && welcome.map !== this._mapName) {
+      throw new Error(`room is on map '${welcome.map}' — reload with ?map=${welcome.map}`);
+    }
 
     // All snapshot-timeline math derives from the server's tick rate.
     this._tickDt = 1 / welcome.tickRate;
@@ -625,6 +666,10 @@ export class Game {
     // it correctly and the server's value could be stale (not yet processed
     // our fire command).
     if (dst.id !== this._playerId) dst.abilityCooldown = src.abilityCooldown;
+    dst.dodgeActive = src.dodgeActive;
+    dst.dodgeTimer = src.dodgeTimer;
+    dst.dodgeCooldown = src.dodgeCooldown;
+    dst.dodgeLevel = src.dodgeLevel;
   }
 
   /** Run local stepMatch for the player's hero only (instant movement feel). */
@@ -952,6 +997,7 @@ export class Game {
     // ── Misc ──
     this._floatingText.update(dt, this._camera.camera);
     this._water.update(dt);
+    this._moveIndicators.update(dt);
 
     this._recordTraceFrame([], events);
   }
@@ -1044,6 +1090,7 @@ export class Game {
     // ── Misc ──
     this._floatingText.update(dt, this._camera.camera);
     this._water.update(dt);
+    this._moveIndicators.update(dt);
 
     this._recordTraceFrame(snaps.map((s) => s.tick), frameEvents);
   }
@@ -1114,7 +1161,7 @@ export class Game {
     const pan = this._input.edgePan;
     if (pan.length() > 0) {
       this._cameraLocked = false;
-      const speed = 900 * dt;
+      const speed = 1200 * dt;
       this._camera.panScreen(pan.x * speed, pan.z * speed);
     } else if (this._cameraLocked && this._playerState) {
       this._camera.follow(new THREE.Vector3(
@@ -1278,7 +1325,12 @@ export class Game {
     // Spell bar cooldowns
     const cdProgress = p.abilityCooldown <= 0 ? 1
       : 1 - p.abilityCooldown / ARROW.cooldownByLevel[Math.min(p.abilityLevel, 4)];
-    this._spellBar.update(cdProgress, p.abilityLevel, p.skillPoints);
+    const dodgeCdProgress = p.dodgeCooldown <= 0 ? 1
+      : 1 - p.dodgeCooldown / DODGE.cooldownByLevel[Math.min(p.dodgeLevel, 4)];
+    this._spellBar.update(
+      cdProgress, p.abilityLevel, p.skillPoints,
+      dodgeCdProgress, p.dodgeLevel,
+    );
 
     // Hero portrait
     this._portrait.update(
@@ -1371,6 +1423,35 @@ export class Game {
       }
     }
     return new THREE.Vector3(wx, this._heightAt(wx, wz), wz);
+  }
+
+  // ── Debug helpers ───────────────────────────────────────────────
+
+  private _toggleFog(): void {
+    this._fog.debugAllVisible = !this._fog.debugAllVisible;
+    this._debugPanel?.setFogLabel(!this._fog.debugAllVisible);
+    this._fog.recomputeNow();
+    this._fogLayer.update(0);
+  }
+
+  private _debugLevelUp(): void {
+    if (!this._playerState || !this._playerState.alive) return;
+    if (this._playerState.level >= HERO.maxLevel) return;
+    this._playerState.level++;
+    this._playerState.skillPoints++;
+  }
+
+  private _debugAddGold(): void {
+    if (this._playerState) {
+      this._playerState.gold += 10;
+    }
+  }
+
+  /** Reload the page on the other map (all world data derives from the map). */
+  private _swapMap(): void {
+    const url = new URL(window.location.href);
+    url.searchParams.set('map', this._mapName === 'test' ? 'arena' : 'test');
+    window.location.href = url.toString();
   }
 }
 

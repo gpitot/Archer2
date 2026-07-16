@@ -28,8 +28,7 @@ export class InputManager {
   private _keyUpHandlers = new Map<string, KeyHandler[]>();
 
   // Edge panning
-  private _edgeThreshold = 30;
-  private _panSpeed = 500;       // world units/sec
+  private _edgeZone = 100;        // px from edge where panning starts (gradient ramp)
   private _mouseScreenX = 0;
   private _mouseScreenY = 0;
   private _panDirection = new THREE.Vector3();
@@ -113,19 +112,33 @@ export class InputManager {
   private _updatePanDirection(): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const t = this._edgeThreshold;
+    const zone = this._edgeZone;
 
+    // Gradient ramp: 0 at zone boundary, ±1 at screen edge.
+    // This naturally enables smooth diagonal panning when the cursor is in a corner.
     let right = 0;   // screen right (+1) / left (-1)
     let forward = 0; // screen up/forward (+1) / down (-1)
 
-    if (this._mouseScreenX < t) right = -1;
-    else if (this._mouseScreenX > w - t) right = 1;
+    if (this._mouseScreenX < zone) {
+      right = -(zone - this._mouseScreenX) / zone;          // -1 at x=0,  0 at x=zone
+    } else if (this._mouseScreenX > w - zone) {
+      right = (this._mouseScreenX - (w - zone)) / zone;    //  0 at x=w-zone, +1 at x=w
+    }
 
-    if (this._mouseScreenY < t) forward = 1;         // top    → into screen
-    else if (this._mouseScreenY > h - t) forward = -1; // bottom → toward camera
+    if (this._mouseScreenY < zone) {
+      forward = (zone - this._mouseScreenY) / zone;         // +1 at y=0,  0 at y=zone
+    } else if (this._mouseScreenY > h - zone) {
+      forward = -(this._mouseScreenY - (h - zone)) / zone; //  0 at y=h-zone, -1 at y=h
+    }
 
     if (right !== 0 || forward !== 0) {
-      this._panDirection.set(right, 0, forward).normalize();
+      // Cap total magnitude so diagonals aren't faster than cardinals.
+      const mag = Math.sqrt(right * right + forward * forward);
+      if (mag > 1) {
+        right /= mag;
+        forward /= mag;
+      }
+      this._panDirection.set(right, 0, forward);
     } else {
       this._panDirection.set(0, 0, 0);
     }

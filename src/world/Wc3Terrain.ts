@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { MapData, TILE_SIZE, sampleTilepointGrid } from './wc3/MapData';
 import { FLAG_WATER } from './wc3/W3EParser';
 import { createGroundAtlas, GroundAtlas, CLIFF_CELL_GRASS, CLIFF_CELL_DIRT } from './wc3/GroundTextures';
-import { tileIsCliff, cliffTileGeometry, steppedHeightAt, layerAt } from './wc3/terrainLevels';
+import { tileIsCliff, cliffTileGeometry, steppedHeightAt, layerAt, visionLayerAt } from './wc3/terrainLevels';
 
 const CHUNK_TILES = 32;
 
@@ -55,6 +55,11 @@ export class Wc3Terrain {
   /** Discrete cliff layer at a world XZ position (nearest tilepoint). */
   layerAt(wx: number, wz: number): number {
     return layerAt(this._map.terrain, wx, wz);
+  }
+
+  /** Cliff layer for vision: like layerAt, but ramps stay on the lower layer until near the top. */
+  visionLayerAt(wx: number, wz: number): number {
+    return visionLayerAt(this._map.terrain, wx, wz);
   }
 
   /** Gradient magnitude (rise/run) of the smooth field at a world XZ position. */

@@ -37,7 +37,7 @@ export class NetworkClient {
   get welcome(): WelcomeMessage | null { return this._welcome; }
 
   /** Connect to a room, send join, and wait for the welcome handshake. */
-  connect(roomCode: string, name: string): Promise<WelcomeMessage> {
+  connect(roomCode: string, name: string, map?: string): Promise<WelcomeMessage> {
     this._url = `/ws/${roomCode}`;
     this._state = 'connecting';
     this._snapshots = [];
@@ -54,7 +54,7 @@ export class NetworkClient {
       this._ws = ws;
 
       ws.onopen = () => {
-        this._send({ type: 'join', name });
+        this._send({ type: 'join', name, map });
       };
 
       ws.onmessage = (event) => {

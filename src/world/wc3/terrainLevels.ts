@@ -60,9 +60,9 @@ export function tileIndexAt(t: W3ETerrain, wx: number, wz: number): { i: number;
   return { i: Math.floor(cu), j: Math.floor(cv) };
 }
 
-/** True when tile (i, j) is a stepped cliff (mixed layers, not a ramp). */
-export function tileIsCliff(t: W3ETerrain, i: number, j: number): boolean {
-  if (i < 0 || j < 0 || i >= t.width - 1 || j >= t.height - 1) return true;
+/** Corner layer spread and ramp-flag count of tile (i, j); null out of bounds. */
+function tileCornerStats(t: W3ETerrain, i: number, j: number): { mixed: boolean; ramps: number } | null {
+  if (i < 0 || j < 0 || i >= t.width - 1 || j >= t.height - 1) return null;
   const kSW = j * t.width + i;
   const ks = [kSW, kSW + 1, kSW + t.width, kSW + t.width + 1];
   let minL = 15;
@@ -74,7 +74,19 @@ export function tileIsCliff(t: W3ETerrain, i: number, j: number): boolean {
     if (l > maxL) maxL = l;
     if ((t.flags[k] & FLAG_RAMP) !== 0) ramps++;
   }
-  return minL !== maxL && ramps < 2;
+  return { mixed: minL !== maxL, ramps };
+}
+
+/** True when tile (i, j) is a walkable ramp (mixed layers, ≥2 ramp corners). */
+export function tileIsRamp(t: W3ETerrain, i: number, j: number): boolean {
+  const s = tileCornerStats(t, i, j);
+  return s !== null && s.mixed && s.ramps >= 2;
+}
+
+/** True when tile (i, j) is a stepped cliff (mixed layers, not a ramp). */
+export function tileIsCliff(t: W3ETerrain, i: number, j: number): boolean {
+  const s = tileCornerStats(t, i, j);
+  return s === null || (s.mixed && s.ramps < 2);
 }
 
 /** Discrete cliff layer at a world position (nearest tilepoint). */
@@ -84,6 +96,59 @@ export function layerAt(t: W3ETerrain, wx: number, wz: number): number {
   const i = Math.min(Math.max(Math.round(u), 0), t.width - 1);
   const j = Math.min(Math.max(Math.round(v), 0), t.height - 1);
   return t.layer[j * t.width + i];
+}
+
+/**
+ * How far up its slope a ramp position must be before it counts as the upper
+ * layer for vision. WC3 flips the cliff level near the top of a ramp, so from
+ * below you can see most of the ramp, and a unit climbing gains high-ground
+ * vision just before cresting.
+ */
+export const RAMP_UPPER_FRACTION = 0.7;
+
+/**
+ * Cliff layer for *vision* purposes. Same as `layerAt` everywhere except on
+ * ramp tiles, where nearest-tilepoint sampling flips to the upper layer far
+ * too early (making the whole ramp read as high ground from below). Here a
+ * ramp position belongs to the lower layer until its interpolated height
+ * crosses RAMP_UPPER_FRACTION of the slope.
+ */
+export function visionLayerAt(t: W3ETerrain, wx: number, wz: number): number {
+  const { i, j } = tileIndexAt(t, wx, wz);
+  if (!tileIsRamp(t, i, j)) return layerAt(t, wx, wz);
+
+  const w = t.width;
+  const kSW = j * w + i;
+  const corners = [kSW, kSW + 1, kSW + w, kSW + w + 1];
+  let lowL = 15;
+  let highL = 0;
+  for (const k of corners) {
+    const l = t.layer[k];
+    if (l < lowL) lowL = l;
+    if (l > highL) highL = l;
+  }
+
+  // Average corner finalHeights per layer so WC3's rolling height noise
+  // doesn't skew the slope fraction.
+  let hLow = 0;
+  let nLow = 0;
+  let hHigh = 0;
+  let nHigh = 0;
+  for (const k of corners) {
+    if (t.layer[k] === lowL) {
+      hLow += t.finalHeight[k];
+      nLow++;
+    } else if (t.layer[k] === highL) {
+      hHigh += t.finalHeight[k];
+      nHigh++;
+    }
+  }
+  hLow /= nLow;
+  hHigh /= nHigh;
+
+  const h = bilinearHeightAt(t, wx, wz);
+  const frac = (h - hLow) / Math.max(hHigh - hLow, 1e-6);
+  return frac >= RAMP_UPPER_FRACTION ? highL : lowL;
 }
 
 /**
