@@ -86,6 +86,9 @@ function applyCommand(
     case 'ward':
       placeWard(state, hero, world, cmd.x, cmd.z);
       break;
+    case 'blink':
+      blink(hero, cmd.x, cmd.z, world);
+      break;
     case 'buy':
       buy(hero, cmd.itemIndex, world, events);
       break;
@@ -210,6 +213,19 @@ function placeWard(
   });
 }
 
+function blink(hero: HeroState, tx: number, tz: number, world: SimWorld): void {
+  if (!hero.alive) return;
+  if (hero.blinkCooldown > 0) return;
+  // Snap to nearest walkable, reachable cell.
+  const snapped = findReachableNear(world, tx, tz, hero.pos.x, hero.pos.z);
+  if (!snapped) return;
+
+  // Teleport instantly — clear movement state.
+  stopMovement(hero);
+  hero.pos = { x: snapped.x, z: snapped.z };
+  hero.blinkCooldown = 10;
+}
+
 function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]): void {
   const shop = world.shop;
   if (index < 0 || index >= shop.items.length) return;
@@ -301,6 +317,10 @@ function stepHero(hero: HeroState, dt: number): void {
 
   if (hero.dodgeCooldown > 0) {
     hero.dodgeCooldown = Math.max(0, hero.dodgeCooldown - dt);
+  }
+
+  if (hero.blinkCooldown > 0) {
+    hero.blinkCooldown = Math.max(0, hero.blinkCooldown - dt);
   }
 
   if (hero.invulnerable) {

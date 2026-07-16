@@ -81,6 +81,7 @@ export interface HeroMeta {
   dodgeTimer: number;
   dodgeCooldown: number;
   dodgeLevel: number;
+  blinkCooldown: number;
 }
 
 // ── Server → Client ──────────────────────────────────────────────────

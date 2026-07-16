@@ -24,4 +24,13 @@ export const SHOP_ITEMS: ShopItemDef[] = [
       hero.wardCharges += 5;
     },
   },
+  {
+    id: 'blink_dagger',
+    name: 'Blink Dagger',
+    cost: 15,
+    description: 'Click to instantly teleport to target location (450 range, 10s cooldown)',
+    apply: (_hero) => {
+      // Effect is handled via the 'blink' command in stepMatch.
+    },
+  },
 ];

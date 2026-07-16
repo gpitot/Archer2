@@ -11,6 +11,7 @@ export class ItemBar {
   private static readonly _icons: Record<string, string> = {
     boots: '🥾',
     sentry_wards: '👁️',
+    blink_dagger: '🗡️',
   };
 
   constructor() {

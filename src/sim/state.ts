@@ -47,6 +47,7 @@ export interface HeroState {
   dodgeTimer: number;
   dodgeCooldown: number;
   dodgeLevel: number;
+  blinkCooldown: number;
   inventory: Inventory;
   wardCharges: number;
   abilityLevel: number;
@@ -92,6 +93,7 @@ export type Command =
   | { type: 'moveTo'; x: number; z: number }
   | { type: 'fire'; aimX: number; aimZ: number }
   | { type: 'ward'; x?: number; z?: number }
+  | { type: 'blink'; x: number; z: number }
   | { type: 'buy'; itemIndex: number }
   | { type: 'useItem'; slot: number }
   | { type: 'levelAbility'; ability: 'arrow' | 'dodge' }
@@ -147,6 +149,7 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     dodgeTimer: 0,
     dodgeCooldown: 0,
     dodgeLevel: 0,
+    blinkCooldown: 0,
   };
 }
 

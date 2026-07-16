@@ -442,9 +442,18 @@ export class Game {
           this._targeting.cancel();
           return;
         }
+        // Toggle: if blink dagger targeting is already active, cancel.
+        if (this._targeting.isActive && itemId === 'blink_dagger' && this._targeting.sourceItemId === 'blink_dagger') {
+          this._targeting.cancel();
+          return;
+        }
         this._targeting.cancel();
         if (itemId === 'sentry_wards') {
           this._activateWardTargeting();
+          return;
+        }
+        if (itemId === 'blink_dagger') {
+          this._activateBlinkTargeting();
           return;
         }
         this._enqueueCommand({ type: 'useItem', slot: i - 1 });
@@ -708,6 +717,7 @@ export class Game {
     dst.dodgeTimer = src.dodgeTimer;
     dst.dodgeCooldown = src.dodgeCooldown;
     dst.dodgeLevel = src.dodgeLevel;
+    dst.blinkCooldown = src.blinkCooldown;
   }
 
   /** Run local stepMatch for the player's hero only (instant movement feel). */
@@ -729,6 +739,9 @@ export class Game {
               idle.abilityCooldown = ARROW.cooldownByLevel[Math.max(idle.abilityLevel, 1)];
             }
           }
+        }
+        if (idle.blinkCooldown > 0) {
+          idle.blinkCooldown = Math.max(0, idle.blinkCooldown - dt);
         }
       }
       return;
@@ -1257,6 +1270,35 @@ export class Game {
         },
       },
       'sentry_wards',
+      p.pos.x, p.pos.z,
+      this._heightAt(p.pos.x, p.pos.z),
+      this._scene,
+    );
+  }
+
+  /** Activate ground-targeting for the blink dagger. */
+  private _activateBlinkTargeting(): void {
+    const p = this._playerState;
+    if (!p || !p.alive) return;
+    if (p.blinkCooldown > 0) return;
+    const BLINK_RANGE = 450;
+    this._targeting.activate(
+      {
+        range: BLINK_RANGE,
+        indicatorColor: 0x9966ff,
+        validateTarget: walkableValidator(this._navGrid, this._world.obstacles),
+        onTarget: (x, z) => {
+          this._enqueueCommand({ type: 'blink', x, z });
+        },
+        onCancel: () => {},
+        onMove: (x, z) => {
+          this._enqueueCommand({ type: 'moveTo', x, z });
+          this._moveIndicators.spawn(
+            new THREE.Vector3(x, this._heightAt(x, z), z),
+          );
+        },
+      },
+      'blink_dagger',
       p.pos.x, p.pos.z,
       this._heightAt(p.pos.x, p.pos.z),
       this._scene,
