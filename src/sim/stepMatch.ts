@@ -182,7 +182,16 @@ function fireArrow(
   if (hero.abilityCharges < ARROW.maxCharges && hero.abilityCooldown <= 0) {
     hero.abilityCooldown = ARROW.cooldownByLevel[hero.abilityLevel];
   }
-  events.push({ type: 'fire', heroId: hero.id, projectileId: projectile.id });
+  // `state.tick` is pre-increment here: position at time t on the tick
+  // timeline is spawnPos + dir * speed * (t - tick * dt), matching the sim's
+  // same-tick stepProjectiles advance. The event carries a copy — the live
+  // projectile keeps advancing while events await the next snapshot broadcast.
+  events.push({
+    type: 'fire',
+    heroId: hero.id,
+    tick: state.tick,
+    projectile: { ...projectile, pos: { ...projectile.pos }, dir: { ...projectile.dir } },
+  });
 }
 
 function placeWard(
@@ -438,7 +447,7 @@ function stepProjectiles(
     if (target) {
       const source = state.heroes.find((h) => h.id === p.ownerId);
       state.projectiles.splice(i, 1);
-      if (source) applyDamage(state, target, source, p.damage, events);
+      if (source) applyDamage(state, target, source, p.damage, p.id, events);
     }
   }
 }
@@ -462,17 +471,20 @@ function applyDamage(
   state: MatchState,
   target: HeroState,
   source: HeroState,
-  amount: number,
+  damage: number,
+  /** Id of the projectile (or blast) that dealt it — clients retire the matching arrow. */
+  projectileId: string,
   events: SimEvent[],
 ): void {
   if (!target.alive || target.invulnerable) return;
 
-  target.hp = Math.max(0, target.hp - amount);
+  target.hp = Math.max(0, target.hp - damage);
   events.push({
     type: 'hit',
     targetId: target.id,
     sourceId: source.id,
-    damage: amount,
+    projectileId,
+    damage,
     x: target.pos.x,
     z: target.pos.z,
   });
@@ -561,7 +573,7 @@ function stepBlasts(state: MatchState, dt: number, events: SimEvent[]): void {
       if (hero.team === blast.team) continue;
       if (!hero.alive || hero.invulnerable) continue;
       if (V.distanceSq(blast.pos, hero.pos) > r2) continue;
-      applyDamage(state, hero, source, BLAST.damage, events);
+      applyDamage(state, hero, source, BLAST.damage, blast.id, events);
     }
   }
 }

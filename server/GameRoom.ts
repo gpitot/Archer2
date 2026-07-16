@@ -6,13 +6,14 @@
  * are connected. All gameplay is authoritative — clients send commands, the
  * server simulates, and snapshots + events are broadcast back.
  *
- * Every tick broadcasts a quantized "hot" snapshot (positions, hp, flags,
- * projectiles, wards) with that tick's events piggybacked. The "cold" hero
- * fields (economy, progression, inventory) go out as a separate `heroMeta`
- * message at a low rate, and immediately when an event changes them.
+ * The sim ticks at 60 Hz; every SNAPSHOT_EVERY-th tick broadcasts a quantized
+ * "hot" snapshot (positions, hp, flags, projectiles, wards) with the events
+ * accumulated since the previous snapshot piggybacked. The "cold" hero fields
+ * (economy, progression, inventory) go out as a separate `heroMeta` message
+ * at a low rate, and immediately when an event changes them.
  */
 import { DurableObject, WebSocket } from 'cloudflare:workers';
-import { MatchState, HeroInput, HeroState, SimEvent, createMatchState, createHeroState } from '../src/sim/state';
+import { MatchState, HeroInput, HeroState, SimEvent, ProjectileState, WardState, createMatchState, createHeroState } from '../src/sim/state';
 import { stepMatch } from '../src/sim/stepMatch';
 import { SimWorld, ObstacleAABB, Rect, Shop, findRespawnPosition } from '../src/sim/world';
 import { SHOP_ITEMS } from '../src/sim/shopItems';
@@ -41,6 +42,12 @@ interface PlayerInfo {
 
 const TICK_RATE = 60;
 const TICK_INTERVAL = 1000 / TICK_RATE;
+// The sim steps at TICK_RATE but snapshots go out every Nth tick (20 Hz):
+// clients interpolate between snapshots anyway, and 60 Hz broadcasts cost 3×
+// the bandwidth for no visible gain. Events from skipped ticks accumulate and
+// ride the next snapshot.
+const SNAPSHOT_EVERY = 3;
+const SNAPSHOT_RATE = TICK_RATE / SNAPSHOT_EVERY;
 const META_EVERY = 15; // cold hero fields every Nth tick (4 Hz)
 const MAX_PLAYERS = 8;
 
@@ -59,9 +66,14 @@ export class GameRoom extends DurableObject<Env> {
   private _state!: MatchState;
   private _tickTimer: ReturnType<typeof setInterval> | null = null;
   private _pendingInputs: HeroInput[] = [];
+  /** Events from ticks since the last snapshot broadcast. */
+  private _pendingEvents: SimEvent[] = [];
   private _players = new Map<WebSocket, PlayerInfo>();
   /** playerId → WebSocket for targeted messages. */
   private _playerSockets = new Map<string, WebSocket>();
+  /** Last-broadcast serialized meta per hero, so scheduled sends can skip
+   *  heroes whose cold fields haven't changed. */
+  private _lastMetaJson = new Map<string, string>();
   private _nextPlayerId = 1;
 
   /**
@@ -141,6 +153,7 @@ export class GameRoom extends DurableObject<Env> {
           type: 'welcome',
           playerId,
           tickRate: TICK_RATE,
+          snapshotRate: SNAPSHOT_RATE,
           map: this._mapName,
           snapshot: this._currentSnapshot(),
           meta: this._heroMetas(),
@@ -151,7 +164,7 @@ export class GameRoom extends DurableObject<Env> {
         // hero's meta without waiting for the next scheduled heroMeta.
         const peerMsg: PeerJoinedMessage = { type: 'peerJoined', playerId, name: msg.name };
         this._broadcast(peerMsg, ws);
-        this._broadcast({ type: 'heroMeta', heroes: this._heroMetas() } satisfies HeroMetaMessage, ws);
+        this._broadcastHeroMeta(false, ws);
         break;
       }
 
@@ -174,6 +187,7 @@ export class GameRoom extends DurableObject<Env> {
 
     this._players.delete(ws);
     this._playerSockets.delete(info.playerId);
+    this._lastMetaJson.delete(info.playerId);
 
     // Mark hero as dead / despawned (removed from state).
     this._state.heroes = this._state.heroes.filter((h) => h.id !== info.playerId);
@@ -202,6 +216,7 @@ export class GameRoom extends DurableObject<Env> {
       clearInterval(this._tickTimer);
       this._tickTimer = null;
     }
+    this._pendingEvents = [];
   }
 
   private _tick(): void {
@@ -211,44 +226,90 @@ export class GameRoom extends DurableObject<Env> {
 
     // Step the simulation.
     const events = stepMatch(this._state, inputs, 1 / TICK_RATE, this._world);
+    this._pendingEvents.push(...events);
 
-    // Broadcast the hot snapshot every tick, with this tick's events aboard.
-    const snapshot: SnapshotMessage = {
-      type: 'snapshot',
-      ...this._currentSnapshot(),
-    };
-    if (events.length > 0) snapshot.events = events;
-    this._broadcast(snapshot);
-
-    // Cold fields: on schedule, or immediately when an event changed them.
-    if (this._state.tick % META_EVERY === 0 || events.some((ev) => META_EVENTS.has(ev.type))) {
-      this._broadcast({ type: 'heroMeta', heroes: this._heroMetas() } satisfies HeroMetaMessage);
+    // Broadcast the hot snapshot every SNAPSHOT_EVERY ticks, with all events
+    // accumulated since the previous snapshot aboard. Projectiles ride their
+    // `fire` events instead of the snapshot — clients simulate the flight.
+    if (this._state.tick % SNAPSHOT_EVERY === 0) {
+      const snapshot: SnapshotMessage = {
+        type: 'snapshot',
+        tick: this._state.tick,
+        heroes: this._state.heroes.map((h) => this._wireHero(h)),
+        wards: this._wireWards(),
+        blasts: this._wireBlasts(),
+      };
+      if (this._pendingEvents.length > 0) {
+        snapshot.events = this._pendingEvents.map((ev) =>
+          ev.type === 'fire' ? { ...ev, projectile: this._wireProjectile(ev.projectile) } : ev,
+        );
+      }
+      this._broadcast(snapshot);
+      this._pendingEvents = [];
     }
+
+    // Cold fields: on schedule (changed heroes only), or a full flush
+    // immediately when an event changed them.
+    if (events.some((ev) => META_EVENTS.has(ev.type))) {
+      this._broadcastHeroMeta(false);
+    } else if (this._state.tick % META_EVERY === 0) {
+      this._broadcastHeroMeta(true);
+    }
+  }
+
+  /**
+   * Broadcast cold hero fields. With `changedOnly`, heroes whose serialized
+   * meta matches the last broadcast are skipped (idle heroes stop costing
+   * ~450 B × 4 Hz each); without it, everyone goes out as a full baseline.
+   */
+  private _broadcastHeroMeta(changedOnly: boolean, exclude?: WebSocket): void {
+    const heroes: HeroMeta[] = [];
+    for (const meta of this._heroMetas()) {
+      const json = JSON.stringify(meta);
+      if (changedOnly && this._lastMetaJson.get(meta.id) === json) continue;
+      this._lastMetaJson.set(meta.id, json);
+      heroes.push(meta);
+    }
+    if (heroes.length === 0) return;
+    this._broadcast({ type: 'heroMeta', heroes } satisfies HeroMetaMessage, exclude);
   }
 
   // ── Wire encoding ─────────────────────────────────────────────────
 
+  /** Full state for the welcome handshake, including in-flight projectiles. */
   private _currentSnapshot(): Snapshot {
     return {
       tick: this._state.tick,
       heroes: this._state.heroes.map((h) => this._wireHero(h)),
-      projectiles: this._state.projectiles.map((p) => ({
-        ...p,
-        pos: { x: q(p.pos.x), z: q(p.pos.z) },
-        dir: { x: q4(p.dir.x), z: q4(p.dir.z) },
-        traveled: q(p.traveled),
-      })),
-      wards: this._state.wards.map((w) => ({
-        ...w,
-        pos: { x: q(w.pos.x), z: q(w.pos.z) },
-        life: q(w.life),
-      })),
-      blasts: this._state.blasts.map((b) => ({
-        ...b,
-        pos: { x: q(b.pos.x), z: q(b.pos.z) },
-        timer: q(b.timer),
-      })),
+      projectiles: this._state.projectiles.map((p) => this._wireProjectile(p)),
+      wards: this._wireWards(),
+      blasts: this._wireBlasts(),
     };
+  }
+
+  private _wireProjectile(p: ProjectileState): ProjectileState {
+    return {
+      ...p,
+      pos: { x: q(p.pos.x), z: q(p.pos.z) },
+      dir: { x: q4(p.dir.x), z: q4(p.dir.z) },
+      traveled: q(p.traveled),
+    };
+  }
+
+  private _wireWards(): WardState[] {
+    return this._state.wards.map((w) => ({
+      ...w,
+      pos: { x: q(w.pos.x), z: q(w.pos.z) },
+      life: q(w.life),
+    }));
+  }
+
+  private _wireBlasts(): BlastState[] {
+    return this._state.blasts.map((b) => ({
+      ...b,
+      pos: { x: q(b.pos.x), z: q(b.pos.z) },
+      timer: q(b.timer),
+    }));
   }
 
   private _wireHero(h: HeroState): SnapshotHero {

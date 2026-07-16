@@ -110,13 +110,13 @@ export class Game {
   private static readonly SNAP_THRESHOLD = 64; // 2 cells → snap to server
 
   // ── Interpolation buffer ──
-  private _snapshots: Snapshot[] = [];
+  private _snapshots: SnapshotMessage[] = [];
   /** Server tick duration in seconds; overwritten from the welcome message. */
   private _tickDt = 1 / 60;
   /**
    * How far behind the server tick timeline remote entities render. Sized
-   * from the welcome tick rate: snapshots arrive every tick, so ~3 intervals
-   * absorbs one dropped/late snapshot plus jitter (50 ms at 60 Hz).
+   * from the welcome snapshot rate: ~3 snapshot intervals absorbs one
+   * dropped/late snapshot plus jitter (150 ms at 20 Hz).
    */
   private _interpDelay = 0.05;
 
@@ -147,12 +147,31 @@ export class Game {
   }[] = [];
   /**
    * Server ids of our own arrows, kept (even after the local arrow retires)
-   * so `_renderProjectiles` never shows the server's duplicate. An entry
-   * lives until the *render* timeline passes the projectile's last appearance
-   * (`seenTick`) — pruning on the arrival timeline would unhide it while the
-   * interp-delayed timeline still has it in flight.
+   * so `_renderProjectiles` never shows the simulated duplicate. An entry
+   * lives until its `_remoteProjectiles` entry dies on the render timeline.
    */
-  private _ownArrowIds = new Map<string, { seenTick: number | null; missedBatches: number }>();
+  private _ownArrowIds = new Set<string>();
+
+  /**
+   * Remote projectiles, keyed by server id. Registered from `fire` events
+   * (which carry the full spawn state) and welcome snapshots, then simulated
+   * locally — the server never re-sends a projectile after launch.
+   * `deathTime` lands with the server's `hit` event; obstacle and max-range
+   * deaths are computed locally, mirroring the sim.
+   */
+  private _remoteProjectiles = new Map<string, {
+    ownerId: string;
+    team: number;
+    spawnPos: Vec2;
+    dir: Vec2;
+    speed: number;
+    maxRange: number;
+    damage: number;
+    /** Seconds on the server tick timeline when the arrow left the bow. */
+    spawnTime: number;
+    /** Render-timeline death from the server's hit event; null while flying. */
+    deathTime: number | null;
+  }>();
 
   // ── Views ──
   private _heroViews = new Map<string, HeroView>();
@@ -542,9 +561,11 @@ export class Game {
       throw new Error(`room is on map '${welcome.map}' — reload with ?map=${welcome.map}`);
     }
 
-    // All snapshot-timeline math derives from the server's tick rate.
+    // All snapshot-timeline math derives from the server's tick rate; the
+    // interpolation delay derives from the (lower) snapshot broadcast rate.
     this._tickDt = 1 / welcome.tickRate;
-    this._interpDelay = Math.max(0.05, 3 * this._tickDt);
+    const snapshotDt = 1 / (welcome.snapshotRate ?? welcome.tickRate);
+    this._interpDelay = Math.max(0.05, 3 * snapshotDt);
 
     // Apply the welcome snapshot to initialise our state and views.
     this._playerId = welcome.playerId;
@@ -624,6 +645,13 @@ export class Game {
     this._state.blasts = this._cloneBlasts(snap.blasts ?? []);
     this._state.tick = snap.tick;
 
+    // Seed the remote-projectile registry with arrows already in flight,
+    // walking each spawn time back from how far it has traveled.
+    this._remoteProjectiles.clear();
+    for (const p of snap.projectiles) {
+      this._registerRemoteProjectile(p, snap.tick * this._tickDt - p.traveled / p.speed);
+    }
+
     const ourHero = this._state.heroes.find((h) => h.id === this._playerId);
     if (ourHero) this._playerState = ourHero;
 
@@ -637,7 +665,7 @@ export class Game {
    * adopt the server's non-position state (position is set by interpolation);
    * the local player's hero is left to prediction + snap reconciliation.
    */
-  private _applyServerState(snap: Snapshot): void {
+  private _applyServerState(snap: SnapshotMessage): void {
     const snapIds = new Set(snap.heroes.map((h) => h.id));
 
     // Update persistent remote hero state (skip our own — prediction owns it).
@@ -673,7 +701,7 @@ export class Game {
    * left to local prediction and only snapped on large desync (see
    * SNAP_THRESHOLD).
    */
-  private _reconcileFromSnapshot(snap: Snapshot): void {
+  private _reconcileFromSnapshot(snap: SnapshotMessage): void {
     const serverHero = snap.heroes.find((h) => h.id === this._playerId);
     const localHero = this._state.heroes.find((h) => h.id === this._playerId);
     if (!serverHero || !localHero) return;
@@ -853,66 +881,83 @@ export class Game {
     }
   }
 
-  /**
-   * Rebuild `_state.projectiles` for this frame from the snapshot just ahead
-   * of `renderTime`. Projectiles fly in straight lines at constant speed, so
-   * their position at renderTime is exact: walk back along `dir` from the
-   * snapshot position (clamped by `traveled`, i.e. never before the spawn
-   * point). This renders every projectile that reaches *any* snapshot for its
-   * full lifetime — including ones that would be missed when several
-   * snapshots arrive in one frame — with per-frame motion, not tick steps.
-   */
-  private _renderProjectiles(renderTime: number): void {
-    if (this._snapshots.length === 0) return;
+  /** Enter a projectile's spawn state into the remote-projectile registry. */
+  private _registerRemoteProjectile(p: ProjectileState, spawnTime: number): void {
+    this._remoteProjectiles.set(p.id, {
+      ownerId: p.ownerId,
+      team: p.team,
+      // Walk back to the spawn point (`traveled` is 0 for fire events, >0 for
+      // welcome-snapshot arrows already in flight).
+      spawnPos: { x: p.pos.x - p.dir.x * p.traveled, z: p.pos.z - p.dir.z * p.traveled },
+      dir: { x: p.dir.x, z: p.dir.z },
+      speed: p.speed,
+      maxRange: p.maxRange,
+      damage: p.damage,
+      spawnTime,
+      deathTime: null,
+    });
+  }
 
-    let next = this._snapshots[this._snapshots.length - 1];
-    for (const s of this._snapshots) {
-      if (s.tick * this._tickDt >= renderTime) {
-        next = s;
-        break;
+  /** Register fire events (spawns) and hit events (deaths) from a snapshot. */
+  private _trackProjectileEvents(snap: SnapshotMessage): void {
+    if (!snap.events) return;
+    for (const ev of snap.events) {
+      if (ev.type === 'fire') {
+        this._registerRemoteProjectile(ev.projectile, ev.tick * this._tickDt);
+      } else if (ev.type === 'hit') {
+        const rp = this._remoteProjectiles.get(ev.projectileId);
+        // The projectile is gone server-side by this snapshot's tick; let the
+        // render timeline carry it to (approximately) the impact before hiding.
+        if (rp) rp.deathTime = snap.tick * this._tickDt;
       }
     }
-    // If renderTime has outrun the buffer (network stall), `behind` is 0 and
-    // projectiles hold at their last known position rather than extrapolating.
-    const behind = Math.max(0, next.tick * this._tickDt - renderTime);
-
-    // Release own-arrow ids the render timeline has fully passed.
-    for (const [id, rec] of this._ownArrowIds) {
-      if (rec.seenTick !== null && next.tick > rec.seenTick) this._ownArrowIds.delete(id);
-    }
-
-    this._state.projectiles = next.projectiles
-      .filter((sp) => !this._ownArrowIds.has(sp.id)) // own arrows render locally
-      .map((sp) => {
-        const back = Math.min(sp.speed * behind, sp.traveled);
-        return {
-          ...sp,
-          pos: { x: sp.pos.x - sp.dir.x * back, z: sp.pos.z - sp.dir.z * back },
-          dir: { x: sp.dir.x, z: sp.dir.z },
-          traveled: sp.traveled - back,
-        };
-      });
   }
 
   /**
-   * Note the last snapshot tick each own arrow was seen at (its release from
-   * `_ownArrowIds` happens in `_renderProjectiles`, on the render timeline).
-   * Ids never seen within a few batches died between broadcasts — they can't
-   * leak a duplicate, so drop them.
+   * Rebuild `_state.projectiles` for this frame by advancing every registered
+   * remote projectile to `renderTime`: a straight line at constant speed from
+   * its spawn state, so per-frame motion is exact without the server ever
+   * re-sending positions. Deaths: hero hits come from the server's `hit`
+   * event (`deathTime`); obstacle and max-range deaths are deterministic and
+   * computed locally, mirroring the sim.
    */
-  private _trackOwnArrowIds(snaps: Snapshot[]): void {
-    for (const [id, rec] of this._ownArrowIds) {
-      let seen = false;
-      for (const snap of snaps) {
-        if (snap.projectiles.some((p) => p.id === id)) {
-          rec.seenTick = snap.tick;
-          seen = true;
-        }
+  private _renderProjectiles(renderTime: number): void {
+    const out: ProjectileState[] = [];
+    for (const [id, rp] of this._remoteProjectiles) {
+      if (rp.deathTime !== null && renderTime >= rp.deathTime) {
+        this._retireRemoteProjectile(id);
+        continue;
       }
-      if (!seen && rec.seenTick === null && ++rec.missedBatches >= 6) {
-        this._ownArrowIds.delete(id);
+      const traveled = rp.speed * (renderTime - rp.spawnTime);
+      if (traveled < 0) continue; // fired ahead of the render timeline
+      if (traveled >= rp.maxRange) {
+        this._retireRemoteProjectile(id);
+        continue;
       }
+      const pos = { x: rp.spawnPos.x + rp.dir.x * traveled, z: rp.spawnPos.z + rp.dir.z * traveled };
+      if (rp.deathTime === null && sphereHitsObstacle(this._world, pos, ARROW.collisionRadius)) {
+        this._retireRemoteProjectile(id);
+        continue;
+      }
+      if (this._ownArrowIds.has(id)) continue; // own arrows render locally
+      out.push({
+        id,
+        ownerId: rp.ownerId,
+        team: rp.team,
+        pos,
+        dir: { x: rp.dir.x, z: rp.dir.z },
+        speed: rp.speed,
+        maxRange: rp.maxRange,
+        traveled,
+        damage: rp.damage,
+      });
     }
+    this._state.projectiles = out;
+  }
+
+  private _retireRemoteProjectile(id: string): void {
+    this._remoteProjectiles.delete(id);
+    this._ownArrowIds.delete(id);
   }
 
   /** Track our fire/hit events to link cosmetic arrows to server projectiles. */
@@ -920,27 +965,20 @@ export class Game {
     if (ev.type === 'fire' && ev.heroId === this._playerId) {
       const cosmetic = this._cosmeticProjectiles.find((c) => c.serverId === null);
       // Only hide the server projectile when a local arrow actually claimed
-      // it — if the cosmetic guard suppressed the spawn, the interp-timeline
+      // it — if the cosmetic guard suppressed the spawn, the simulated remote
       // projectile is the only visible copy and must stay rendered.
       if (cosmetic) {
-        cosmetic.serverId = ev.projectileId;
-        this._ownArrowIds.set(ev.projectileId, { seenTick: null, missedBatches: 0 });
+        cosmetic.serverId = ev.projectile.id;
+        this._ownArrowIds.add(ev.projectile.id);
       }
       return;
     }
-    // Our arrow hit someone: retire the local arrow closest to the impact.
-    // (Obstacle and max-range deaths are computed locally and need no event.)
+    // Our arrow hit someone: retire the local arrow claimed by that server
+    // projectile. (Obstacle and max-range deaths are computed locally and
+    // need no event.)
     if (ev.type === 'hit' && ev.sourceId === this._playerId) {
-      let best: (typeof this._cosmeticProjectiles)[number] | null = null;
-      let bestDist = 400; // ignore implausible matches (≈ max prediction lead)
-      for (const c of this._cosmeticProjectiles) {
-        const d = Math.hypot(c.pos.x - ev.x, c.pos.z - ev.z);
-        if (d < bestDist) {
-          best = c;
-          bestDist = d;
-        }
-      }
-      if (best) this._retireCosmetic(best);
+      const cosmetic = this._cosmeticProjectiles.find((c) => c.serverId === ev.projectileId);
+      if (cosmetic) this._retireCosmetic(cosmetic);
     }
   }
 
@@ -1141,6 +1179,7 @@ export class Game {
     for (const snap of snaps) {
       this._snapshots.push(snap);
       this._reconcileFromSnapshot(snap);
+      this._trackProjectileEvents(snap);
       // Track (serverTime − localTime) with a light EMA: smooths arrival
       // jitter, hard-resets on gross desync (join, tab suspend).
       const sample = snap.tick * this._tickDt - this._localTime;
@@ -1154,7 +1193,6 @@ export class Game {
     // ── Apply server state for remote entities ──
     if (snaps.length > 0) {
       this._applyServerState(snaps[snaps.length - 1]);
-      this._trackOwnArrowIds(snaps);
     }
 
     // ── Cold hero fields (low rate + event-triggered flushes) ──
@@ -1193,7 +1231,7 @@ export class Game {
     // (Snap-based reconciliation already happened per-snapshot above.)
     this._predictMovement(localInputs, dt);
 
-    // ── Own arrows fly locally; remote projectiles come off the interp timeline ──
+    // ── Own arrows fly locally; remote projectiles simulate on the render timeline ──
     this._tickCosmeticProjectiles(dt);
     if (renderTime !== null) this._renderProjectiles(renderTime);
 

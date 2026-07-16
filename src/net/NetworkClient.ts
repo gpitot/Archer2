@@ -24,7 +24,8 @@ export class NetworkClient {
   private _seq = 0;
   private _snapshots: SnapshotMessage[] = [];
   private _events: SimEvent[] = [];
-  /** Latest cold hero fields; absolute state, so only the newest matters. */
+  /** Latest cold hero fields, merged per hero: each entry is absolute state,
+   *  but a message may carry only the heroes that changed. */
   private _pendingMeta: HeroMeta[] | null = null;
   private _welcome: WelcomeMessage | null = null;
   private _pendingWelcome: ((w: WelcomeMessage) => void) | null = null;
@@ -155,7 +156,17 @@ export class NetworkClient {
         break;
 
       case 'heroMeta':
-        this._pendingMeta = msg.heroes;
+        // Merge per hero — messages may carry only changed heroes, and a
+        // later message's entry supersedes an earlier one's.
+        if (!this._pendingMeta) {
+          this._pendingMeta = [...msg.heroes];
+        } else {
+          for (const h of msg.heroes) {
+            const i = this._pendingMeta.findIndex((m) => m.id === h.id);
+            if (i >= 0) this._pendingMeta[i] = h;
+            else this._pendingMeta.push(h);
+          }
+        }
         break;
 
       // peerJoined / peerLeft are informational for now.
