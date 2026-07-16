@@ -71,6 +71,9 @@ export class GameRoom extends DurableObject<Env> {
   private _players = new Map<WebSocket, PlayerInfo>();
   /** playerId → WebSocket for targeted messages. */
   private _playerSockets = new Map<string, WebSocket>();
+  /** Last-broadcast serialized meta per hero, so scheduled sends can skip
+   *  heroes whose cold fields haven't changed. */
+  private _lastMetaJson = new Map<string, string>();
   private _nextPlayerId = 1;
 
   /**
@@ -161,7 +164,7 @@ export class GameRoom extends DurableObject<Env> {
         // hero's meta without waiting for the next scheduled heroMeta.
         const peerMsg: PeerJoinedMessage = { type: 'peerJoined', playerId, name: msg.name };
         this._broadcast(peerMsg, ws);
-        this._broadcast({ type: 'heroMeta', heroes: this._heroMetas() } satisfies HeroMetaMessage, ws);
+        this._broadcastHeroMeta(false, ws);
         break;
       }
 
@@ -184,6 +187,7 @@ export class GameRoom extends DurableObject<Env> {
 
     this._players.delete(ws);
     this._playerSockets.delete(info.playerId);
+    this._lastMetaJson.delete(info.playerId);
 
     // Mark hero as dead / despawned (removed from state).
     this._state.heroes = this._state.heroes.filter((h) => h.id !== info.playerId);
@@ -243,10 +247,30 @@ export class GameRoom extends DurableObject<Env> {
       this._pendingEvents = [];
     }
 
-    // Cold fields: on schedule, or immediately when an event changed them.
-    if (this._state.tick % META_EVERY === 0 || events.some((ev) => META_EVENTS.has(ev.type))) {
-      this._broadcast({ type: 'heroMeta', heroes: this._heroMetas() } satisfies HeroMetaMessage);
+    // Cold fields: on schedule (changed heroes only), or a full flush
+    // immediately when an event changed them.
+    if (events.some((ev) => META_EVENTS.has(ev.type))) {
+      this._broadcastHeroMeta(false);
+    } else if (this._state.tick % META_EVERY === 0) {
+      this._broadcastHeroMeta(true);
     }
+  }
+
+  /**
+   * Broadcast cold hero fields. With `changedOnly`, heroes whose serialized
+   * meta matches the last broadcast are skipped (idle heroes stop costing
+   * ~450 B × 4 Hz each); without it, everyone goes out as a full baseline.
+   */
+  private _broadcastHeroMeta(changedOnly: boolean, exclude?: WebSocket): void {
+    const heroes: HeroMeta[] = [];
+    for (const meta of this._heroMetas()) {
+      const json = JSON.stringify(meta);
+      if (changedOnly && this._lastMetaJson.get(meta.id) === json) continue;
+      this._lastMetaJson.set(meta.id, json);
+      heroes.push(meta);
+    }
+    if (heroes.length === 0) return;
+    this._broadcast({ type: 'heroMeta', heroes } satisfies HeroMetaMessage, exclude);
   }
 
   // ── Wire encoding ─────────────────────────────────────────────────

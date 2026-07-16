@@ -7,11 +7,13 @@
  *   1. pnpm dev:server
  *   2. pnpm tsx scripts/measure-ws.ts            # 4 players, 15 s
  *      PLAYERS=8 DURATION=30 pnpm tsx scripts/measure-ws.ts
+ *      IDLE=1 pnpm tsx scripts/measure-ws.ts     # connected but not acting
  */
 const PORT = process.env.PORT || '8787';
 const ROOM = process.env.ROOM || 'MEASURE';
 const PLAYERS = Number(process.env.PLAYERS || 4);
 const DURATION = Number(process.env.DURATION || 15); // seconds
+const IDLE = process.env.IDLE === '1';
 const BASE = `ws://localhost:${PORT}/ws`;
 
 interface Bot {
@@ -81,6 +83,7 @@ async function main() {
 
   const start = Date.now();
   const driver = setInterval(() => {
+    if (IDLE) return;
     for (const bot of bots) {
       // Wander and fire: enough to keep heroes moving and 1-2 arrows/s/bot
       // in flight, approximating active combat.
