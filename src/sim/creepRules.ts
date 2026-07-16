@@ -124,9 +124,12 @@ export interface CampDef {
   units: CreepTypeId[];
 }
 
+// Note: fractions are chosen so no camp's aggro radius reaches a spawn point
+// on the small test map (spawns sit at ~fz 0.73) — ranged camps (550 aggro)
+// stay in the far north corners, the mid-height flank camps are melee-only.
 export const CAMP_DEFS: CampDef[] = [
-  { id: 'camp_nw', fx: 0.15, fz: 0.15, units: ['ghoul', 'ghoul'] },
-  { id: 'camp_ne', fx: 0.85, fz: 0.15, units: ['dragon'] },
-  { id: 'camp_sw', fx: 0.15, fz: 0.85, units: ['dragon'] },
-  { id: 'camp_se', fx: 0.85, fz: 0.85, units: ['ghoul', 'dragon'] },
+  { id: 'camp_w', fx: 0.15, fz: 0.5, units: ['ghoul', 'ghoul'] },
+  { id: 'camp_e', fx: 0.85, fz: 0.5, units: ['ghoul'] },
+  { id: 'camp_nw', fx: 0.15, fz: 0.15, units: ['dragon'] },
+  { id: 'camp_ne', fx: 0.85, fz: 0.15, units: ['ghoul', 'dragon'] },
 ];

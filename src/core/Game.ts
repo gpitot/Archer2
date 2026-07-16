@@ -30,8 +30,9 @@ import { HeroPortrait } from '../ui/HeroPortrait';
 import { SpellBar } from '../ui/SpellBar';
 
 // ── Sim layer ──
-import { HeroState, ProjectileState, WardState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
+import { HeroState, ProjectileState, WardState, CreepState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
 import { stepMatch, xpForLevel, heroSpeed } from '../sim/stepMatch';
+import { spawnCamps } from '../sim/stepCreeps';
 import { SimWorld, sphereHitsObstacle } from '../sim/world';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
 import { HERO, ARROW, DODGE, WARD } from '../sim/rules';
@@ -46,6 +47,7 @@ import { NetworkClient } from '../net/NetworkClient';
 import { HeroView } from '../entities/HeroView';
 import { ProjectileView } from '../combat/ProjectileView';
 import { WardView } from '../entities/WardView';
+import { CreepView } from '../entities/CreepView';
 
 // ── Debug tooling ──
 import { ClientTrace } from '../testing/ClientTrace';
@@ -152,6 +154,7 @@ export class Game {
   private _heroViews = new Map<string, HeroView>();
   private _projectileViews = new Map<string, ProjectileView>();
   private _wardViews = new Map<string, WardView>();
+  private _creepViews = new Map<string, CreepView>();
   private _projectilePool: ProjectileView[] = [];
 
   // ── Player helpers ──
@@ -295,6 +298,9 @@ export class Game {
       // ── Network mode: connect to server, wait for welcome ──
       await this._initNetwork();
     } else {
+      // ── Offline mode: jungle creep camps, simulated by the local stepMatch ──
+      spawnCamps(this._state, this._world);
+
       // ── Offline mode: create local heroes ──
       // Maps with fixed spawns (test map) place the heroes deterministically.
       const heroSpawn = this._mapSpawns
@@ -933,6 +939,7 @@ export class Game {
 
     const pv = this._projectilePool.pop();
     if (!pv) return;
+    pv.setStyle('arrow'); // pooled views may last have flown as fireballs
 
     const spawnPos = {
       x: player.pos.x + dir.x * ARROW.spawnOffset,
@@ -1332,6 +1339,8 @@ export class Game {
     this._syncProjectileViews();
     // Sync ward views
     this._syncWardViews();
+    // Sync creep views
+    this._syncCreepViews(dt);
   }
 
   // ── Event handling ──────────────────────────────────────────────────
@@ -1355,6 +1364,26 @@ export class Game {
         shooterView?.playShoot();
         break;
       }
+      case 'creepHit': {
+        const creepView = this._creepViews.get(ev.creepId);
+        if (creepView) {
+          this._floatingText.spawn(creepView.mesh.position, ev.damage);
+          creepView.flashHit();
+        }
+        break;
+      }
+      case 'creepKill': {
+        // Bounty text for the local killer: gold + XP above the corpse.
+        if (ev.killerId === this._playerId) {
+          const y = this._heightAt(ev.x, ev.z);
+          this._floatingText.spawn(new THREE.Vector3(ev.x, y + 80, ev.z), ev.gold, '#ffcc44');
+          this._floatingText.spawn(new THREE.Vector3(ev.x, y + 50, ev.z), ev.xp, '#88ff88');
+        }
+        break;
+      }
+      case 'creepRespawn':
+        // State inspection drives the view; nothing cosmetic yet.
+        break;
       case 'kill':
       case 'respawn':
       case 'purchase':
@@ -1434,6 +1463,22 @@ export class Game {
     }
   }
 
+  // ── Creep view sync ─────────────────────────────────────────────────
+
+  private _syncCreepViews(dt: number): void {
+    // Creep ids are stable for the whole match, so views are created once
+    // and never churned; death/respawn is just a visibility toggle in sync.
+    for (const c of this._state.creeps) {
+      let cv = this._creepViews.get(c.id);
+      if (!cv) {
+        cv = new CreepView(c.id, c.type, this._heightAt.bind(this));
+        this._scene.add(cv.mesh);
+        this._creepViews.set(c.id, cv);
+      }
+      cv.sync(c, dt);
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────
 
   private _render(_interpolation: number): void {
@@ -1459,6 +1504,26 @@ export class Game {
       if (w.team === playerTeam) {
         markers.push({ x: w.pos.x, z: w.pos.z, color: '#66ff88', radius: 2 });
       }
+    }
+
+    // Creep camps: one static marker each, dimmed while the camp is cleared;
+    // individual creeps only when alive and inside our vision.
+    const camps = new Map<string, { x: number; z: number; alive: boolean }>();
+    for (const c of this._state.creeps) {
+      let camp = camps.get(c.campId);
+      if (!camp) {
+        camp = { x: c.spawnPos.x, z: c.spawnPos.z, alive: false };
+        camps.set(c.campId, camp);
+      }
+      if (c.alive) {
+        camp.alive = true;
+        if (this._fog.isVisible(playerTeam, c.pos.x, c.pos.z)) {
+          markers.push({ x: c.pos.x, z: c.pos.z, color: '#c8b830', radius: 2 });
+        }
+      }
+    }
+    for (const camp of camps.values()) {
+      markers.push({ x: camp.x, z: camp.z, color: camp.alive ? '#999966' : '#444444', radius: 3 });
     }
 
     // Shop marker
@@ -1538,6 +1603,15 @@ export class Game {
       const wv = this._wardViews.get(w.id);
       if (wv) {
         wv.mesh.visible = this._fog.isVisible(team, w.pos.x, w.pos.z);
+      }
+    }
+
+    // Creeps are neutral: they reveal nothing themselves and are visible
+    // only inside our own vision.
+    for (const c of this._state.creeps) {
+      const cv = this._creepViews.get(c.id);
+      if (cv) {
+        cv.mesh.visible = c.alive && this._fog.isVisible(team, c.pos.x, c.pos.z);
       }
     }
   }
