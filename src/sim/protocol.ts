@@ -12,7 +12,7 @@
  *    economy, progression, inventory — which change rarely.
  * Values are quantized server-side before serialization.
  */
-import { Command, Inventory, ProjectileState, WardState, SimEvent } from './state';
+import { Command, Inventory, ProjectileState, WardState, BlastState, SimEvent } from './state';
 import { Vec2 } from './math';
 
 // ── Client → Server ──────────────────────────────────────────────────
@@ -82,6 +82,7 @@ export interface HeroMeta {
   dodgeCooldown: number;
   dodgeLevel: number;
   blinkCooldown: number;
+  blastCooldown: number;
 }
 
 // ── Server → Client ──────────────────────────────────────────────────
@@ -104,6 +105,8 @@ export interface SnapshotMessage {
   heroes: SnapshotHero[];
   projectiles: ProjectileState[];
   wards: WardState[];
+  /** Pending R-spell blast zones — visible to every player. */
+  blasts: BlastState[];
   /** Sim events from this tick, if any (piggybacked to save a WS frame). */
   events?: SimEvent[];
 }
@@ -138,6 +141,7 @@ export interface Snapshot {
   heroes: SnapshotHero[];
   projectiles: ProjectileState[];
   wards: WardState[];
+  blasts: BlastState[];
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────

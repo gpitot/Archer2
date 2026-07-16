@@ -48,6 +48,7 @@ export interface HeroState {
   dodgeCooldown: number;
   dodgeLevel: number;
   blinkCooldown: number;
+  blastCooldown: number;
   inventory: Inventory;
   wardCharges: number;
   abilityLevel: number;
@@ -75,17 +76,29 @@ export interface WardState {
   life: number;
 }
 
+/** A pending R-spell blast zone — visible to everyone, detonates when timer hits 0. */
+export interface BlastState {
+  id: string;
+  ownerId: string;
+  team: number;
+  pos: Vec2;
+  /** Seconds until detonation. */
+  timer: number;
+}
+
 export interface MatchState {
   tick: number;
   heroes: HeroState[];
   projectiles: ProjectileState[];
   wards: WardState[];
+  blasts: BlastState[];
   /** First blood is a one-time global bonus. */
   firstBlood: boolean;
   /** Accumulates real time toward the next per-second passive-income tick. */
   incomeAccumulator: number;
   nextProjectileId: number;
   nextWardId: number;
+  nextBlastId: number;
 }
 
 // ── Commands (client → sim) ───────────────────────────────────────────
@@ -97,7 +110,8 @@ export type Command =
   | { type: 'buy'; itemIndex: number }
   | { type: 'useItem'; slot: number }
   | { type: 'levelAbility'; ability: 'arrow' | 'dodge' }
-  | { type: 'dodge' };
+  | { type: 'dodge' }
+  | { type: 'blast'; x: number; z: number };
 
 /** A command tagged with the hero it applies to, queued for the next tick. */
 export interface HeroInput {
@@ -111,6 +125,7 @@ export type SimEvent =
   | { type: 'kill'; sourceId: string; victimId: string }
   | { type: 'respawn'; heroId: string }
   | { type: 'fire'; heroId: string; projectileId: string }
+  | { type: 'blastExplode'; blastId: string; ownerId: string; x: number; z: number }
   | { type: 'purchase'; heroId: string; itemId: string }
   | { type: 'levelUp'; heroId: string; level: number };
 
@@ -150,6 +165,7 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     dodgeCooldown: 0,
     dodgeLevel: 0,
     blinkCooldown: 0,
+    blastCooldown: 0,
   };
 }
 
@@ -159,9 +175,11 @@ export function createMatchState(): MatchState {
     heroes: [],
     projectiles: [],
     wards: [],
+    blasts: [],
     firstBlood: true,
     incomeAccumulator: 0,
     nextProjectileId: 1,
     nextWardId: 1,
+    nextBlastId: 1,
   };
 }

@@ -2,7 +2,7 @@
  * MOBA-style spell bar overlay.
  *
  * Renders 4 ability slots (QWER) at the bottom centre of the screen.
- * Q is wired to the ArrowAbility; W/E/R are empty placeholders.
+ * Q is wired to the ArrowAbility; W is Dodge; E is Reveal; R is Blast.
  * Q also has a charge indicator above the slot when the ability has >1 max charge.
  */
 export class SpellBar {
@@ -27,14 +27,17 @@ export class SpellBar {
     const keys: { key: string; active: boolean }[] = [
       { key: 'Q', active: true },
       { key: 'W', active: true },
-      { key: 'E', active: false },
-      { key: 'R', active: false },
+      { key: 'E', active: true },
+      { key: 'R', active: true },
     ];
     for (const { key, active } of keys) {
       const slot = new SpellSlot(key, active);
       this._slots.push(slot);
       this.container.appendChild(slot.el);
     }
+    // E (Reveal) and R (Blast) have no levels — hide their level dots.
+    this._slots[2].hideLevelDots();
+    this._slots[3].hideLevelDots();
 
     document.body.appendChild(this.container);
   }
@@ -48,6 +51,8 @@ export class SpellBar {
     dodgeLevel: number,
     charges: number,
     maxCharges: number,
+    revealCooldownProgress: number,
+    blastCooldownProgress: number,
   ): void {
     // Q — Arrow
     const qOnCd = cooldownProgress < 1;
@@ -63,6 +68,16 @@ export class SpellBar {
     this._slots[1].setLevel(dodgeLevel);
     this._slots[1].setCanLevel(skillPoints > 0 && dodgeLevel < 4);
     this._slots[1].setOnCooldown(wOnCd);
+
+    // E — Reveal (no levels)
+    const eOnCd = revealCooldownProgress < 1;
+    this._slots[2].setCooldown(revealCooldownProgress);
+    this._slots[2].setOnCooldown(eOnCd);
+
+    // R — Blast (no levels)
+    const rOnCd = blastCooldownProgress < 1;
+    this._slots[3].setCooldown(blastCooldownProgress);
+    this._slots[3].setOnCooldown(rOnCd);
   }
 
   destroy(): void {
@@ -105,7 +120,7 @@ class SpellSlot {
       color: ${this._isActive ? '#cc9944' : '#444'};
       opacity: 0.6;
     `;
-    icon.textContent = key === 'Q' ? '➹' : key === 'W' ? '↯' : '·';
+    icon.textContent = key === 'Q' ? '➹' : key === 'W' ? '↯' : key === 'E' ? '◉' : key === 'R' ? '✸' : '·';
     this.el.appendChild(icon);
 
     // Cooldown overlay (sweeps from top to bottom, WC3-style blue tint)
@@ -192,6 +207,11 @@ class SpellSlot {
     inner.appendChild(this._cooldown);
     inner.appendChild(this._keyLabel);
     inner.appendChild(this._levelDots);
+  }
+
+  /** Hide the level dots for abilities that have no levels. */
+  hideLevelDots(): void {
+    this._levelDots.style.display = 'none';
   }
 
   setCooldown(progress: number): void {

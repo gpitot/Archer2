@@ -243,6 +243,11 @@ export class GameRoom extends DurableObject<Env> {
         pos: { x: q(w.pos.x), z: q(w.pos.z) },
         life: q(w.life),
       })),
+      blasts: this._state.blasts.map((b) => ({
+        ...b,
+        pos: { x: q(b.pos.x), z: q(b.pos.z) },
+        timer: q(b.timer),
+      })),
     };
   }
 
@@ -290,6 +295,7 @@ export class GameRoom extends DurableObject<Env> {
       dodgeCooldown: q(h.dodgeCooldown),
       dodgeLevel: h.dodgeLevel,
       blinkCooldown: q(h.blinkCooldown),
+      blastCooldown: q(h.blastCooldown),
     }));
   }
 

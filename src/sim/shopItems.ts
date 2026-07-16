@@ -4,6 +4,9 @@
  */
 import { ShopItemDef } from './world';
 
+/** Blink Dagger cooldown in seconds. */
+export const BLINK_COOLDOWN = 10;
+
 export const SHOP_ITEMS: ShopItemDef[] = [
   {
     id: 'boots',

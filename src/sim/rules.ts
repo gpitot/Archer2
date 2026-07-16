@@ -74,6 +74,25 @@ export const DODGE = {
   maxLevel: 4,
 } as const;
 
+// ── Reveal ability (E) ───────────────────────────────────────────────
+export const REVEAL = {
+  /** Seconds enemy heroes stay pinged on the minimap. */
+  duration: 2,
+  cooldown: 15,
+} as const;
+
+// ── Blast ability (R) ────────────────────────────────────────────────
+export const BLAST = {
+  /** Max distance from the hero the blast can be targeted. */
+  castRange: 900,
+  /** Damage radius around the target point. */
+  radius: 250,
+  /** Seconds between the cast (circle appears) and the explosion. */
+  delay: 1.5,
+  damage: 300,
+  cooldown: 20,
+} as const;
+
 // ── Wards ─────────────────────────────────────────────────────────────
 export const WARD = {
   /** WC3 Observer Ward sight range. */

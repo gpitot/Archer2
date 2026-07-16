@@ -11,6 +11,7 @@
 import * as V from './math';
 import {
   ARROW,
+  BLAST,
   BOUNTY_TABLE,
   DODGE,
   HERO,
@@ -31,6 +32,7 @@ import {
   SimEvent,
 } from './state';
 import { findReachableNear, findRespawnPosition, SimWorld, sphereHitsObstacle } from './world';
+import { BLINK_COOLDOWN } from './shopItems';
 
 /**
  * Advance the match by `dt` seconds, applying `inputs` queued since the last
@@ -60,6 +62,7 @@ export function stepMatch(
   }
 
   stepProjectiles(state, dt, world, events);
+  stepBlasts(state, dt, events);
   stepWards(state, dt);
   stepIncome(state, dt);
 
@@ -100,6 +103,9 @@ function applyCommand(
       break;
     case 'dodge':
       activateDodge(hero);
+      break;
+    case 'blast':
+      castBlast(state, hero, cmd.x, cmd.z);
       break;
   }
 }
@@ -223,7 +229,7 @@ function blink(hero: HeroState, tx: number, tz: number, world: SimWorld): void {
   // Teleport instantly — clear movement state.
   stopMovement(hero);
   hero.pos = { x: snapped.x, z: snapped.z };
-  hero.blinkCooldown = 10;
+  hero.blinkCooldown = BLINK_COOLDOWN;
 }
 
 function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]): void {
@@ -270,6 +276,28 @@ function spendSkillPoint(hero: HeroState, ability: 'arrow' | 'dodge'): void {
   hero.skillPoints--;
   if (ability === 'arrow') hero.abilityLevel++;
   else hero.dodgeLevel++;
+}
+
+/** R — Blast: mark an AoE circle that detonates after a fixed delay. */
+function castBlast(state: MatchState, hero: HeroState, x: number, z: number): void {
+  if (!hero.alive) return;
+  if (hero.blastCooldown > 0) return;
+  const target = { x, z };
+  if (V.distance(hero.pos, target) > BLAST.castRange + 1) return;
+
+  // Casting interrupts movement and turns the hero toward the target.
+  stopMovement(hero);
+  const dir = V.sub(target, hero.pos);
+  if (V.length(dir) > 0.01) hero.targetFacing = V.heading(dir);
+
+  hero.blastCooldown = BLAST.cooldown;
+  state.blasts.push({
+    id: `b${state.nextBlastId++}`,
+    ownerId: hero.id,
+    team: hero.team,
+    pos: target,
+    timer: BLAST.delay,
+  });
 }
 
 function activateDodge(hero: HeroState): void {
@@ -321,6 +349,10 @@ function stepHero(hero: HeroState, dt: number): void {
 
   if (hero.blinkCooldown > 0) {
     hero.blinkCooldown = Math.max(0, hero.blinkCooldown - dt);
+  }
+
+  if (hero.blastCooldown > 0) {
+    hero.blastCooldown = Math.max(0, hero.blastCooldown - dt);
   }
 
   if (hero.invulnerable) {
@@ -498,6 +530,39 @@ function addXp(hero: HeroState, amount: number, events: SimEvent[]): void {
     hero.level++;
     hero.skillPoints++;
     events.push({ type: 'levelUp', heroId: hero.id, level: hero.level });
+  }
+}
+
+// ── Blasts ──────────────────────────────────────────────────────────────
+
+/** Tick pending blast zones; detonate when the fuse runs out. */
+function stepBlasts(state: MatchState, dt: number, events: SimEvent[]): void {
+  for (let i = state.blasts.length - 1; i >= 0; i--) {
+    const blast = state.blasts[i];
+    blast.timer -= dt;
+    if (blast.timer > 0) continue;
+
+    state.blasts.splice(i, 1);
+    events.push({
+      type: 'blastExplode',
+      blastId: blast.id,
+      ownerId: blast.ownerId,
+      x: blast.pos.x,
+      z: blast.pos.z,
+    });
+
+    const source = state.heroes.find((h) => h.id === blast.ownerId);
+    if (!source) continue;
+    const r2 = (BLAST.radius + HERO.bodyRadius) ** 2;
+
+    // Enemy heroes in the circle. The 1.5s fuse is the counterplay — the
+    // blast ignores dodge, only invulnerability (respawn) protects.
+    for (const hero of state.heroes) {
+      if (hero.team === blast.team) continue;
+      if (!hero.alive || hero.invulnerable) continue;
+      if (V.distanceSq(blast.pos, hero.pos) > r2) continue;
+      applyDamage(state, hero, source, BLAST.damage, events);
+    }
   }
 }
 

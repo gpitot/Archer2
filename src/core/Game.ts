@@ -30,12 +30,12 @@ import { HeroPortrait } from '../ui/HeroPortrait';
 import { SpellBar } from '../ui/SpellBar';
 
 // ── Sim layer ──
-import { HeroState, ProjectileState, WardState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
+import { HeroState, ProjectileState, WardState, BlastState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
 import { stepMatch, xpForLevel, heroSpeed } from '../sim/stepMatch';
 import { SimWorld, sphereHitsObstacle } from '../sim/world';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
-import { HERO, ARROW, DODGE, WARD } from '../sim/rules';
-import { SHOP_ITEMS } from '../sim/shopItems';
+import { HERO, ARROW, DODGE, WARD, REVEAL, BLAST } from '../sim/rules';
+import { BLINK_COOLDOWN, SHOP_ITEMS } from '../sim/shopItems';
 import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta } from '../sim/protocol';
 import { Vec2, distance, clamp } from '../sim/math';
 
@@ -46,6 +46,8 @@ import { NetworkClient } from '../net/NetworkClient';
 import { HeroView } from '../entities/HeroView';
 import { ProjectileView } from '../combat/ProjectileView';
 import { WardView } from '../entities/WardView';
+import { BlastView } from '../entities/BlastView';
+import { ExplosionEffects } from '../rendering/ExplosionEffect';
 
 // ── Debug tooling ──
 import { ClientTrace } from '../testing/ClientTrace';
@@ -89,6 +91,10 @@ export class Game {
   private _state!: MatchState;
   private _playerId!: string;
   private _pendingCommands: Command[] = [];
+
+  // E — Reveal: client-side minimap ping of enemy heroes.
+  private _revealCooldown = 0;
+  private _revealTimer = 0;
 
   // ── Networking ──
   private _network: NetworkClient | null = null;
@@ -152,6 +158,8 @@ export class Game {
   private _heroViews = new Map<string, HeroView>();
   private _projectileViews = new Map<string, ProjectileView>();
   private _wardViews = new Map<string, WardView>();
+  private _blastViews = new Map<string, BlastView>();
+  private _explosions!: ExplosionEffects;
   private _projectilePool: ProjectileView[] = [];
 
   // ── Player helpers ──
@@ -407,6 +415,26 @@ export class Game {
       }
     });
 
+    // E — Reveal enemy hero locations on the minimap
+    this._input.onKeyDown('KeyE', () => {
+      this._targeting.cancel();
+      if (!this._playerState.alive) return;
+      if (this._revealCooldown > 0) return;
+      this._revealTimer = REVEAL.duration;
+      this._revealCooldown = REVEAL.cooldown;
+    });
+
+    // R — Blast: ground-targeted AoE with a detonation delay
+    this._input.onKeyDown('KeyR', () => {
+      // Toggle: pressing R again while aiming cancels.
+      if (this._targeting.isActive && this._targeting.sourceItemId === 'blast') {
+        this._targeting.cancel();
+        return;
+      }
+      this._targeting.cancel();
+      this._activateBlastTargeting();
+    });
+
     // B — Open shop when near
     this._input.onKeyDown('KeyB', () => {
       if (this._shopWindow.visible) {
@@ -467,6 +495,7 @@ export class Game {
     this._itemBar = new ItemBar();
     this._kdDisplay = new KDDisplay();
     this._moveIndicators = new MoveIndicatorManager(this._scene);
+    this._explosions = new ExplosionEffects(this._scene);
 
     // ── Debug panel (local dev only) ──
     if (!this._networkMode) {
@@ -578,6 +607,10 @@ export class Game {
     return src.map((w) => ({ ...w, pos: { x: w.pos.x, z: w.pos.z } }));
   }
 
+  private _cloneBlasts(src: BlastState[]): BlastState[] {
+    return src.map((b) => ({ ...b, pos: { x: b.pos.x, z: b.pos.z } }));
+  }
+
   /**
    * Adopt a full snapshot as the initial local state (welcome handshake).
    * Hydrates full HeroStates from the wire hot fields + cold meta, then
@@ -588,6 +621,7 @@ export class Game {
     this._state.heroes = snap.heroes.map((h) => this._heroFromWire(h, metaById.get(h.id)));
     this._state.projectiles = this._cloneProjectiles(snap.projectiles);
     this._state.wards = this._cloneWards(snap.wards);
+    this._state.blasts = this._cloneBlasts(snap.blasts ?? []);
     this._state.tick = snap.tick;
 
     const ourHero = this._state.heroes.find((h) => h.id === this._playerId);
@@ -629,6 +663,7 @@ export class Game {
     // `_renderProjectiles`, not adopted here.)
     this._syncHeroViews(this._state.heroes);
     this._state.wards = this._cloneWards(snap.wards);
+    this._state.blasts = this._cloneBlasts(snap.blasts ?? []);
     this._state.tick = snap.tick;
   }
 
@@ -718,6 +753,7 @@ export class Game {
     dst.dodgeCooldown = src.dodgeCooldown;
     dst.dodgeLevel = src.dodgeLevel;
     dst.blinkCooldown = src.blinkCooldown;
+    dst.blastCooldown = src.blastCooldown;
   }
 
   /** Run local stepMatch for the player's hero only (instant movement feel). */
@@ -742,6 +778,9 @@ export class Game {
         }
         if (idle.blinkCooldown > 0) {
           idle.blinkCooldown = Math.max(0, idle.blinkCooldown - dt);
+        }
+        if (idle.blastCooldown > 0) {
+          idle.blastCooldown = Math.max(0, idle.blastCooldown - dt);
         }
       }
       return;
@@ -1031,6 +1070,10 @@ export class Game {
   private update(delta: number): void {
     const dt = Math.min(delta, 0.1);
 
+    // Reveal (E) timers are purely presentational — tick them locally.
+    if (this._revealCooldown > 0) this._revealCooldown = Math.max(0, this._revealCooldown - dt);
+    if (this._revealTimer > 0) this._revealTimer = Math.max(0, this._revealTimer - dt);
+
     if (this._networkMode) {
       this._updateNetwork(dt);
     } else {
@@ -1305,6 +1348,33 @@ export class Game {
     );
   }
 
+  /** Activate ground-targeting for the R blast. */
+  private _activateBlastTargeting(): void {
+    const p = this._playerState;
+    if (!p || !p.alive) return;
+    if (p.blastCooldown > 0) return;
+    this._targeting.activate(
+      {
+        range: BLAST.castRange,
+        indicatorColor: 0xff5522,
+        onTarget: (x, z) => {
+          this._enqueueCommand({ type: 'blast', x, z });
+        },
+        onCancel: () => {},
+        onMove: (x, z) => {
+          this._enqueueCommand({ type: 'moveTo', x, z });
+          this._moveIndicators.spawn(
+            new THREE.Vector3(x, this._heightAt(x, z), z),
+          );
+        },
+      },
+      'blast',
+      p.pos.x, p.pos.z,
+      this._heightAt(p.pos.x, p.pos.z),
+      this._scene,
+    );
+  }
+
   private _updateCamera(dt: number): void {
     const pan = this._input.edgePan;
     if (pan.length() > 0) {
@@ -1332,6 +1402,35 @@ export class Game {
     this._syncProjectileViews();
     // Sync ward views
     this._syncWardViews();
+    // Sync blast zone views + transient explosion effects
+    this._syncBlastViews();
+    this._explosions.update(dt);
+  }
+
+  // ── Blast zone view sync ───────────────────────────────────────────────────
+
+  private _syncBlastViews(): void {
+    const activeIds = new Set(this._state.blasts.map((b) => b.id));
+
+    // Create views for new blast zones
+    for (const b of this._state.blasts) {
+      if (!this._blastViews.has(b.id)) {
+        const bv = new BlastView(b.id);
+        this._scene.add(bv.mesh);
+        this._blastViews.set(b.id, bv);
+      }
+    }
+
+    // Sync or remove each blast view
+    for (const [id, bv] of this._blastViews) {
+      if (activeIds.has(id)) {
+        const b = this._state.blasts.find((sb) => sb.id === id)!;
+        bv.sync(b, this._heightAt.bind(this));
+      } else {
+        bv.dispose();
+        this._blastViews.delete(id);
+      }
+    }
   }
 
   // ── Event handling ──────────────────────────────────────────────────
@@ -1353,6 +1452,16 @@ export class Game {
         const shooterView = this._heroViews.get(ev.heroId);
         shooterView?.flashFire();
         shooterView?.playShoot();
+        break;
+      }
+      case 'blastExplode': {
+        // Detonation visual for everyone. Damage numbers arrive as separate
+        // 'hit' events from the same tick.
+        const y = this._heightAt(ev.x, ev.z);
+        this._explosions.spawn(ev.x, y + 10, ev.z, BLAST.radius);
+        // In network mode the zone also vanishes from the next snapshot —
+        // dropping it now avoids a one-frame lingering circle.
+        this._state.blasts = this._state.blasts.filter((b) => b.id !== ev.blastId);
         break;
       }
       case 'kill':
@@ -1443,16 +1552,24 @@ export class Game {
     const playerTeam = p.team;
 
     // Minimap markers
-    const markers = this._state.heroes
-      .filter((h) =>
-        h.alive &&
-        (h.team === playerTeam || this._fog.isVisible(playerTeam, h.pos.x, h.pos.z)))
-      .map((h) => ({
+    const revealActive = this._revealTimer > 0;
+    const markers: { x: number; z: number; color: string; radius: number }[] = [];
+    for (const h of this._state.heroes) {
+      if (!h.alive) continue;
+      const visible = h.team === playerTeam || this._fog.isVisible(playerTeam, h.pos.x, h.pos.z);
+      if (!visible && !revealActive) continue;
+      if (!visible) {
+        // Revealed by E: pulsing ping ring under the dot.
+        const pulse = 5 + 3 * Math.abs(Math.sin(performance.now() / 150));
+        markers.push({ x: h.pos.x, z: h.pos.z, color: 'rgba(255,80,80,0.35)', radius: pulse });
+      }
+      markers.push({
         x: h.pos.x,
         z: h.pos.z,
         color: h.team === playerTeam ? '#44aaff' : '#ff4444',
         radius: h.id === this._playerId ? 4 : 3,
-      }));
+      });
+    }
 
     // Own wards
     for (const w of this._state.wards) {
@@ -1481,6 +1598,8 @@ export class Game {
       cdProgress, p.abilityLevel, p.skillPoints,
       dodgeCdProgress, p.dodgeLevel,
       p.abilityCharges, ARROW.maxCharges,
+      this._revealCooldown <= 0 ? 1 : 1 - this._revealCooldown / REVEAL.cooldown,
+      p.blastCooldown <= 0 ? 1 : 1 - p.blastCooldown / BLAST.cooldown,
     );
 
     // Hero portrait
@@ -1493,7 +1612,12 @@ export class Game {
     );
 
     this._goldDisplay.update(p.gold);
-    this._itemBar.update(p.inventory, { sentry_wards: p.wardCharges });
+    const blinkCdProgress = p.blinkCooldown <= 0 ? 1 : 1 - p.blinkCooldown / BLINK_COOLDOWN;
+    this._itemBar.update(
+      p.inventory,
+      { sentry_wards: p.wardCharges },
+      { blink_dagger: blinkCdProgress },
+    );
     this._kdDisplay.update(p.kills, p.deaths);
 
     // Shop overlay — show when in range
