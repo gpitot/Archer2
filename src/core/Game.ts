@@ -37,7 +37,8 @@ import { SimWorld, sphereHitsObstacle } from '../sim/world';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
 import { HERO, ARROW, DODGE, WARD } from '../sim/rules';
 import { SHOP_ITEMS } from '../sim/shopItems';
-import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta } from '../sim/protocol';
+import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta, CreepMeta } from '../sim/protocol';
+import { creepMaxHp } from '../sim/creepRules';
 import { Vec2, distance, clamp } from '../sim/math';
 
 // ── Networking ──
@@ -525,7 +526,7 @@ export class Game {
 
     // Apply the welcome snapshot to initialise our state and views.
     this._playerId = welcome.playerId;
-    this._applySnapshot(welcome.snapshot, welcome.meta);
+    this._applySnapshot(welcome.snapshot, welcome.meta, welcome.creepMeta ?? []);
 
     // Confirm our hero made it into the snapshot (`_applySnapshot` set
     // `_playerState` from it).
@@ -589,17 +590,40 @@ export class Game {
    * Hydrates full HeroStates from the wire hot fields + cold meta, then
    * builds views. Nothing aliases the snapshot.
    */
-  private _applySnapshot(snap: Snapshot, meta: HeroMeta[]): void {
+  private _applySnapshot(snap: Snapshot, meta: HeroMeta[], creepMeta: CreepMeta[] = []): void {
     const metaById = new Map(meta.map((m) => [m.id, m]));
     this._state.heroes = snap.heroes.map((h) => this._heroFromWire(h, metaById.get(h.id)));
     this._state.projectiles = this._cloneProjectiles(snap.projectiles);
     this._state.wards = this._cloneWards(snap.wards);
+    // Hydrate persistent creeps from the cold registry. Ids are stable for
+    // the whole match, so this list is never rebuilt — snapshots update hot
+    // fields, events carry death/respawn/level.
+    this._state.creeps = creepMeta.map((m) => this._creepFromMeta(m));
     this._state.tick = snap.tick;
 
     const ourHero = this._state.heroes.find((h) => h.id === this._playerId);
     if (ourHero) this._playerState = ourHero;
 
     this._syncHeroViews(this._state.heroes);
+  }
+
+  /** Build a persistent local CreepState from a welcome registry entry. */
+  private _creepFromMeta(m: CreepMeta): CreepState {
+    return {
+      id: m.id,
+      campId: m.campId,
+      type: m.type,
+      pos: { x: m.pos.x, z: m.pos.z },
+      facing: 0,
+      spawnPos: { x: m.spawnPos.x, z: m.spawnPos.z },
+      hp: m.hp,
+      level: m.level,
+      alive: m.alive,
+      respawnTimer: 0,
+      aggroTargetId: null,
+      attackCooldown: 0,
+      lastActiveTick: 0,
+    };
   }
 
   // ── Network prediction helpers ──────────────────────────────────────
@@ -635,6 +659,19 @@ export class Game {
     // `_renderProjectiles`, not adopted here.)
     this._syncHeroViews(this._state.heroes);
     this._state.wards = this._cloneWards(snap.wards);
+
+    // Creeps: presence in the snapshot means alive; update hot fields.
+    // Absence means idle (hold last state) or dead — death arrives via the
+    // `creepKill` event, never by omission. The persistent list is stable.
+    for (const sc of snap.creeps ?? []) {
+      const creep = this._state.creeps.find((c) => c.id === sc.id);
+      if (!creep) continue;
+      creep.alive = true;
+      creep.hp = sc.hp;
+      creep.pos.x = sc.pos.x;
+      creep.pos.z = sc.pos.z;
+      creep.facing = sc.facing;
+    }
     this._state.tick = snap.tick;
   }
 
@@ -817,6 +854,46 @@ export class Game {
       hero.pos.z = prevH.pos.z + (nextH.pos.z - prevH.pos.z) * t;
       // lerp angle
       hero.facing = _lerpAngle(prevH.facing, nextH.facing, t);
+    }
+  }
+
+  /**
+   * Interpolate creep positions between the snapshot pair straddling
+   * `renderTime` — the same timeline as remote heroes, with no local-player
+   * skip (creeps are always server-driven). A creep absent from either
+   * snapshot is idle or dead and simply holds its last state.
+   */
+  private _interpolateCreeps(renderTime: number): void {
+    if (this._snapshots.length < 2) return;
+
+    let prev = this._snapshots[0];
+    let next = this._snapshots[1];
+    for (let i = 0; i < this._snapshots.length - 1; i++) {
+      const a = this._snapshots[i];
+      const b = this._snapshots[i + 1];
+      if (a.tick * this._tickDt <= renderTime && renderTime <= b.tick * this._tickDt) {
+        prev = a;
+        next = b;
+        break;
+      }
+      if (i === this._snapshots.length - 2) {
+        prev = a;
+        next = b;
+      }
+    }
+
+    const prevTime = prev.tick * this._tickDt;
+    const nextTime = next.tick * this._tickDt;
+    const span = nextTime - prevTime;
+    const t = span > 0 ? clamp((renderTime - prevTime) / span, 0, 1) : 0;
+
+    for (const creep of this._state.creeps) {
+      const prevC = prev.creeps?.find((c) => c.id === creep.id);
+      const nextC = next.creeps?.find((c) => c.id === creep.id);
+      if (!prevC || !nextC) continue;
+      creep.pos.x = prevC.pos.x + (nextC.pos.x - prevC.pos.x) * t;
+      creep.pos.z = prevC.pos.z + (nextC.pos.z - prevC.pos.z) * t;
+      creep.facing = _lerpAngle(prevC.facing, nextC.facing, t);
     }
   }
 
@@ -1150,8 +1227,11 @@ export class Game {
       this._handleEvent(ev, dt);
     }
 
-    // ── Interpolate remote heroes ──
-    if (renderTime !== null) this._interpolateHeroes(renderTime);
+    // ── Interpolate remote heroes & creeps ──
+    if (renderTime !== null) {
+      this._interpolateHeroes(renderTime);
+      this._interpolateCreeps(renderTime);
+    }
 
     // ── Local prediction: move own hero with pending inputs ──
     // (Snap-based reconciliation already happened per-snapshot above.)
@@ -1373,6 +1453,11 @@ export class Game {
         break;
       }
       case 'creepKill': {
+        // Snapshots omit dead creeps rather than flagging them, so in
+        // network mode the death itself is event-carried. (Offline the sim
+        // already set this — idempotent.)
+        const creep = this._state.creeps.find((c) => c.id === ev.creepId);
+        if (creep) creep.alive = false;
         // Bounty text for the local killer: gold + XP above the corpse.
         if (ev.killerId === this._playerId) {
           const y = this._heightAt(ev.x, ev.z);
@@ -1381,9 +1466,17 @@ export class Game {
         }
         break;
       }
-      case 'creepRespawn':
-        // State inspection drives the view; nothing cosmetic yet.
+      case 'creepRespawn': {
+        // Event-carried respawn: back to full hp at the camp, one level up.
+        const creep = this._state.creeps.find((c) => c.id === ev.creepId);
+        if (creep) {
+          creep.alive = true;
+          creep.level = ev.level;
+          creep.hp = creepMaxHp(creep.type, ev.level);
+          creep.pos = { x: creep.spawnPos.x, z: creep.spawnPos.z };
+        }
         break;
+      }
       case 'kill':
       case 'respawn':
       case 'purchase':

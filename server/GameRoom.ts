@@ -14,6 +14,8 @@
 import { DurableObject, WebSocket } from 'cloudflare:workers';
 import { MatchState, HeroInput, HeroState, SimEvent, createMatchState, createHeroState } from '../src/sim/state';
 import { stepMatch } from '../src/sim/stepMatch';
+import { spawnCamps } from '../src/sim/stepCreeps';
+import { CREEP } from '../src/sim/creepRules';
 import { SimWorld, ObstacleAABB, Rect, Shop, findRespawnPosition } from '../src/sim/world';
 import { SHOP_ITEMS } from '../src/sim/shopItems';
 import { NavGrid } from '../src/navigation/NavGrid';
@@ -21,7 +23,7 @@ import { Pathfinder } from '../src/navigation/Pathfinder';
 import { HERO } from '../src/sim/rules';
 import {
   ClientMessage, ServerMessage, WelcomeMessage, SnapshotMessage,
-  HeroMetaMessage, SnapshotHero, HeroMeta, Snapshot,
+  HeroMetaMessage, SnapshotHero, HeroMeta, CreepMeta, Snapshot,
   PeerJoinedMessage, PeerLeftMessage,
 } from '../src/sim/protocol';
 
@@ -45,7 +47,7 @@ const META_EVERY = 15; // cold hero fields every Nth tick (4 Hz)
 const MAX_PLAYERS = 8;
 
 /** Events whose effects live in the cold fields — flush meta immediately. */
-const META_EVENTS = new Set(['kill', 'respawn', 'purchase', 'levelUp']);
+const META_EVENTS = new Set(['kill', 'respawn', 'purchase', 'levelUp', 'creepKill']);
 
 // Quantize floats before JSON serialization: raw doubles stringify to 15+
 // chars each; 2 decimals is far below any visible threshold at world scale.
@@ -71,7 +73,13 @@ export class GameRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this._buildWorld('arena');
+    this._resetMatch();
+  }
+
+  /** Fresh match state for the current world — including creep camps. */
+  private _resetMatch(): void {
     this._state = createMatchState();
+    spawnCamps(this._state, this._world);
   }
 
   // ── HTTP / WebSocket upgrade ──────────────────────────────────────
@@ -112,7 +120,7 @@ export class GameRoom extends DurableObject<Env> {
         if (this._players.size === 0) {
           if (requestedMap !== this._mapName) {
             this._buildWorld(requestedMap);
-            this._state = createMatchState();
+            this._resetMatch();
           }
         } else if (requestedMap !== this._mapName) {
           ws.close(1013, `room is on map '${this._mapName}'`);
@@ -144,6 +152,7 @@ export class GameRoom extends DurableObject<Env> {
           map: this._mapName,
           snapshot: this._currentSnapshot(),
           meta: this._heroMetas(),
+          creepMeta: this._creepMetas(),
         };
         ws.send(JSON.stringify(welcome));
 
@@ -243,7 +252,33 @@ export class GameRoom extends DurableObject<Env> {
         pos: { x: q(w.pos.x), z: q(w.pos.z) },
         life: q(w.life),
       })),
+      // Only "active" creeps ship per tick: at-rest creeps (at spawn, full
+      // hp — the sim guarantees this via the leash heal) cost zero bytes.
+      // The linger window flushes the final resting pos/hp before a creep
+      // goes silent; death/respawn/level travel as events.
+      creeps: this._state.creeps
+        .filter((c) => c.alive && this._state.tick - c.lastActiveTick < CREEP.activeLingerTicks)
+        .map((c) => ({
+          id: c.id,
+          pos: { x: q(c.pos.x), z: q(c.pos.z) },
+          facing: q(c.facing),
+          hp: q(c.hp),
+        })),
     };
+  }
+
+  /** Cold creep registry for the welcome handshake. */
+  private _creepMetas(): CreepMeta[] {
+    return this._state.creeps.map((c) => ({
+      id: c.id,
+      campId: c.campId,
+      type: c.type,
+      level: c.level,
+      alive: c.alive,
+      hp: q(c.hp),
+      pos: { x: q(c.pos.x), z: q(c.pos.z) },
+      spawnPos: { x: q(c.spawnPos.x), z: q(c.spawnPos.z) },
+    }));
   }
 
   private _wireHero(h: HeroState): SnapshotHero {
