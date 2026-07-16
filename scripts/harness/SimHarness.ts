@@ -26,6 +26,9 @@ import { SimWorld, sphereHitsObstacle, findWalkableNear } from '../../src/sim/wo
 import { buildTestSimWorld } from '../../src/world/testMap';
 import { Vec2 } from '../../src/sim/math';
 import { ARROW } from '../../src/sim/rules';
+import { CreepState } from '../../src/sim/state';
+import { CREEP, CreepTypeId } from '../../src/sim/creepRules';
+import { createCreep } from '../../src/sim/stepCreeps';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -54,6 +57,15 @@ export interface TraceLine {
     moving: boolean;
   }[];
   projectiles: { id: string; x: number; z: number; traveled: number }[];
+  creeps: {
+    id: string;
+    x: number;
+    z: number;
+    hp: number;
+    level: number;
+    alive: boolean;
+    aggro: string | null;
+  }[];
   events: SimEvent[];
 }
 
@@ -142,6 +154,29 @@ export class SimHarness {
     return h;
   }
 
+  /**
+   * Spawn a creep camp at an explicit position (units spread like
+   * `spawnCamps`, snapped to walkable ground). Ids continue `c1, c2, …`
+   * across camps. Scenarios that never call this keep a creep-free state.
+   */
+  spawnCamp(campId: string, pos: Vec2, units: CreepTypeId[]): CreepState[] {
+    const created: CreepState[] = [];
+    for (let i = 0; i < units.length; i++) {
+      const offsetX = (i - (units.length - 1) / 2) * CREEP.spawnSpread;
+      const p = findWalkableNear(this.world, pos.x + offsetX, pos.z);
+      const creep = createCreep(`c${this.state.creeps.length + 1}`, campId, units[i], p);
+      this.state.creeps.push(creep);
+      created.push(creep);
+    }
+    return created;
+  }
+
+  creep(id: string): CreepState {
+    const c = this.state.creeps.find((c) => c.id === id);
+    if (!c) throw new Error(`no creep '${id}'`);
+    return c;
+  }
+
   /** Queue a command to be applied on the next tick. */
   issue(heroId: string, cmd: Command): void {
     this._pendingInputs.push({ heroId, cmd });
@@ -212,6 +247,15 @@ export class SimHarness {
         x: +p.pos.x.toFixed(2),
         z: +p.pos.z.toFixed(2),
         traveled: +p.traveled.toFixed(2),
+      })),
+      creeps: this.state.creeps.map((c) => ({
+        id: c.id,
+        x: +c.pos.x.toFixed(2),
+        z: +c.pos.z.toFixed(2),
+        hp: c.hp,
+        level: c.level,
+        alive: c.alive,
+        aggro: c.aggroTargetId,
       })),
       events,
     };
