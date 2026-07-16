@@ -84,13 +84,13 @@ function applyCommand(
       fireArrow(state, hero, cmd.aimX, cmd.aimZ, events);
       break;
     case 'ward':
-      placeWard(state, hero);
+      placeWard(state, hero, world, cmd.x, cmd.z);
       break;
     case 'buy':
       buy(hero, cmd.itemIndex, world, events);
       break;
     case 'useItem':
-      useItem(hero, cmd.slot, state, events);
+      useItem(hero, cmd.slot, state, world, events);
       break;
     case 'levelAbility':
       spendSkillPoint(hero, cmd.ability);
@@ -140,6 +140,9 @@ function fireArrow(
     dir = V.normalize(dir);
   }
 
+  // Turn toward the shot (same smoothed turn as movement).
+  hero.targetFacing = V.heading(dir);
+
   const spawn = V.add(hero.pos, V.scale(dir, ARROW.spawnOffset));
   const projectile: ProjectileState = {
     id: `p${state.nextProjectileId++}`,
@@ -157,15 +160,33 @@ function fireArrow(
   events.push({ type: 'fire', heroId: hero.id, projectileId: projectile.id });
 }
 
-function placeWard(state: MatchState, hero: HeroState): void {
+function placeWard(
+  state: MatchState,
+  hero: HeroState,
+  world: SimWorld,
+  targetX?: number,
+  targetZ?: number,
+): void {
   if (!hero.alive) return;
   if (hero.wardCharges <= 0) return;
+
+  let pos: V.Vec2;
+  if (targetX !== undefined && targetZ !== undefined) {
+    // Validate range — reject if the target is too far.
+    if (V.distance(hero.pos, { x: targetX, z: targetZ }) > WARD.placeRange + 1) return;
+    // Reject placement inside solid obstacles (trees, rocks).
+    if (sphereHitsObstacle(world, { x: targetX, z: targetZ }, WARD.placementRadius)) return;
+    pos = { x: targetX, z: targetZ };
+  } else {
+    pos = { x: hero.pos.x, z: hero.pos.z };
+  }
+
   hero.wardCharges--;
   if (hero.wardCharges === 0) removeItem(hero, 'sentry_wards');
   state.wards.push({
     id: `w${state.nextWardId++}`,
     team: hero.team,
-    pos: { x: hero.pos.x, z: hero.pos.z },
+    pos,
     life: WARD.duration,
   });
 }
@@ -185,7 +206,7 @@ function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]
 }
 
 /** Use the item in a specific inventory slot (hotkey 1–6). */
-function useItem(hero: HeroState, slot: number, state: MatchState, events: SimEvent[]): void {
+function useItem(hero: HeroState, slot: number, state: MatchState, world: SimWorld, events: SimEvent[]): void {
   if (!hero.alive) return;
   if (slot < 0 || slot >= hero.inventory.length) return;
   const itemId = hero.inventory[slot];
@@ -193,7 +214,7 @@ function useItem(hero: HeroState, slot: number, state: MatchState, events: SimEv
 
   switch (itemId) {
     case 'sentry_wards':
-      placeWard(state, hero);
+      placeWard(state, hero, world);
       break;
     default:
       // Passive items (e.g. boots) — nothing to do.

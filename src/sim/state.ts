@@ -89,7 +89,7 @@ export interface MatchState {
 export type Command =
   | { type: 'moveTo'; x: number; z: number }
   | { type: 'fire'; aimX: number; aimZ: number }
-  | { type: 'ward' }
+  | { type: 'ward'; x?: number; z?: number }
   | { type: 'buy'; itemIndex: number }
   | { type: 'useItem'; slot: number }
   | { type: 'levelAbility'; ability: 'arrow' | 'dodge' }

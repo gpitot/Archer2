@@ -75,4 +75,8 @@ export const WARD = {
   /** WC3 Observer Ward sight range. */
   sightRadius: 1600,
   duration: 300,
+  /** Max distance the hero can place a ward from their position. */
+  placeRange: 100,
+  /** Collision radius for obstacle check when placing (prevents inside trees). */
+  placementRadius: 10,
 } as const;
