@@ -6,13 +6,13 @@
  * frame. Designed to be ticked synchronously from the game update — no
  * internal timers or async callbacks beyond the raw WebSocket events.
  */
-import { Command } from '../sim/state';
+import { Command, SimEvent } from '../sim/state';
 import {
   ClientMessage,
   ServerMessage,
   WelcomeMessage,
   SnapshotMessage,
-  EventMessage,
+  HeroMeta,
 } from '../sim/protocol';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected';
@@ -23,7 +23,9 @@ export class NetworkClient {
   private _playerId: string | null = null;
   private _seq = 0;
   private _snapshots: SnapshotMessage[] = [];
-  private _events: EventMessage[] = [];
+  private _events: SimEvent[] = [];
+  /** Latest cold hero fields; absolute state, so only the newest matters. */
+  private _pendingMeta: HeroMeta[] | null = null;
   private _welcome: WelcomeMessage | null = null;
   private _pendingWelcome: ((w: WelcomeMessage) => void) | null = null;
   private _url: string = '';
@@ -40,6 +42,7 @@ export class NetworkClient {
     this._state = 'connecting';
     this._snapshots = [];
     this._events = [];
+    this._pendingMeta = null;
     this._seq = 0;
 
     return new Promise((resolve, reject) => {
@@ -96,11 +99,18 @@ export class NetworkClient {
     return snaps;
   }
 
-  /** Drain and return all buffered events (oldest first). */
-  drainEvents(): EventMessage[] {
+  /** Drain and return all buffered sim events (oldest first). */
+  drainEvents(): SimEvent[] {
     const evts = this._events;
     this._events = [];
     return evts;
+  }
+
+  /** Take the latest cold hero fields, or null if none arrived since last take. */
+  takeMeta(): HeroMeta[] | null {
+    const meta = this._pendingMeta;
+    this._pendingMeta = null;
+    return meta;
   }
 
   /** Return the most recent snapshot without draining. */
@@ -141,13 +151,14 @@ export class NetworkClient {
 
       case 'snapshot':
         this._snapshots.push(msg);
+        if (msg.events) this._events.push(...msg.events);
         break;
 
-      case 'event':
-        this._events.push(msg);
+      case 'heroMeta':
+        this._pendingMeta = msg.heroes;
         break;
 
-      // peerJoined / peerLeft are consumed via drainEvents if needed.
+      // peerJoined / peerLeft are informational for now.
       default:
         break;
     }

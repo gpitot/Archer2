@@ -3,8 +3,9 @@ import { MapData } from './wc3/MapData';
 import { DoodadPlacement } from './wc3/DooParser';
 import { isCellWalkable } from './wc3/WpmParser';
 import { ObstacleRegistry } from './ObstacleRegistry';
+import { TREE_HALF_EXTENT } from '../sim/treeFootprints';
 
-/** Solid doodad footprint, exported for fog sight blockers. */
+/** Doodad footprint (fog sight blocking and/or projectile collision). */
 export interface SolidDoodad {
   x: number;
   z: number;
@@ -43,13 +44,17 @@ const TREE_STYLES: Style[] = ['treeDark', 'treeGreen', 'treeTeal'];
  * rocks, sphere bushes). Placements, rotations, and scales come from the
  * original placement file; each prop sits on the rebuilt terrain surface.
  *
- * Doodads standing on pathing-blocked cells are treated as solid: they get
- * an AABB in the ObstacleRegistry so arrows collide (movement is already
- * blocked by the pathing-driven nav grid).
+ * Gameplay footprints: every tree blocks movement (stamped into the nav
+ * grid via treeFootprints) and line-of-sight (`sightBlockers`), but arrows
+ * fly through trees. Rocks standing on pathing-blocked cells block both
+ * sight and arrows (`projectileSolids` → ObstacleRegistry / world.obstacles).
  */
 export class Doodads {
   readonly group: THREE.Group;
-  readonly solids: SolidDoodad[] = [];
+  /** All trees + solid rocks — occlude fog-of-war vision (footprint only; fog ignores height). */
+  readonly sightBlockers: SolidDoodad[] = [];
+  /** Solid rocks only — arrows collide with these. */
+  readonly projectileSolids: SolidDoodad[] = [];
 
   constructor(
     map: MapData,
@@ -89,14 +94,18 @@ export class Doodads {
       }
       list.push({ d, solid });
 
-      if (solid && (style === 'treeDark' || style === 'treeGreen' || style === 'treeTeal' || style === 'rock')) {
-        const isTree = style !== 'rock';
-        const halfW = (isTree ? 48 : 40) * d.scaleX;
-        const halfD = (isTree ? 48 : 40) * d.scaleY;
+      const isTree = TREE_STYLES.includes(style);
+      if (isTree || (solid && style === 'rock')) {
+        const halfW = (isTree ? TREE_HALF_EXTENT : 40) * d.scaleX;
+        const halfD = (isTree ? TREE_HALF_EXTENT : 40) * d.scaleY;
         const height = (isTree ? 170 : 50) * d.scaleZ;
-        const y = heightAt(wx, wz);
-        registry.register(new THREE.Vector3(wx, y + height / 2, wz), halfW, height, halfD);
-        this.solids.push({ x: wx, z: wz, halfW, halfD, height });
+        const footprint = { x: wx, z: wz, halfW, halfD, height };
+        this.sightBlockers.push(footprint);
+        if (!isTree) {
+          const y = heightAt(wx, wz);
+          registry.register(new THREE.Vector3(wx, y + height / 2, wz), halfW, height, halfD);
+          this.projectileSolids.push(footprint);
+        }
       }
     }
 
@@ -107,7 +116,8 @@ export class Doodads {
     const summary = [...byStyle.entries()]
       .map(([s, l]) => `${s}:${l.length}`)
       .join(' ');
-    console.info(`[doodads] ${map.doodads.length} placed (${summary}), ${this.solids.length} solid`);
+    console.info(`[doodads] ${map.doodads.length} placed (${summary}), ` +
+      `${this.sightBlockers.length} sight blockers, ${this.projectileSolids.length} projectile solids`);
     void disagreements;
   }
 

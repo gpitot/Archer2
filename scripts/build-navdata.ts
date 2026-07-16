@@ -17,9 +17,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { parseW3E, W3ETerrain } from '../src/world/wc3/W3EParser';
-import { parseWpm, WpmPathing, isCellWalkable, PATH_CELL_SIZE } from '../src/world/wc3/WpmParser';
-import { parseDoo, DoodadPlacement } from '../src/world/wc3/DooParser';
+import { parseW3E } from '../src/world/wc3/W3EParser';
+import { parseWpm, isCellWalkable, PATH_CELL_SIZE } from '../src/world/wc3/WpmParser';
+import { parseDoo } from '../src/world/wc3/DooParser';
+import { buildNavGridFromWpm, findWalkableNearOnGrid } from '../src/sim/buildWorld';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS_DIR = path.resolve(__dirname, '..', 'assets');
@@ -60,22 +61,6 @@ function wc3ToWorld(x: number, y: number): { wx: number; wz: number } {
   return { wx: x, wz: -y };
 }
 
-/** Grid coordinate for a world position on the pathing grid. */
-function worldToPathCell(
-  wx: number, wz: number,
-  originX: number, originZ: number,
-): { col: number; row: number } {
-  const col = Math.floor((wx - originX) / PATH_CELL_SIZE);
-  // The wpm stores rows bottom-to-top (south to north).  In Three.js space,
-  // south = max WC3 y = min Z.  The bottom row of the wpm corresponds to
-  // the minimum WC3 y, which is the maximum Z in our coords.
-  // So row (wpm index) = (originY_max - wz) / PATH_CELL_SIZE
-  // where originY_max = terrain.offsetY + terrain.height * 128.
-  // But the WPM doesn't carry offsetY, so we use the terrain's offsetY +
-  // total height to find the north edge in WC3 Y, then flip to Z.
-  return { col, row: Math.floor((-wz - originZ) / PATH_CELL_SIZE) };
-}
-
 // ── Main ──────────────────────────────────────────────────────────────
 
 function main() {
@@ -109,21 +94,25 @@ function main() {
   };
 
   // ── Pathing grid (flattened row-major walkable booleans) ────────
-  // WPM rows go bottom-to-top (south→north), columns left-to-right (west→east).
-  // We flatten in the same order so `cells[row * width + col]` matches.
+  // Built through the same buildNavGridFromWpm path as the client (WPM +
+  // tree footprints), then flattened back to WPM-native order (row 0 =
+  // south) so `cells[row * width + col]` matches the file convention.
+  const bounds = { minX: terrain.offsetX, minZ: -(terrain.offsetY + tilesH * 128) };
+  const grid = buildNavGridFromWpm(pathing, bounds, doodads);
+
   const navGrid = {
     width: pathing.width,
     height: pathing.height,
     cellSize: PATH_CELL_SIZE,
     // Three.js world-space origin: minX = terrain.offsetX, minZ = -(offsetY + totalHeight)
-    originX: terrain.offsetX,
-    originZ: -(terrain.offsetY + tilesH * 128),
+    originX: bounds.minX,
+    originZ: bounds.minZ,
     cells: new Array<boolean>(pathing.width * pathing.height),
   };
 
   for (let row = 0; row < pathing.height; row++) {
     for (let col = 0; col < pathing.width; col++) {
-      navGrid.cells[row * pathing.width + col] = isCellWalkable(pathing, col, row);
+      navGrid.cells[row * pathing.width + col] = grid.isWalkable(col, pathing.height - 1 - row);
     }
   }
 
@@ -150,49 +139,34 @@ function main() {
   // as the WPM file (south-to-north).  The `buildSimWorld()` factory will
   // invert rows to match the NavGrid convention (row 0 = north/max-Z).
 
-  // ── Solid doodad AABBs ─────────────────────────────────────────
+  // ── Solid doodad AABBs (projectile collision: rocks only) ──────
+  // Trees block movement and sight but not arrows, so they are stamped
+  // into the nav grid above and deliberately absent here.
   const obstacles: { minX: number; minZ: number; maxX: number; maxZ: number }[] = [];
-  const TREE_STYLES = new Set(['ATtr', 'LTlt', 'YTpb', 'YTfc']);
   const ROCK_STYLES = new Set(['ARrk', 'LRrk', 'LPcr']);
 
   for (const d of doodads) {
+    if (!ROCK_STYLES.has(d.typeId)) continue;
     const { wx, wz } = wc3ToWorld(d.x, d.y);
 
     // Check the pathing cell under the doodad's origin
     const col = Math.floor((d.x - terrain.offsetX) / PATH_CELL_SIZE);
     const row = Math.floor((d.y - terrain.offsetY) / PATH_CELL_SIZE);
     if (!isCellWalkable(pathing, col, row)) {
-      // This doodad blocks movement → it should also block projectiles.
-      const isTree = TREE_STYLES.has(d.typeId);
-      const isRock = ROCK_STYLES.has(d.typeId);
-      if (isTree || isRock) {
-        const halfW = (isTree ? 48 : 40) * d.scaleX;
-        const halfD = (isTree ? 48 : 40) * d.scaleY;
-        obstacles.push({
-          minX: wx - halfW,
-          minZ: wz - halfD,
-          maxX: wx + halfW,
-          maxZ: wz + halfD,
-        });
-      } else {
-        // Unknown solid doodads — use a conservative footprint.
-        const halfW = 32 * d.scaleX;
-        const halfD = 32 * d.scaleY;
-        obstacles.push({
-          minX: wx - halfW,
-          minZ: wz - halfD,
-          maxX: wx + halfW,
-          maxZ: wz + halfD,
-        });
-      }
+      const halfW = 40 * d.scaleX;
+      const halfD = 40 * d.scaleY;
+      obstacles.push({
+        minX: wx - halfW,
+        minZ: wz - halfD,
+        maxX: wx + halfW,
+        maxZ: wz + halfD,
+      });
     }
   }
 
   // ── Shop position (walkable cell near the default arena centre) ─
   const defaultArena = ARENAS.terrain1;
-  const shopPos = findWalkableNear(
-    defaultArena.centerX, defaultArena.centerZ, pathing, terrain,
-  );
+  const shopPos = findWalkableNearOnGrid(grid, defaultArena.centerX, defaultArena.centerZ);
 
   // ── Assemble & write ───────────────────────────────────────────
   const navdata = {
@@ -200,7 +174,7 @@ function main() {
     heightGrid,
     obstacles,
     arenas: ARENAS,
-    shopPos: { x: shopPos.wx, z: shopPos.wz },
+    shopPos: { x: shopPos.x, z: shopPos.z },
   };
 
   fs.writeFileSync(OUT_PATH, JSON.stringify(navdata, null, 2), 'utf-8');
@@ -209,39 +183,6 @@ function main() {
     `(${navGrid.width}x${navGrid.height} pathing, ${heightGrid.width}x${heightGrid.height} heights, ` +
     `${obstacles.length} obstacles)`,
   );
-}
-
-// ── Walkable search (same spiral algorithm as Game.ts) ────────────────
-
-function findWalkableNear(
-  wx: number, wz: number,
-  pathing: WpmPathing,
-  terrain: W3ETerrain,
-): { wx: number; wz: number } {
-  // Convert world → WPM grid coordinates.
-  // WPM col = floor((wx - terrain.offsetX) / PATH_CELL_SIZE)
-  // WPM row = floor((WC3_y - terrain.offsetY) / PATH_CELL_SIZE)
-  //         = floor((-wz - terrain.offsetY) / PATH_CELL_SIZE)
-  const startCol = Math.floor((wx - terrain.offsetX) / PATH_CELL_SIZE);
-  const startRow = Math.floor((-wz - terrain.offsetY) / PATH_CELL_SIZE);
-
-  for (let radius = 0; radius < 64; radius++) {
-    for (let dz = -radius; dz <= radius; dz++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dz)) !== radius) continue;
-        const col = startCol + dx;
-        const row = startRow + dz;
-        if (isCellWalkable(pathing, col, row)) {
-          // Cell center in Three.js world coords
-          const cx = terrain.offsetX + (col + 0.5) * PATH_CELL_SIZE;
-          // WPM row → WC3 y → Three.js z
-          const cz = -(terrain.offsetY + (row + 0.5) * PATH_CELL_SIZE);
-          return { wx: cx, wz: cz };
-        }
-      }
-    }
-  }
-  return { wx, wz };
 }
 
 main();

@@ -9,17 +9,18 @@ import { Pathfinder } from '../navigation/Pathfinder';
 import { PATH_CELL_SIZE, isCellWalkable, WpmPathing } from '../world/wc3/WpmParser';
 import { SHOP_ITEMS } from './shopItems';
 import { SimWorld, ObstacleAABB, Rect, Shop } from './world';
+import { TreeDoodadLike, stampTreeFootprints, treeFootprints } from './treeFootprints';
 
 /**
- * Build a SimWorld from raw map components (client path).
- * Pass `pathing`, the world-space bounds of the nav grid, and the arena rect.
+ * Build a NavGrid from the WPM pathing map plus tree footprints.  Used by
+ * the client world build and the navdata scripts so every serialized or
+ * live grid blocks the exact same cells.
  */
-export function buildSimWorld(
+export function buildNavGridFromWpm(
   pathing: WpmPathing,
   bounds: { minX: number; minZ: number },
-  arena: Rect,
-): SimWorld {
-  // NavGrid
+  doodads?: readonly TreeDoodadLike[],
+): NavGrid {
   const navGrid = new NavGrid(
     pathing.width,
     pathing.height,
@@ -34,13 +35,29 @@ export function buildSimWorld(
       navGrid.setWalkable(gx, gz, isCellWalkable(pathing, gx, wpmRow));
     }
   }
+  if (doodads) stampTreeFootprints(navGrid, treeFootprints(doodads));
+  return navGrid;
+}
+
+/**
+ * Build a SimWorld from raw map components (client path).
+ * Pass `pathing`, the world-space bounds of the nav grid, the arena rect,
+ * and the doodad placements (trees are stamped into the nav grid).
+ */
+export function buildSimWorld(
+  pathing: WpmPathing,
+  bounds: { minX: number; minZ: number },
+  arena: Rect,
+  doodads?: readonly TreeDoodadLike[],
+): SimWorld {
+  const navGrid = buildNavGridFromWpm(pathing, bounds, doodads);
   const pathfinder = new Pathfinder(navGrid);
 
   // Obstacles — populated later via buildObstaclesFromSolids.
   const obstacles: ObstacleAABB[] = [];
 
   // Shop position — find walkable near arena centre
-  const shopPos = findWalkableNear(navGrid, arena.centerX, arena.centerZ);
+  const shopPos = findWalkableNearOnGrid(navGrid, arena.centerX, arena.centerZ);
 
   const shop: Shop = {
     pos: shopPos,
@@ -101,7 +118,8 @@ export function buildObstaclesFromSolids(
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-function findWalkableNear(navGrid: NavGrid, wx: number, wz: number): { x: number; z: number } {
+/** Nearest walkable cell center on a bare NavGrid (spiral search). */
+export function findWalkableNearOnGrid(navGrid: NavGrid, wx: number, wz: number): { x: number; z: number } {
   const start = navGrid.worldToGrid(wx, wz);
   for (let radius = 0; radius < 64; radius++) {
     for (let dz = -radius; dz <= radius; dz++) {

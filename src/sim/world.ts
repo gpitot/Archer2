@@ -87,6 +87,38 @@ export function findRespawnPosition(world: SimWorld, rng: () => number = Math.ra
   return { x: arena.centerX, z: arena.centerZ };
 }
 
+/**
+ * Nearest cell center to (wx, wz) that is walkable AND in the same connected
+ * component as (fromX, fromZ) — so a click on a cliff or an isolated islet
+ * resolves to a spot the mover can actually stand on. Null if the spiral
+ * (radius 64 cells) finds nothing.
+ */
+export function findReachableNear(
+  world: SimWorld,
+  wx: number,
+  wz: number,
+  fromX: number,
+  fromZ: number,
+): Vec2 | null {
+  const { navGrid, pathfinder } = world;
+  const start = navGrid.worldToGrid(wx, wz);
+  for (let radius = 0; radius < 64; radius++) {
+    for (let dz = -radius; dz <= radius; dz++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== radius) continue;
+        const gx = start.gx + dx;
+        const gz = start.gz + dz;
+        if (!navGrid.isWalkable(gx, gz)) continue;
+        const { wx: cx, wz: cz } = navGrid.gridToWorld(gx, gz);
+        if (pathfinder.isReachable(cx, cz, fromX, fromZ)) {
+          return { x: cx, z: cz };
+        }
+      }
+    }
+  }
+  return null;
+}
+
 /** Nearest walkable cell center to a world position (spiral search). */
 export function findWalkableNear(world: SimWorld, wx: number, wz: number): Vec2 {
   const { navGrid } = world;

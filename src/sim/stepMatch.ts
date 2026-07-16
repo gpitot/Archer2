@@ -29,7 +29,7 @@ import {
   ProjectileState,
   SimEvent,
 } from './state';
-import { findRespawnPosition, SimWorld, sphereHitsObstacle } from './world';
+import { findReachableNear, findRespawnPosition, SimWorld, sphereHitsObstacle } from './world';
 
 /**
  * Advance the match by `dt` seconds, applying `inputs` queued since the last
@@ -96,7 +96,16 @@ function applyCommand(
 
 function setDestination(hero: HeroState, x: number, z: number, world: SimWorld): void {
   if (!hero.alive) return;
-  const path = world.pathfinder.findSmoothedPath(hero.pos.x, hero.pos.z, x, z);
+  let path = world.pathfinder.findSmoothedPath(hero.pos.x, hero.pos.z, x, z);
+  if (!path || path.length <= 1) {
+    // Unwalkable or unreachable target (cliff, tree, fogged terrain): walk
+    // to the nearest cell the hero can actually reach instead of ignoring
+    // the click. Runs identically in server sim and client prediction.
+    const snapped = findReachableNear(world, x, z, hero.pos.x, hero.pos.z);
+    if (snapped) {
+      path = world.pathfinder.findSmoothedPath(hero.pos.x, hero.pos.z, snapped.x, snapped.z);
+    }
+  }
   if (path && path.length > 1) {
     // path[0] is the hero's current position — walk the rest.
     hero.path = path.slice(1).map((p) => ({ x: p.wx, z: p.wz }));

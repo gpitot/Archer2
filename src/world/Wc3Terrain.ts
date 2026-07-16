@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { MapData, TILE_SIZE, sampleTilepointGrid } from './wc3/MapData';
-import { FLAG_WATER, FLAG_RAMP } from './wc3/W3EParser';
+import { FLAG_WATER } from './wc3/W3EParser';
 import { createGroundAtlas, GroundAtlas, CLIFF_CELL_GRASS, CLIFF_CELL_DIRT } from './wc3/GroundTextures';
+import { tileIsCliff, cliffTileGeometry, steppedHeightAt, layerAt } from './wc3/terrainLevels';
 
 const CHUNK_TILES = 32;
 
@@ -12,10 +13,11 @@ const CHUNK_TILES = 32;
  * type from the procedural atlas.
  *
  * `heightAt` is the single source of truth for ground elevation — it drives
- * hero/projectile Y, camera framing, and prop placement.
- *
- * Cliff transitions currently render as steep smooth quads; the stepped
- * cliff/ramp mesher replaces them in the next phase.
+ * hero/projectile Y, camera framing, and prop placement. It samples the same
+ * discrete-level model the mesh renders (via wc3/terrainLevels): stepped on
+ * cliff tiles, smooth bilinear within a level and on walkable ramps.
+ * `smoothHeightAt` keeps the old fully-bilinear sample for consumers that
+ * must not step (camera focus).
  */
 export class Wc3Terrain {
   readonly group: THREE.Group;
@@ -37,24 +39,37 @@ export class Wc3Terrain {
 
   // ── Sampling ───────────────────────────────────────────────────
 
-  /** Terrain height at a world XZ position (bilinear over tilepoints). */
+  /**
+   * Terrain height at a world XZ position. Matches the rendered mesh:
+   * stepped on cliff tiles, bilinear elsewhere.
+   */
   heightAt(wx: number, wz: number): number {
+    return steppedHeightAt(this._map.terrain, wx, wz);
+  }
+
+  /** Old fully-bilinear height — smooth across cliffs (camera focus etc.). */
+  smoothHeightAt(wx: number, wz: number): number {
     return sampleTilepointGrid(this._map.terrain, this._map.terrain.finalHeight, wx, wz);
   }
 
-  /** Gradient magnitude (rise/run) at a world XZ position. */
+  /** Discrete cliff layer at a world XZ position (nearest tilepoint). */
+  layerAt(wx: number, wz: number): number {
+    return layerAt(this._map.terrain, wx, wz);
+  }
+
+  /** Gradient magnitude (rise/run) of the smooth field at a world XZ position. */
   slopeAt(wx: number, wz: number): number {
     const e = 8;
-    const hx = (this.heightAt(wx + e, wz) - this.heightAt(wx - e, wz)) / (2 * e);
-    const hz = (this.heightAt(wx, wz + e) - this.heightAt(wx, wz - e)) / (2 * e);
+    const hx = (this.smoothHeightAt(wx + e, wz) - this.smoothHeightAt(wx - e, wz)) / (2 * e);
+    const hz = (this.smoothHeightAt(wx, wz + e) - this.smoothHeightAt(wx, wz - e)) / (2 * e);
     return Math.sqrt(hx * hx + hz * hz);
   }
 
-  /** Surface normal at a world XZ position. */
+  /** Surface normal of the smooth field at a world XZ position. */
   normalAt(wx: number, wz: number): THREE.Vector3 {
     const e = 8;
-    const hx = (this.heightAt(wx + e, wz) - this.heightAt(wx - e, wz)) / (2 * e);
-    const hz = (this.heightAt(wx, wz + e) - this.heightAt(wx, wz - e)) / (2 * e);
+    const hx = (this.smoothHeightAt(wx + e, wz) - this.smoothHeightAt(wx - e, wz)) / (2 * e);
+    const hz = (this.smoothHeightAt(wx, wz + e) - this.smoothHeightAt(wx, wz - e)) / (2 * e);
     return new THREE.Vector3(-hx, 1, -hz).normalize();
   }
 
@@ -113,17 +128,12 @@ export class Wc3Terrain {
         const xs = [x0, x0 + TILE_SIZE, x0 + TILE_SIZE, x0];
         const zs = [zS, zS, zN, zN];
 
-        const layers = corners.map((k) => t.layer[k]);
-        const minL = Math.min(...layers);
-        const maxL = Math.max(...layers);
-        const rampCorners = corners.filter((k) => (t.flags[k] & FLAG_RAMP) !== 0).length;
-
-        if (minL === maxL || rampCorners >= 2) {
+        if (!tileIsCliff(t, i, j)) {
           // Uniform tile or walkable ramp: smooth quad at corner heights.
           this._emitGroundTile(builder, corners, xs, zs);
         } else {
           // Layer transition without a ramp: stepped WC3-style cliff.
-          this._emitCliffTile(builder, i, j, corners, xs, zs, layers, minL);
+          this._emitCliffTile(builder, i, j, corners, xs, zs);
         }
       }
     }
@@ -176,21 +186,17 @@ export class Wc3Terrain {
     corners: number[],
     xs: number[],
     zs: number[],
-    layers: number[],
-    minL: number,
   ): void {
     const t = this._map.terrain;
     const H = t.finalHeight;
-    const isHigh = layers.map((l) => l > minL);
-    let mask = 0;
-    for (let c = 0; c < 4; c++) if (isHigh[c]) mask |= 1 << c;
+    const g = cliffTileGeometry(t, ti, tj);
 
     // Neighbor tile across each edge in walk order S, E, N, W.
     const neighborIsCliff = [
-      this._tileIsCliff(ti, tj - 1),
-      this._tileIsCliff(ti + 1, tj),
-      this._tileIsCliff(ti, tj + 1),
-      this._tileIsCliff(ti - 1, tj),
+      tileIsCliff(t, ti, tj - 1),
+      tileIsCliff(t, ti + 1, tj),
+      tileIsCliff(t, ti, tj + 1),
+      tileIsCliff(t, ti - 1, tj),
     ];
 
     const tex = this._dominantTexture(corners);
@@ -200,55 +206,19 @@ export class Wc3Terrain {
       rect.v0 + ((zs[0] - z) / TILE_SIZE) * (rect.v1 - rect.v0),
     ];
 
-    interface Pt { x: number; z: number; h: number; shade: [number, number, number] }
-    const polyHigh: Pt[] = [];
-    const polyLow: Pt[] = [];
-    interface Crossing { x: number; z: number; topH: number; botH: number; edge: number }
-    const crossings: Crossing[] = [];
-
-    for (let c = 0; c < 4; c++) {
-      const k = corners[c];
-      const pt: Pt = { x: xs[c], z: zs[c], h: H[k], shade: this._tilepointShade(k) };
-      (isHigh[c] ? polyHigh : polyLow).push(pt);
-
-      const nc = (c + 1) & 3;
-      if (isHigh[c] !== isHigh[nc]) {
-        const hiK = corners[isHigh[c] ? c : nc];
-        const loK = corners[isHigh[c] ? nc : c];
-        // When the tile across this edge is another cliff tile, it emits the
-        // same stepped midpoint profile — keep the full step. Against a
-        // smooth ramp (or the map border) taper to the edge's straight-line
-        // midpoint so the surfaces meet without a gap.
-        const step = neighborIsCliff[c];
-        const avg = (H[hiK] + H[loK]) / 2;
-        const cross: Crossing = {
-          x: (xs[c] + xs[nc]) / 2,
-          z: (zs[c] + zs[nc]) / 2,
-          topH: step ? H[hiK] : avg,
-          botH: step ? H[loK] : avg,
-          edge: c,
-        };
-        crossings.push(cross);
-        const hiShade = this._tilepointShade(hiK);
-        const loShade = this._tilepointShade(loK);
-        polyHigh.push({ x: cross.x, z: cross.z, h: cross.topH, shade: hiShade });
-        polyLow.push({ x: cross.x, z: cross.z, h: cross.botH, shade: loShade });
-      }
-    }
-
-    const emitPoly = (poly: Pt[]): void => {
+    const emitPoly = (poly: { x: number; z: number; h: number; k: number }[]): void => {
       if (poly.length < 3) return;
       const idx = poly.map((p) => {
         const [u, v] = groundUV(p.x, p.z);
-        return builder.vertex(p.x, p.h, p.z, 0, 1, 0, u, v, p.shade);
+        return builder.vertex(p.x, p.h, p.z, 0, 1, 0, u, v, this._tilepointShade(p.k));
       });
       for (let f = 1; f < poly.length - 1; f++) {
         builder.tri(idx[0], idx[f], idx[f + 1]);
       }
     };
 
-    const lowCx = polyLow.reduce((s, p) => s + p.x, 0) / polyLow.length;
-    const lowCz = polyLow.reduce((s, p) => s + p.z, 0) / polyLow.length;
+    const lowCx = g.polyLow.reduce((s, p) => s + p.x, 0) / g.polyLow.length;
+    const lowCz = g.polyLow.reduce((s, p) => s + p.z, 0) / g.polyLow.length;
     const cliffCell = t.cliffTexture[corners[0]] === 1 ? CLIFF_CELL_DIRT : CLIFF_CELL_GRASS;
 
     // Tiles spanning 3 cliff levels classify some mixed edge's corners as
@@ -256,36 +226,29 @@ export class Wc3Terrain {
     // expects a midpoint step. Fill the sliver with a double-sided cap.
     for (let c = 0; c < 4; c++) {
       const nc = (c + 1) & 3;
-      if (layers[c] !== layers[nc] && isHigh[c] === isHigh[nc] && neighborIsCliff[c]) {
+      const bothSide = ((g.mask >> c) & 1) === ((g.mask >> nc) & 1);
+      if (t.layer[corners[c]] !== t.layer[corners[nc]] && bothSide && neighborIsCliff[c]) {
         this._emitEdgeCap(builder, corners, xs, zs, c, nc, cliffCell);
       }
     }
 
-    const diagonal = mask === 0b0101 || mask === 0b1010;
-    if (!diagonal) {
+    if (!g.diagonal) {
       // Single contour: walk order gives convex high/low polygons as-is.
-      emitPoly(polyHigh);
-      emitPoly(polyLow);
-      if (crossings.length === 2) {
-        this._emitCliffWall(builder, crossings[0], crossings[1], lowCx, lowCz, cliffCell);
+      emitPoly(g.polyHigh);
+      emitPoly(g.polyLow);
+      if (g.crossings.length === 2) {
+        this._emitCliffWall(builder, g.crossings[0], g.crossings[1], lowCx, lowCz, cliffCell);
       }
     } else {
       // Two opposite high corners: two plateau triangles + hexagon floor
-      // + two walls. polyHigh in walk order is [c?, hiA, c?, ...]; rebuild
-      // each triangle explicitly from its corner and neighboring crossings.
-      const hexIdx = polyLow.map((p) => {
-        const [u, v] = groundUV(p.x, p.z);
-        return builder.vertex(p.x, p.h, p.z, 0, 1, 0, u, v, p.shade);
-      });
-      for (let f = 1; f < polyLow.length - 1; f++) {
-        builder.tri(hexIdx[0], hexIdx[f], hexIdx[f + 1]);
-      }
+      // + two walls, one per high corner between its adjacent crossings.
+      emitPoly(g.polyLow);
       for (let c = 0; c < 4; c++) {
-        if (!isHigh[c]) continue;
+        if (!((g.mask >> c) & 1)) continue;
         const k = corners[c];
         const shade = this._tilepointShade(k);
-        const prev = crossings.find((cr) => cr.edge === ((c + 3) & 3))!;
-        const next = crossings.find((cr) => cr.edge === c)!;
+        const prev = g.crossings.find((cr) => cr.edge === ((c + 3) & 3))!;
+        const next = g.crossings.find((cr) => cr.edge === c)!;
         const [uc, vc] = groundUV(xs[c], zs[c]);
         const [up, vp] = groundUV(prev.x, prev.z);
         const [un, vn] = groundUV(next.x, next.z);
@@ -372,24 +335,6 @@ export class Wc3Terrain {
     const p0b = builder.vertex(c0.x, c0.botH - skirt, c0.z, nx / nl, 0, nz / nl, rect.u0, rect.v0, shade);
     builder.tri(p0t, p1t, p0b);
     builder.tri(p1t, p1b, p0b);
-  }
-
-  /** True when tile (i, j) is a stepped cliff (mixed layers, not a ramp). */
-  private _tileIsCliff(i: number, j: number): boolean {
-    const t = this._map.terrain;
-    if (i < 0 || j < 0 || i >= t.width - 1 || j >= t.height - 1) return true;
-    const kSW = j * t.width + i;
-    const ks = [kSW, kSW + 1, kSW + t.width, kSW + t.width + 1];
-    let minL = 15;
-    let maxL = 0;
-    let ramps = 0;
-    for (const k of ks) {
-      const l = t.layer[k];
-      if (l < minL) minL = l;
-      if (l > maxL) maxL = l;
-      if ((t.flags[k] & FLAG_RAMP) !== 0) ramps++;
-    }
-    return minL !== maxL && ramps < 2;
   }
 
   /** Most frequent ground-texture index among 4 corner tilepoints. */

@@ -7,11 +7,10 @@ import { IsometricCamera } from '../rendering/Camera';
 import { Minimap } from '../rendering/Minimap';
 import { Shop, ShopItem } from '../world/Shop';
 import { ObstacleRegistry } from '../world/ObstacleRegistry';
-import { MapData, loadMapData, ArenaRect, ARENA_TERRAIN1, PATH_CELL_SIZE } from '../world/wc3/MapData';
+import { MapData, loadMapData, ArenaRect, ARENA_TERRAIN1 } from '../world/wc3/MapData';
 import { Wc3Terrain } from '../world/Wc3Terrain';
 import { Water } from '../world/Water';
 import { Doodads } from '../world/Doodads';
-import { isCellWalkable } from '../world/wc3/WpmParser';
 import { NavGrid } from '../navigation/NavGrid';
 import { Pathfinder } from '../navigation/Pathfinder';
 import { FogOfWar, VisionSource } from '../vision/FogOfWar';
@@ -30,10 +29,10 @@ import { SpellBar } from '../ui/SpellBar';
 import { HeroState, ProjectileState, WardState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
 import { stepMatch, xpForLevel, heroSpeed } from '../sim/stepMatch';
 import { SimWorld, sphereHitsObstacle } from '../sim/world';
-import { buildSimWorld, buildObstaclesFromSolids } from '../sim/buildWorld';
+import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
 import { HERO, ARROW, WARD } from '../sim/rules';
 import { SHOP_ITEMS } from '../sim/shopItems';
-import { SnapshotMessage, WelcomeMessage, EventMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot } from '../sim/protocol';
+import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta } from '../sim/protocol';
 import { Vec2, distance, clamp } from '../sim/math';
 
 // ── Networking ──
@@ -52,7 +51,12 @@ const FOG_CELL_SIZE = 40;
 /** Ground surface abstraction. */
 interface GroundProvider {
   mesh: THREE.Object3D;
+  /** Stepped height — matches the rendered cliffs. */
   heightAt(x: number, z: number): number;
+  /** Smooth bilinear height — for consumers that must not step (camera). */
+  smoothHeightAt(x: number, z: number): number;
+  /** Discrete WC3 cliff layer. */
+  layerAt(x: number, z: number): number;
 }
 
 export class Game {
@@ -92,13 +96,20 @@ export class Game {
 
   // ── Interpolation buffer ──
   private _snapshots: Snapshot[] = [];
-  private static readonly INTERP_DELAY = 0.130; // 130 ms
+  /** Server tick duration in seconds; overwritten from the welcome message. */
+  private _tickDt = 1 / 60;
+  /**
+   * How far behind the server tick timeline remote entities render. Sized
+   * from the welcome tick rate: snapshots arrive every tick, so ~3 intervals
+   * absorbs one dropped/late snapshot plus jitter (50 ms at 60 Hz).
+   */
+  private _interpDelay = 0.05;
 
   // ── Render clock ──
-  // Remote entities are rendered INTERP_DELAY behind the server tick
+  // Remote entities are rendered _interpDelay behind the server tick
   // timeline. The clock must advance with *local* time every frame — deriving
-  // it from the newest snapshot's tick freezes it between snapshot arrivals
-  // (15 Hz), which renders remote motion as freeze-then-teleport steps.
+  // it from the newest snapshot's tick freezes it between snapshot arrivals,
+  // which renders remote motion as freeze-then-teleport steps.
   /** Accumulated local update time (seconds). */
   private _localTime = 0;
   /** Smoothed (serverTime − localTime); null until the first snapshot. */
@@ -124,7 +135,7 @@ export class Game {
    * so `_renderProjectiles` never shows the server's duplicate. An entry
    * lives until the *render* timeline passes the projectile's last appearance
    * (`seenTick`) — pruning on the arrival timeline would unhide it while the
-   * ~130 ms-delayed interpolation still has it in flight.
+   * interp-delayed timeline still has it in flight.
    */
   private _ownArrowIds = new Map<string, { seenTick: number | null; missedBatches: number }>();
 
@@ -206,15 +217,12 @@ export class Game {
     this._water = new Water(this._map);
     this._scene.add(this._water.group);
 
-    // ── Navigation ──
-    this._navGrid = new NavGrid(
-      this._map.pathing.width,
-      this._map.pathing.height,
-      PATH_CELL_SIZE,
-      bounds.minX,
-      bounds.minZ,
+    // ── Navigation (WPM pathing + tree footprints, same as the server grid) ──
+    this._navGrid = buildNavGridFromWpm(
+      this._map.pathing,
+      { minX: bounds.minX, minZ: bounds.minZ },
+      this._map.doodads,
     );
-    this._applyPathingToNav();
     this._pathfinder = new Pathfinder(this._navGrid);
 
     // ── Doodads ──
@@ -222,12 +230,12 @@ export class Game {
     const doodads = new Doodads(this._map, heightAt, this._obstacleRegistry);
     this._scene.add(doodads.group);
 
-    // ── Fog of war ──
-    this._fog = new FogOfWar(this._arena, FOG_CELL_SIZE, heightAt);
-    for (const s of doodads.solids) {
+    // ── Fog of war (WC3 rules: discrete cliff layers + tree blockers) ──
+    this._fog = new FogOfWar(this._arena, FOG_CELL_SIZE, (x, z) => this._terrain.layerAt(x, z));
+    for (const s of doodads.sightBlockers) {
       if (s.x >= this._arena.minX && s.x <= this._arena.maxX &&
           s.z >= this._arena.minZ && s.z <= this._arena.maxZ) {
-        this._fog.addSightBlocker(s.x, s.z, s.halfW, s.halfD, s.height);
+        this._fog.addSightBlocker(s.x, s.z, s.halfW, s.halfD);
       }
     }
     this._fogLayer = null!; // set below after we know the player's team
@@ -242,8 +250,9 @@ export class Game {
         centerX: this._arena.centerX, centerZ: this._arena.centerZ,
         width: this._arena.width, height: this._arena.height,
       },
+      this._map.doodads,
     );
-    this._world.obstacles = buildObstaclesFromSolids(doodads.solids);
+    this._world.obstacles = buildObstaclesFromSolids(doodads.projectileSolids);
 
     // Override the shop position with the actual placed shop location
     // (buildSimWorld picks a walkable spot, but we already found one below).
@@ -315,10 +324,10 @@ export class Game {
     this._camera.setBounds(this._arena.minX, this._arena.minZ, this._arena.maxX, this._arena.maxZ);
     this._camera.setTarget(new THREE.Vector3(
       this._playerState.pos.x,
-      heightAt(this._playerState.pos.x, this._playerState.pos.z),
+      this._smoothHeightAt(this._playerState.pos.x, this._playerState.pos.z),
       this._playerState.pos.z,
     ));
-    this._camera.setFocusY(heightAt(this._playerState.pos.x, this._playerState.pos.z));
+    this._camera.setFocusY(this._smoothHeightAt(this._playerState.pos.x, this._playerState.pos.z));
 
     // ── Input ──
     this._input = new InputManager(this._renderer.domElement, this._camera.camera);
@@ -393,7 +402,7 @@ export class Game {
     this._minimap.setFog(this._fog, this._playerState.team);
     this._minimap.onClick = (wx, wz) => {
       this._cameraLocked = false;
-      this._camera.setTarget(new THREE.Vector3(wx, heightAt(wx, wz), wz));
+      this._camera.setTarget(new THREE.Vector3(wx, this._smoothHeightAt(wx, wz), wz));
     };
 
     window.addEventListener('resize', this._onResize.bind(this));
@@ -406,6 +415,12 @@ export class Game {
   // ── Input queue ─────────────────────────────────────────────────────
 
   private _enqueueCommand(cmd: Command): void {
+    // Network mode: put the command on the wire immediately rather than on
+    // the next fixed update — shaves up to one update tick of input latency.
+    // The queue entry still drives prediction and cosmetic spawns.
+    if (this._networkMode && this._network?.isReady) {
+      this._network.sendInput(cmd);
+    }
     this._pendingCommands.push(cmd);
   }
 
@@ -414,9 +429,13 @@ export class Game {
   private async _initNetwork(): Promise<void> {
     const welcome = await this._network!.connect(this._roomCode!, 'Player');
 
+    // All snapshot-timeline math derives from the server's tick rate.
+    this._tickDt = 1 / welcome.tickRate;
+    this._interpDelay = Math.max(0.05, 3 * this._tickDt);
+
     // Apply the welcome snapshot to initialise our state and views.
     this._playerId = welcome.playerId;
-    this._applySnapshot(welcome.snapshot);
+    this._applySnapshot(welcome.snapshot, welcome.meta);
 
     // Confirm our hero made it into the snapshot (`_applySnapshot` set
     // `_playerState` from it).
@@ -477,14 +496,12 @@ export class Game {
 
   /**
    * Adopt a full snapshot as the initial local state (welcome handshake).
-   * Deep-copies everything so nothing aliases the snapshot, then builds views.
+   * Hydrates full HeroStates from the wire hot fields + cold meta, then
+   * builds views. Nothing aliases the snapshot.
    */
-  private _applySnapshot(snap: Snapshot): void {
-    this._state.heroes = snap.heroes.map((h) => ({
-      ...h,
-      pos: { x: h.pos.x, z: h.pos.z },
-      path: h.path.map((p) => ({ ...p })),
-    }));
+  private _applySnapshot(snap: Snapshot, meta: HeroMeta[]): void {
+    const metaById = new Map(meta.map((m) => [m.id, m]));
+    this._state.heroes = snap.heroes.map((h) => this._heroFromWire(h, metaById.get(h.id)));
     this._state.projectiles = this._cloneProjectiles(snap.projectiles);
     this._state.wards = this._cloneWards(snap.wards);
     this._state.tick = snap.tick;
@@ -510,11 +527,14 @@ export class Game {
       if (sh.id === this._playerId) continue;
       let local = this._state.heroes.find((h) => h.id === sh.id);
       if (!local) {
-        // New peer — clone so this state object never aliases the buffer.
-        local = { ...sh, pos: { x: sh.pos.x, z: sh.pos.z }, path: [] };
+        // New peer — hydrate from hot fields; cold fields land with the
+        // heroMeta flush the server broadcasts on every join.
+        local = this._heroFromWire(sh);
         this._state.heroes.push(local);
       }
-      this._copyHeroState(local, sh);
+      this._applyHotFields(local, sh);
+      // Position/facing come from interpolation; `moving` drives animation.
+      local.moving = sh.moving;
     }
     this._state.heroes = this._state.heroes.filter((h) =>
       h.id === this._playerId || snapIds.has(h.id),
@@ -539,8 +559,8 @@ export class Game {
     const localHero = this._state.heroes.find((h) => h.id === this._playerId);
     if (!serverHero || !localHero) return;
 
-    // Always adopt server authority for non-position state.
-    this._copyHeroState(localHero, serverHero);
+    // Always adopt server authority for combat state.
+    this._applyHotFields(localHero, serverHero);
 
     // Position: only snap on large desync. Local prediction is authoritative
     // until the server disagrees by more than the snap threshold.
@@ -548,16 +568,43 @@ export class Game {
     if (dist > Game.SNAP_THRESHOLD) {
       localHero.pos = { x: serverHero.pos.x, z: serverHero.pos.z };
       localHero.facing = serverHero.facing;
-      localHero.targetFacing = serverHero.targetFacing;
-      localHero.path = serverHero.path.map((p) => ({ ...p }));
-      localHero.moving = serverHero.moving;
+      localHero.targetFacing = serverHero.facing;
+      // The wire carries only the destination — rebuild the waypoint path
+      // on the same NavGrid the server pathed, from the snapped position.
+      localHero.path = [];
+      localHero.moving = false;
+      if (serverHero.moving && serverHero.dest) {
+        const path = this._world.pathfinder.findSmoothedPath(
+          serverHero.pos.x, serverHero.pos.z, serverHero.dest.x, serverHero.dest.z,
+        );
+        if (path && path.length > 1) {
+          localHero.path = path.slice(1).map((p) => ({ x: p.wx, z: p.wz }));
+          localHero.moving = true;
+        }
+      }
     }
   }
 
-  /** Copy every field from src → dst (shallow, safe for plain data). */
-  private _copyHeroState(dst: HeroState, src: HeroState): void {
+  /** Build a full local HeroState from wire hot fields (+ cold meta if known). */
+  private _heroFromWire(hot: SnapshotHero, meta?: HeroMeta): HeroState {
+    const hero = createHeroState(hot.id, hot.team, hot.pos);
+    hero.facing = hot.facing;
+    hero.targetFacing = hot.facing;
+    hero.moving = hot.moving;
+    this._applyHotFields(hero, hot);
+    if (meta) this._applyMetaFields(hero, meta);
+    return hero;
+  }
+
+  /** Server-authoritative per-tick fields, safe to adopt for any hero. */
+  private _applyHotFields(dst: HeroState, src: SnapshotHero): void {
+    dst.team = src.team;
     dst.hp = src.hp;
     dst.alive = src.alive;
+  }
+
+  /** Cold fields from a heroMeta message (shallow, safe for plain data). */
+  private _applyMetaFields(dst: HeroState, src: HeroMeta): void {
     dst.invulnerable = src.invulnerable;
     dst.invulnerableTimer = src.invulnerableTimer;
     dst.respawnTimer = src.respawnTimer;
@@ -574,9 +621,10 @@ export class Game {
     dst.inventory = [...src.inventory];
     dst.wardCharges = src.wardCharges;
     dst.abilityLevel = src.abilityLevel;
-    // Don't reconcile abilityCooldown — local prediction ticks it
-    // correctly and the server's value could be stale (not yet processed
-    // our fire command).  The snapshot threshold handles desync.
+    // Don't reconcile the local player's abilityCooldown — prediction ticks
+    // it correctly and the server's value could be stale (not yet processed
+    // our fire command).
+    if (dst.id !== this._playerId) dst.abilityCooldown = src.abilityCooldown;
   }
 
   /** Run local stepMatch for the player's hero only (instant movement feel). */
@@ -610,7 +658,8 @@ export class Game {
 
   /**
    * Interpolate remote hero positions between the pair of snapshots that
-   * straddles `renderTime`, so 15 Hz snapshots render as smooth 60 fps motion.
+   * straddles `renderTime`, so tick-rate snapshots render as smooth motion
+   * at any display refresh rate.
    */
   private _interpolateHeroes(renderTime: number): void {
     if (this._snapshots.length < 2) return;
@@ -622,7 +671,7 @@ export class Game {
     for (let i = 0; i < this._snapshots.length - 1; i++) {
       const a = this._snapshots[i];
       const b = this._snapshots[i + 1];
-      if (a.tick / 30 <= renderTime && renderTime <= b.tick / 30) {
+      if (a.tick * this._tickDt <= renderTime && renderTime <= b.tick * this._tickDt) {
         prev = a;
         next = b;
         break;
@@ -634,8 +683,8 @@ export class Game {
       }
     }
 
-    const prevTime = prev.tick / 30;
-    const nextTime = next.tick / 30;
+    const prevTime = prev.tick * this._tickDt;
+    const nextTime = next.tick * this._tickDt;
     const span = nextTime - prevTime;
     const t = span > 0 ? clamp((renderTime - prevTime) / span, 0, 1) : 0;
 
@@ -658,21 +707,21 @@ export class Game {
    * snapshot position (clamped by `traveled`, i.e. never before the spawn
    * point). This renders every projectile that reaches *any* snapshot for its
    * full lifetime — including ones that would be missed when several
-   * snapshots arrive in one frame — with per-frame motion, not 15 Hz steps.
+   * snapshots arrive in one frame — with per-frame motion, not tick steps.
    */
   private _renderProjectiles(renderTime: number): void {
     if (this._snapshots.length === 0) return;
 
     let next = this._snapshots[this._snapshots.length - 1];
     for (const s of this._snapshots) {
-      if (s.tick / 30 >= renderTime) {
+      if (s.tick * this._tickDt >= renderTime) {
         next = s;
         break;
       }
     }
     // If renderTime has outrun the buffer (network stall), `behind` is 0 and
     // projectiles hold at their last known position rather than extrapolating.
-    const behind = Math.max(0, next.tick / 30 - renderTime);
+    const behind = Math.max(0, next.tick * this._tickDt - renderTime);
 
     // Release own-arrow ids the render timeline has fully passed.
     for (const [id, rec] of this._ownArrowIds) {
@@ -834,15 +883,8 @@ export class Game {
     return this._terrain.heightAt(x, z);
   }
 
-  /** Copy the original pathing map into the nav grid (rows flip: wpm row 0 = south). */
-  private _applyPathingToNav(): void {
-    const pathing = this._map.pathing;
-    for (let gz = 0; gz < pathing.height; gz++) {
-      const row = pathing.height - 1 - gz;
-      for (let gx = 0; gx < pathing.width; gx++) {
-        this._navGrid.setWalkable(gx, gz, isCellWalkable(pathing, gx, row));
-      }
-    }
+  private _smoothHeightAt(x: number, z: number): number {
+    return this._terrain.smoothHeightAt(x, z);
   }
 
   private _onResize(): void {
@@ -919,10 +961,10 @@ export class Game {
     this._updateCamera(dt);
     this._localTime += dt;
 
-    // ── Send inputs to server (also keep for local prediction) ──
+    // ── Drain pending commands for prediction & cosmetics ──
+    // (Commands already went on the wire in `_enqueueCommand`.)
     const localInputs: HeroInput[] = [];
     for (const cmd of this._pendingCommands) {
-      this._network?.sendInput(cmd);
       localInputs.push({ heroId: this._playerId, cmd });
       if (cmd.type === 'fire') {
         this._spawnCosmeticProjectile(cmd);
@@ -937,7 +979,7 @@ export class Game {
       this._reconcileFromSnapshot(snap);
       // Track (serverTime − localTime) with a light EMA: smooths arrival
       // jitter, hard-resets on gross desync (join, tab suspend).
-      const sample = snap.tick / 30 - this._localTime;
+      const sample = snap.tick * this._tickDt - this._localTime;
       if (this._serverTimeOffset === null || Math.abs(sample - this._serverTimeOffset) > 0.5) {
         this._serverTimeOffset = sample;
       } else {
@@ -951,26 +993,34 @@ export class Game {
       this._trackOwnArrowIds(snaps);
     }
 
+    // ── Cold hero fields (low rate + event-triggered flushes) ──
+    const meta = this._network?.takeMeta();
+    if (meta) {
+      for (const m of meta) {
+        const hero = this._state.heroes.find((h) => h.id === m.id);
+        if (hero) this._applyMetaFields(hero, m);
+      }
+    }
+
     // Render clock: advances every frame with local time (never frozen
     // between snapshot arrivals), offset onto the server tick timeline.
     const renderTime = this._serverTimeOffset === null
       ? null
-      : this._localTime + this._serverTimeOffset - Game.INTERP_DELAY;
+      : this._localTime + this._serverTimeOffset - this._interpDelay;
 
     // Prune snapshots that fell behind the straddling pair.
     if (renderTime !== null) {
-      while (this._snapshots.length > 2 && this._snapshots[1].tick / 30 <= renderTime) {
+      while (this._snapshots.length > 2 && this._snapshots[1].tick * this._tickDt <= renderTime) {
         this._snapshots.shift();
       }
     }
 
     // ── Drain events (own-arrow bookkeeping first: it may retire arrows) ──
-    const evts = this._network?.drainEvents() ?? [];
-    for (const evMsg of evts) {
-      this._handleOwnArrowEvent(evMsg.event);
-      this._handleEvent(evMsg.event, dt);
+    const frameEvents = this._network?.drainEvents() ?? [];
+    for (const ev of frameEvents) {
+      this._handleOwnArrowEvent(ev);
+      this._handleEvent(ev, dt);
     }
-    const frameEvents = evts.map((e) => e.event);
 
     // ── Interpolate remote heroes ──
     if (renderTime !== null) this._interpolateHeroes(renderTime);
@@ -1069,12 +1119,12 @@ export class Game {
     } else if (this._cameraLocked && this._playerState) {
       this._camera.follow(new THREE.Vector3(
         this._playerState.pos.x,
-        this._heightAt(this._playerState.pos.x, this._playerState.pos.z),
+        this._smoothHeightAt(this._playerState.pos.x, this._playerState.pos.z),
         this._playerState.pos.z,
       ));
     }
     const focus = this._camera.focus;
-    this._camera.setFocusY(this._heightAt(focus.x, focus.z));
+    this._camera.setFocusY(this._smoothHeightAt(focus.x, focus.z));
   }
 
   private _syncAllViews(dt: number): void {

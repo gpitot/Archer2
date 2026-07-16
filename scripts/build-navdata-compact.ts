@@ -11,6 +11,8 @@ import { fileURLToPath } from 'url';
 import { parseW3E } from '../src/world/wc3/W3EParser';
 import { parseWpm, isCellWalkable, PATH_CELL_SIZE } from '../src/world/wc3/WpmParser';
 import { parseDoo } from '../src/world/wc3/DooParser';
+import { buildNavGridFromWpm, findWalkableNearOnGrid } from '../src/sim/buildWorld';
+import { NavGrid } from '../src/navigation/NavGrid';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS_DIR = path.resolve(__dirname, '..', 'assets');
@@ -42,13 +44,20 @@ function main() {
     throw new Error('pathing/terrain mismatch');
   }
 
-  // ── Pack the pathing grid into a bit array ──
+  // ── Build the nav grid (WPM + tree footprints) and bit-pack it ──
+  // Same code path as the client's buildSimWorld, so the grids are identical.
+  const bounds = { minX: terrain.offsetX, minZ: -(terrain.offsetY + tilesH * 128) };
+  const bare = buildNavGridFromWpm(pathing, bounds);
+  const navGrid = buildNavGridFromWpm(pathing, bounds, doodads);
+  logTreeStamping(bare, navGrid);
+
+  // Bits stay in WPM-native order (row 0 = south); NavGrid row 0 = north.
   const numCells = pathing.width * pathing.height;
   const bytes = new Uint8Array(Math.ceil(numCells / 8));
   for (let i = 0; i < numCells; i++) {
     const row = Math.floor(i / pathing.width);
     const col = i % pathing.width;
-    if (isCellWalkable(pathing, col, row)) {
+    if (navGrid.isWalkable(col, pathing.height - 1 - row)) {
       bytes[Math.floor(i / 8)] |= 1 << (i % 8);
     }
   }
@@ -57,36 +66,26 @@ function main() {
   // ── Height grid (full resolution float array → base64) ──
   const heightsBase64 = Buffer.from(new Uint8Array(terrain.finalHeight.buffer)).toString('base64');
 
-  // ── Obstacles ──
-  const TREE_STYLES = new Set(['ATtr', 'LTlt', 'YTpb', 'YTfc']);
+  // ── Obstacles (projectile collision: solid rocks only — trees don't block arrows) ──
   const ROCK_STYLES = new Set(['ARrk', 'LRrk', 'LPcr']);
   const obsLines: string[] = [];
   for (const d of doodads) {
+    if (!ROCK_STYLES.has(d.typeId)) continue;
     const { wx, wz } = wc3ToWorld(d.x, d.y);
     const col = Math.floor((d.x - terrain.offsetX) / PATH_CELL_SIZE);
     const row = Math.floor((d.y - terrain.offsetY) / PATH_CELL_SIZE);
     if (!isCellWalkable(pathing, col, row)) {
-      const isTree = TREE_STYLES.has(d.typeId);
-      const isRock = ROCK_STYLES.has(d.typeId);
-      if (isTree || isRock) {
-        const halfW = (isTree ? 48 : 40) * d.scaleX;
-        const halfD = (isTree ? 48 : 40) * d.scaleY;
-        obsLines.push(`  { minX: ${(wx - halfW).toFixed(1)}, minZ: ${(wz - halfD).toFixed(1)}, maxX: ${(wx + halfW).toFixed(1)}, maxZ: ${(wz + halfD).toFixed(1)} }`);
-      } else {
-        const halfW = 32 * d.scaleX;
-        const halfD = 32 * d.scaleY;
-        obsLines.push(`  { minX: ${(wx - halfW).toFixed(1)}, minZ: ${(wz - halfD).toFixed(1)}, maxX: ${(wx + halfW).toFixed(1)}, maxZ: ${(wz + halfD).toFixed(1)} }`);
-      }
+      const halfW = 40 * d.scaleX;
+      const halfD = 40 * d.scaleY;
+      obsLines.push(`  { minX: ${(wx - halfW).toFixed(1)}, minZ: ${(wz - halfD).toFixed(1)}, maxX: ${(wx + halfW).toFixed(1)}, maxZ: ${(wz + halfD).toFixed(1)} }`);
     }
   }
 
   // ── Arena (terrain 1) ──
   const arena = arenaFromWc3(-2784, -6720, 4416, 512);
 
-  // ── Shop position ──
-  const shopPos = findWalkableNear(
-    arena.centerX, arena.centerZ, pathing, terrain,
-  );
+  // ── Shop position (on the stamped grid, so it can't land inside a tree) ──
+  const shopPos = findWalkableNearOnGrid(navGrid, arena.centerX, arena.centerZ);
 
   // ── Generate the module ──
   const ts = `/**
@@ -126,7 +125,7 @@ ${obsLines.join(',\n')}
     terrain1: ${JSON.stringify(arena)},
   },
 
-  shopPos: { x: ${shopPos.wx.toFixed(1)}, z: ${shopPos.wz.toFixed(1)} },
+  shopPos: { x: ${shopPos.x.toFixed(1)}, z: ${shopPos.z.toFixed(1)} },
 } as const;
 `;
 
@@ -152,24 +151,24 @@ function arenaFromWc3(minx: number, miny: number, maxx: number, maxy: number) {
   };
 }
 
-function findWalkableNear(wx: number, wz: number, pathing: any, terrain: any): { wx: number; wz: number } {
-  const startCol = Math.floor((wx - terrain.offsetX) / PATH_CELL_SIZE);
-  const startRow = Math.floor((-wz - terrain.offsetY) / PATH_CELL_SIZE);
-  for (let radius = 0; radius < 64; radius++) {
-    for (let dz = -radius; dz <= radius; dz++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dz)) !== radius) continue;
-        const col = startCol + dx;
-        const row = startRow + dz;
-        if (isCellWalkable(pathing, col, row)) {
-          const cx = terrain.offsetX + (col + 0.5) * PATH_CELL_SIZE;
-          const cz = -(terrain.offsetY + (row + 0.5) * PATH_CELL_SIZE);
-          return { wx: cx, wz: cz };
-        }
-      }
+function countWalkable(grid: NavGrid): number {
+  let n = 0;
+  for (let gz = 0; gz < grid.height; gz++) {
+    for (let gx = 0; gx < grid.width; gx++) {
+      if (grid.isWalkable(gx, gz)) n++;
     }
   }
-  return { wx, wz };
+  return n;
+}
+
+function logTreeStamping(before: NavGrid, after: NavGrid): void {
+  const total = before.width * before.height;
+  const a = countWalkable(before);
+  const b = countWalkable(after);
+  console.log(
+    `[build-navdata-compact] tree stamping blocked ${a - b} cells ` +
+    `(walkable ${((a / total) * 100).toFixed(1)}% → ${((b / total) * 100).toFixed(1)}%)`,
+  );
 }
 
 main();

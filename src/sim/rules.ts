@@ -9,8 +9,8 @@
 export const HERO = {
   maxHp: 100,
   baseSpeed: 480,
-  /** Fog-of-war sight radius (world units). */
-  sightRadius: 900,
+  /** Fog-of-war sight radius (world units) — WC3 hero daytime sight. */
+  sightRadius: 1800,
   /** Collision radius used for projectile hit tests (0.45 × mesh scale of 60). */
   bodyRadius: 27,
   maxLevel: 10,
@@ -63,6 +63,7 @@ export const ARROW = {
 
 // ── Wards ─────────────────────────────────────────────────────────────
 export const WARD = {
-  sightRadius: 700,
+  /** WC3 Observer Ward sight range. */
+  sightRadius: 1600,
   duration: 300,
 } as const;

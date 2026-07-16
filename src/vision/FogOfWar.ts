@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 
 /** Per-cell visibility states, Warcraft 3 style. */
-export const FOG_HIDDEN = 0; // never seen — black mask
-export const FOG_EXPLORED = 1; // seen before — terrain remembered, units hidden
+export const FOG_HIDDEN = 0; // outside the map bounds — black mask
+export const FOG_EXPLORED = 1; // out of sight — terrain shown fogged, units hidden
 export const FOG_VISIBLE = 2; // currently in sight
 
 /** World-space rectangle a fog grid covers. */
@@ -32,29 +32,25 @@ export interface VisionSource {
  * Warcraft-3-style fog of war.
  *
  * The playable area is divided into a coarse grid. Each *team* owns a
- * visibility map (hidden / explored / visible) that is the union of what all
- * of that team's vision sources can see — so teammates and their wards
- * automatically share vision. A cell is in sight of a source when it is
- * inside the source's sight radius AND the heightfield line-of-sight test
- * passes:
+ * visibility map that is the union of what all of that team's vision sources
+ * can see — so teammates and their wards automatically share vision. The map
+ * starts fully explored (custom-game style: no black undiscovered areas —
+ * terrain is always shown, only unit visibility is gated by fog). Visibility
+ * follows WC3's discrete rules:
  *
- *  - **High ground advantage**: the sight line runs from the source's eye
- *    (ground + EYE_HEIGHT) to the target cell (ground + TARGET_HEIGHT).
- *    Terrain rising above that line blocks it, so a unit downhill cannot see
- *    up past a crest, while a unit on the crest sees down freely — WC3's
- *    high-ground rule, adapted to a smooth heightfield.
- *  - **Sight blockers**: trees and rocks raise the blocking height of the
- *    cells they cover, so forests occlude vision like WC3 tree walls.
+ *  - **Cliff layers only**: each cell carries the map's discrete cliff layer.
+ *    A cell on a layer *higher* than the source's is never visible, and it
+ *    shadows everything behind it. Cells at or below the source's layer never
+ *    block — a unit on a plateau sees all lower ground in range, and rolling
+ *    height variation within a level never affects vision.
+ *  - **Sight blockers**: cells covered by trees/rocks block the sight line
+ *    behind them (the blocker's own cells stay visible from adjacent cells,
+ *    like WC3 tree walls).
  *
  * Visibility is recomputed on a fixed interval (not every frame); renderers
  * smooth the transitions.
  */
 export class FogOfWar {
-  /** Eye height added above the ground at the source's cell. */
-  static readonly EYE_HEIGHT = 25;
-  /** Height above the ground a cell must be seen at to count as visible. */
-  static readonly TARGET_HEIGHT = 12;
-
   /** Seconds between visibility recomputes. */
   readonly recomputeInterval = 0.15;
 
@@ -68,8 +64,9 @@ export class FogOfWar {
   readonly worldWidth: number;
   readonly worldHeight: number;
 
-  private _groundH: Float32Array; // terrain height per cell
-  private _blockH: Float32Array; // sight-blocking height per cell (terrain + doodads)
+  private _cellLayer: Uint8Array; // discrete cliff layer per cell
+  private _blocked: Uint8Array; // 1 = sight blocker (tree/rock) covers the cell
+  private _layerAt: (x: number, z: number) => number;
   private _teams = new Map<number, Uint8Array>();
   private _sources: VisionSource[] = [];
   private _timer = 0; // time until next recompute; 0 → recompute on next update
@@ -77,7 +74,7 @@ export class FogOfWar {
   constructor(
     bounds: FogBounds,
     cellSize: number,
-    heightAt: (x: number, z: number) => number,
+    layerAt: (x: number, z: number) => number,
   ) {
     this.cellSize = cellSize;
     this.cellsX = Math.max(1, Math.round(bounds.width / cellSize));
@@ -86,34 +83,32 @@ export class FogOfWar {
     this.worldHeight = this.cellsZ * cellSize;
     this.originX = bounds.minX;
     this.originZ = bounds.minZ;
+    this._layerAt = layerAt;
 
     const n = this.cellsX * this.cellsZ;
-    this._groundH = new Float32Array(n);
-    this._blockH = new Float32Array(n);
+    this._cellLayer = new Uint8Array(n);
+    this._blocked = new Uint8Array(n);
     for (let cz = 0; cz < this.cellsZ; cz++) {
       for (let cx = 0; cx < this.cellsX; cx++) {
-        const h = heightAt(
+        this._cellLayer[cz * this.cellsX + cx] = layerAt(
           this.originX + (cx + 0.5) * cellSize,
           this.originZ + (cz + 0.5) * cellSize,
         );
-        this._groundH[cz * this.cellsX + cx] = h;
-        this._blockH[cz * this.cellsX + cx] = h;
       }
     }
   }
 
   // ── Setup ──────────────────────────────────────────────────────
 
-  /** Raise the sight-blocking height over a rectangular footprint (tree/rock). */
-  addSightBlocker(wx: number, wz: number, halfWidth: number, halfDepth: number, height: number): void {
+  /** Mark a rectangular footprint (tree/rock) as sight-blocking. */
+  addSightBlocker(wx: number, wz: number, halfWidth: number, halfDepth: number): void {
     const minX = this._clampCellX(Math.floor((wx - halfWidth - this.originX) / this.cellSize));
     const maxX = this._clampCellX(Math.floor((wx + halfWidth - this.originX) / this.cellSize));
     const minZ = this._clampCellZ(Math.floor((wz - halfDepth - this.originZ) / this.cellSize));
     const maxZ = this._clampCellZ(Math.floor((wz + halfDepth - this.originZ) / this.cellSize));
     for (let cz = minZ; cz <= maxZ; cz++) {
       for (let cx = minX; cx <= maxX; cx++) {
-        const idx = cz * this.cellsX + cx;
-        this._blockH[idx] = Math.max(this._blockH[idx], this._groundH[idx] + height);
+        this._blocked[cz * this.cellsX + cx] = 1;
       }
     }
   }
@@ -130,11 +125,11 @@ export class FogOfWar {
 
   // ── Queries ────────────────────────────────────────────────────
 
-  /** The team's visibility map (creating it hidden-everywhere on first use). */
+  /** The team's visibility map (created fully explored on first use). */
   team(team: number): Uint8Array {
     let map = this._teams.get(team);
     if (!map) {
-      map = new Uint8Array(this.cellsX * this.cellsZ); // FOG_HIDDEN
+      map = new Uint8Array(this.cellsX * this.cellsZ).fill(FOG_EXPLORED);
       this._teams.set(team, map);
     }
     return map;
@@ -190,7 +185,9 @@ export class FogOfWar {
   private _sweep(map: Uint8Array, src: VisionSource): void {
     const cx = this._clampCellX(Math.floor((src.position.x - this.originX) / this.cellSize));
     const cz = this._clampCellZ(Math.floor((src.position.z - this.originZ) / this.cellSize));
-    const eyeH = this._groundH[cz * this.cellsX + cx] + FogOfWar.EYE_HEIGHT;
+    // Exact position, not cell center: a source stepping onto a plateau
+    // gains high-ground vision the moment it crosses the layer boundary.
+    const srcLayer = this._layerAt(src.position.x, src.position.z);
 
     const rCells = Math.ceil(src.sightRadius / this.cellSize);
     const r2 = rCells * rCells;
@@ -205,8 +202,10 @@ export class FogOfWar {
         const dz = tz - cz;
         const d2 = dx * dx + dz * dz;
         if (d2 > r2) continue;
+        // Higher ground is never visible from below, not even point-blank.
+        if (this._cellLayer[tz * this.cellsX + tx] > srcLayer) continue;
         // Immediate surroundings are always seen, even inside a tree line.
-        if (d2 <= 2 || this._lineOfSight(cx, cz, tx, tz, eyeH)) {
+        if (d2 <= 2 || this._lineOfSight(cx, cz, tx, tz, srcLayer)) {
           map[tz * this.cellsX + tx] = FOG_VISIBLE;
         }
       }
@@ -214,23 +213,22 @@ export class FogOfWar {
   }
 
   /**
-   * March the sight line over the blocking heightfield. Endpoints are skipped
+   * March the sight line over the layer/blocker grid. Endpoints are skipped
    * so a unit hugging a tree still sees its own cell and the tree's.
    */
-  private _lineOfSight(cx: number, cz: number, tx: number, tz: number, eyeH: number): boolean {
+  private _lineOfSight(cx: number, cz: number, tx: number, tz: number, srcLayer: number): boolean {
     const dx = tx - cx;
     const dz = tz - cz;
     const steps = Math.max(Math.abs(dx), Math.abs(dz));
     if (steps <= 1) return true;
 
-    const targetH = this._groundH[tz * this.cellsX + tx] + FogOfWar.TARGET_HEIGHT;
     const inv = 1 / steps;
     for (let i = 1; i < steps; i++) {
       const t = i * inv;
       const sx = Math.round(cx + dx * t);
       const sz = Math.round(cz + dz * t);
-      const lineH = eyeH + (targetH - eyeH) * t;
-      if (this._blockH[sz * this.cellsX + sx] > lineH) return false;
+      const idx = sz * this.cellsX + sx;
+      if (this._cellLayer[idx] > srcLayer || this._blocked[idx]) return false;
     }
     return true;
   }

@@ -2,12 +2,17 @@
  * Durable Object: one instance = one match room.
  *
  * Uses the hibernation WebSocket API. The DO builds a SimWorld from compact
- * navdata on first instantiation, then runs a 30 Hz tick loop while players
+ * navdata on first instantiation, then runs a 60 Hz tick loop while players
  * are connected. All gameplay is authoritative — clients send commands, the
  * server simulates, and snapshots + events are broadcast back.
+ *
+ * Every tick broadcasts a quantized "hot" snapshot (positions, hp, flags,
+ * projectiles, wards) with that tick's events piggybacked. The "cold" hero
+ * fields (economy, progression, inventory) go out as a separate `heroMeta`
+ * message at a low rate, and immediately when an event changes them.
  */
 import { DurableObject, WebSocket } from 'cloudflare:workers';
-import { MatchState, HeroInput, HeroState, createMatchState, createHeroState } from '../src/sim/state';
+import { MatchState, HeroInput, HeroState, SimEvent, createMatchState, createHeroState } from '../src/sim/state';
 import { stepMatch } from '../src/sim/stepMatch';
 import { SimWorld, ObstacleAABB, Rect, Shop, findRespawnPosition } from '../src/sim/world';
 import { SHOP_ITEMS } from '../src/sim/shopItems';
@@ -16,7 +21,8 @@ import { Pathfinder } from '../src/navigation/Pathfinder';
 import { HERO } from '../src/sim/rules';
 import {
   ClientMessage, ServerMessage, WelcomeMessage, SnapshotMessage,
-  EventMessage, PeerJoinedMessage, PeerLeftMessage,
+  HeroMetaMessage, SnapshotHero, HeroMeta, Snapshot,
+  PeerJoinedMessage, PeerLeftMessage,
 } from '../src/sim/protocol';
 
 // ── Compact navdata (auto-generated) ─────────────────────────────────
@@ -33,10 +39,19 @@ interface PlayerInfo {
   name: string;
 }
 
-const TICK_RATE = 30;
+const TICK_RATE = 60;
 const TICK_INTERVAL = 1000 / TICK_RATE;
-const SNAPSHOT_EVERY = 2; // broadcast every Nth tick (15 Hz)
+const META_EVERY = 15; // cold hero fields every Nth tick (4 Hz)
 const MAX_PLAYERS = 8;
+
+/** Events whose effects live in the cold fields — flush meta immediately. */
+const META_EVENTS = new Set(['kill', 'respawn', 'purchase', 'levelUp']);
+
+// Quantize floats before JSON serialization: raw doubles stringify to 15+
+// chars each; 2 decimals is far below any visible threshold at world scale.
+const q = (n: number) => Math.round(n * 100) / 100;
+// Unit vectors need more precision (2dp ≈ 0.6° of heading error).
+const q4 = (n: number) => Math.round(n * 10000) / 10000;
 
 export class GameRoom extends DurableObject<Env> {
   private _world!: SimWorld;
@@ -109,18 +124,21 @@ export class GameRoom extends DurableObject<Env> {
         // Start the tick loop if this is the first player.
         if (!this._tickTimer) this._startTick();
 
-        // Send welcome with initial snapshot.
+        // Send welcome with initial snapshot + cold fields.
         const welcome: WelcomeMessage = {
           type: 'welcome',
           playerId,
           tickRate: TICK_RATE,
           snapshot: this._currentSnapshot(),
+          meta: this._heroMetas(),
         };
         ws.send(JSON.stringify(welcome));
 
-        // Notify others.
+        // Notify others, and flush cold fields so everyone has the new
+        // hero's meta without waiting for the next scheduled heroMeta.
         const peerMsg: PeerJoinedMessage = { type: 'peerJoined', playerId, name: msg.name };
         this._broadcast(peerMsg, ws);
+        this._broadcast({ type: 'heroMeta', heroes: this._heroMetas() } satisfies HeroMetaMessage, ws);
         break;
       }
 
@@ -181,34 +199,78 @@ export class GameRoom extends DurableObject<Env> {
     // Step the simulation.
     const events = stepMatch(this._state, inputs, 1 / TICK_RATE, this._world);
 
-    // Broadcast snapshot every 2nd tick.
-    if (this._state.tick % SNAPSHOT_EVERY === 0) {
-      const snapshot: SnapshotMessage = {
-        type: 'snapshot',
-        tick: this._state.tick,
-        heroes: this._state.heroes,
-        projectiles: this._state.projectiles,
-        wards: this._state.wards,
-      };
-      this._broadcast(snapshot);
-    }
+    // Broadcast the hot snapshot every tick, with this tick's events aboard.
+    const snapshot: SnapshotMessage = {
+      type: 'snapshot',
+      ...this._currentSnapshot(),
+    };
+    if (events.length > 0) snapshot.events = events;
+    this._broadcast(snapshot);
 
-    // Broadcast discrete events immediately.
-    for (const ev of events) {
-      const evMsg: EventMessage = { type: 'event', event: ev };
-      this._broadcast(evMsg);
+    // Cold fields: on schedule, or immediately when an event changed them.
+    if (this._state.tick % META_EVERY === 0 || events.some((ev) => META_EVENTS.has(ev.type))) {
+      this._broadcast({ type: 'heroMeta', heroes: this._heroMetas() } satisfies HeroMetaMessage);
     }
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────
+  // ── Wire encoding ─────────────────────────────────────────────────
 
-  private _currentSnapshot() {
+  private _currentSnapshot(): Snapshot {
     return {
       tick: this._state.tick,
-      heroes: this._state.heroes,
-      projectiles: this._state.projectiles,
-      wards: this._state.wards,
+      heroes: this._state.heroes.map((h) => this._wireHero(h)),
+      projectiles: this._state.projectiles.map((p) => ({
+        ...p,
+        pos: { x: q(p.pos.x), z: q(p.pos.z) },
+        dir: { x: q4(p.dir.x), z: q4(p.dir.z) },
+        traveled: q(p.traveled),
+      })),
+      wards: this._state.wards.map((w) => ({
+        ...w,
+        pos: { x: q(w.pos.x), z: q(w.pos.z) },
+        life: q(w.life),
+      })),
     };
+  }
+
+  private _wireHero(h: HeroState): SnapshotHero {
+    const wire: SnapshotHero = {
+      id: h.id,
+      team: h.team,
+      pos: { x: q(h.pos.x), z: q(h.pos.z) },
+      facing: q(h.facing),
+      hp: q(h.hp),
+      alive: h.alive,
+      moving: h.moving,
+    };
+    if (h.moving && h.path.length > 0) {
+      const dest = h.path[h.path.length - 1];
+      wire.dest = { x: q(dest.x), z: q(dest.z) };
+    }
+    return wire;
+  }
+
+  private _heroMetas(): HeroMeta[] {
+    return this._state.heroes.map((h) => ({
+      id: h.id,
+      invulnerable: h.invulnerable,
+      invulnerableTimer: q(h.invulnerableTimer),
+      respawnTimer: q(h.respawnTimer),
+      xp: h.xp,
+      level: h.level,
+      skillPoints: h.skillPoints,
+      gold: h.gold,
+      kills: h.kills,
+      deaths: h.deaths,
+      killStreak: h.killStreak,
+      multiKillCount: h.multiKillCount,
+      multiKillTimer: q(h.multiKillTimer),
+      speedBonus: h.speedBonus,
+      inventory: [...h.inventory],
+      wardCharges: h.wardCharges,
+      abilityLevel: h.abilityLevel,
+      abilityCooldown: q(h.abilityCooldown),
+    }));
   }
 
   private _broadcast(msg: ServerMessage, exclude?: WebSocket): void {
