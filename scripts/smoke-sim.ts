@@ -64,7 +64,7 @@ function run(): void {
   // Phase 2: Learn ability and fire at the dummy.
   console.log('[smoke] learning ability...');
   player.skillPoints = 1;
-  stepMatch(state, [{ heroId: 'p1', cmd: { type: 'levelAbility' } }], 1 / 30, world, rng);
+  stepMatch(state, [{ heroId: 'p1', cmd: { type: 'levelAbility', ability: 'arrow' } }], 1 / 30, world, rng);
   console.log(`  ability level: ${player.abilityLevel} (expected 1)`);
   if (player.abilityLevel !== 1) throw new Error('ability not learned');
 

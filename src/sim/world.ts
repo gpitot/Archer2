@@ -56,7 +56,7 @@ export interface SimWorld {
 }
 
 /** True if a sphere at `pos` with `radius` overlaps any obstacle (2D). */
-export function sphereHitsObstacle(world: SimWorld, pos: Vec2, radius: number): boolean {
+export function sphereHitsObstacle(world: { obstacles: ObstacleAABB[] }, pos: Vec2, radius: number): boolean {
   const r2 = radius * radius;
   for (const o of world.obstacles) {
     const cx = pos.x < o.minX ? o.minX : pos.x > o.maxX ? o.maxX : pos.x;

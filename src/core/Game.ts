@@ -17,6 +17,7 @@ import { Pathfinder } from '../navigation/Pathfinder';
 import { FogOfWar, VisionSource } from '../vision/FogOfWar';
 import { FogLayer } from '../vision/FogLayer';
 import { InputManager } from '../input/InputManager';
+import { TargetingSystem, walkableValidator } from '../input/TargetingSystem';
 import { ItemBar } from '../ui/ItemBar';
 import { KDDisplay } from '../ui/KDDisplay';
 import { ShopWindow } from '../ui/ShopWindow';
@@ -167,6 +168,7 @@ export class Game {
 
   // ── Input ──
   private _input!: InputManager;
+  private _targeting!: TargetingSystem;
 
   // ── Debug trace (?debug=1) ──
   private _trace: ClientTrace | null = null;
@@ -351,6 +353,14 @@ export class Game {
     // ── Input ──
     this._input = new InputManager(this._renderer.domElement, this._camera.camera);
     this._input.setGround(this._terrain.mesh);
+
+    // ── Targeting system (wards, blink, AoE) ──
+    this._targeting = new TargetingSystem();
+    // Always intercept clicks — handleClick returns false when idle so
+    // regular click handlers still fire.
+    this._input.setClickInterceptor((pos) => this._targeting.handleClick(pos.x, pos.z));
+    this._input.onRightClick(() => this._targeting.cancel());
+
     this._input.onClick((pos) => {
       // If click near shop and hero is also near shop, open the shop window.
       // If click near shop but hero is far, move hero near the shop first.
@@ -374,6 +384,7 @@ export class Game {
 
     // Q — Shoot Arrow (Shift+Q to spend skill point)
     this._input.onKeyDown('KeyQ', () => {
+      this._targeting.cancel();
       if (this._input.isKeyDown('ShiftLeft') || this._input.isKeyDown('ShiftRight')) {
         this._enqueueCommand({ type: 'levelAbility', ability: 'arrow' });
       } else {
@@ -388,6 +399,7 @@ export class Game {
 
     // W — Dodge (Shift+W to level up)
     this._input.onKeyDown('KeyW', () => {
+      this._targeting.cancel();
       if (this._input.isKeyDown('ShiftLeft') || this._input.isKeyDown('ShiftRight')) {
         this._enqueueCommand({ type: 'levelAbility', ability: 'dodge' });
       } else {
@@ -404,23 +416,38 @@ export class Game {
       }
     });
 
-    // Escape — close shop
+    // Escape — cancel targeting or close shop
     this._input.onKeyDown('Escape', () => {
+      if (this._targeting.isActive) {
+        this._targeting.cancel();
+        return;
+      }
       if (this._shopWindow.visible) this._shopWindow.close();
     });
 
     // Space — re-center camera
     this._input.onKeyDown('Space', () => { this._cameraLocked = true; });
 
-    // Number keys 1–6: buy from shop when open, or use item in that slot
+    // Number keys 1–6: buy from shop when open, or use item / activate targeting
     for (let i = 1; i <= 6; i++) {
       this._input.onKeyDown(`Digit${i}`, () => {
         if (this._shopWindow.visible) {
           this._enqueueCommand({ type: 'buy', itemIndex: i - 1 });
           this._shopWindow.close();
-        } else {
-          this._enqueueCommand({ type: 'useItem', slot: i - 1 });
+          return;
         }
+        const itemId = this._playerState.inventory[i - 1];
+        // Toggle: if same ward item targeting is already active, cancel.
+        if (this._targeting.isActive && itemId === 'sentry_wards' && this._targeting.sourceItemId === 'sentry_wards') {
+          this._targeting.cancel();
+          return;
+        }
+        this._targeting.cancel();
+        if (itemId === 'sentry_wards') {
+          this._activateWardTargeting();
+          return;
+        }
+        this._enqueueCommand({ type: 'useItem', slot: i - 1 });
       });
     }
 
@@ -669,10 +696,14 @@ export class Game {
     dst.inventory = [...src.inventory];
     dst.wardCharges = src.wardCharges;
     dst.abilityLevel = src.abilityLevel;
-    // Don't reconcile the local player's abilityCooldown — prediction ticks
-    // it correctly and the server's value could be stale (not yet processed
-    // our fire command).
-    if (dst.id !== this._playerId) dst.abilityCooldown = src.abilityCooldown;
+    // Don't reconcile the local player's charge / cooldown / recoil timers —
+    // prediction ticks them correctly and the server's value could be stale
+    // (not yet processed our fire command).
+    if (dst.id !== this._playerId) {
+      dst.abilityCharges = src.abilityCharges;
+      dst.abilityRecoilTimer = src.abilityRecoilTimer;
+      dst.abilityCooldown = src.abilityCooldown;
+    }
     dst.dodgeActive = src.dodgeActive;
     dst.dodgeTimer = src.dodgeTimer;
     dst.dodgeCooldown = src.dodgeCooldown;
@@ -686,7 +717,20 @@ export class Game {
       // run — otherwise a stationary hero's cooldown stays stuck until the
       // next move and the fire guard wrongly rejects follow-up shots.
       const idle = this._state.heroes.find((h) => h.id === this._playerId);
-      if (idle) idle.abilityCooldown = Math.max(0, idle.abilityCooldown - dt);
+      if (idle) {
+        if (idle.abilityRecoilTimer > 0) {
+          idle.abilityRecoilTimer = Math.max(0, idle.abilityRecoilTimer - dt);
+        }
+        if (idle.abilityCooldown > 0) {
+          idle.abilityCooldown = Math.max(0, idle.abilityCooldown - dt);
+          if (idle.abilityCooldown <= 0 && idle.abilityCharges < ARROW.maxCharges) {
+            idle.abilityCharges++;
+            if (idle.abilityCharges < ARROW.maxCharges) {
+              idle.abilityCooldown = ARROW.cooldownByLevel[Math.max(idle.abilityLevel, 1)];
+            }
+          }
+        }
+      }
       return;
     }
 
@@ -706,6 +750,11 @@ export class Game {
     player.targetFacing = temp.heroes[0].targetFacing;
     player.path = temp.heroes[0].path.map((p) => ({ ...p }));
     player.moving = temp.heroes[0].moving;
+    // Also sync predicted charge / cooldown / recoil so the cosmetic guard
+    // and UI stay in lockstep with what the sim accepted or rejected.
+    player.abilityCharges = temp.heroes[0].abilityCharges;
+    player.abilityCooldown = temp.heroes[0].abilityCooldown;
+    player.abilityRecoilTimer = temp.heroes[0].abilityRecoilTimer;
   }
 
   /**
@@ -857,10 +906,10 @@ export class Game {
     const player = this._playerState;
     if (!player || !player.alive) return;
     // Mirror the server's fire guard (stepMatch.fireArrow) so we don't show a
-    // ghost arrow for a shot the server will reject — on cooldown or with the
-    // ability unlearned. Checked before prediction ticks the cooldown for this
-    // shot, so it reflects whether the shot is currently allowed.
-    if (player.abilityCooldown > 0 || player.abilityLevel < 1) return;
+    // ghost arrow for a shot the server will reject.
+    if (player.abilityLevel < 1) return;
+    if (player.abilityCharges <= 0) return;
+    if (player.abilityRecoilTimer > 0) return;
 
     const dirX = cmd.aimX - player.pos.x;
     const dirZ = cmd.aimZ - player.pos.z;
@@ -977,6 +1026,9 @@ export class Game {
   }
 
   private _updateOffline(dt: number): void {
+    // ── Targeting ──
+    this._updateTargeting();
+
     // ── Camera ──
     this._updateCamera(dt);
 
@@ -1010,6 +1062,9 @@ export class Game {
   }
 
   private _updateNetwork(dt: number): void {
+    // ── Targeting ──
+    this._updateTargeting();
+
     // ── Camera ──
     this._updateCamera(dt);
     this._localTime += dt;
@@ -1162,6 +1217,50 @@ export class Game {
   /** The recorded trace as JSONL (empty string when tracing is off). */
   debugDumpTrace(): string {
     return this._trace ? this._trace.dump() : '';
+  }
+
+  /** Advance the targeting state machine (walk-then-place progress). */
+  private _updateTargeting(): void {
+    if (!this._targeting.isActive) return;
+    const p = this._playerState;
+    if (!p || !p.alive) {
+      this._targeting.cancel();
+      return;
+    }
+    this._targeting.update(
+      p.pos.x, p.pos.z,
+      this._heightAt(p.pos.x, p.pos.z),
+    );
+  }
+
+  /** Activate ground-targeting for sentry wards. */
+  private _activateWardTargeting(): void {
+    const p = this._playerState;
+    if (!p || !p.alive || p.wardCharges <= 0) return;
+    this._targeting.activate(
+      {
+        range: WARD.placeRange,
+        indicatorColor: 0x66ff88,
+        validateTarget: walkableValidator(this._navGrid, this._world.obstacles),
+        onTarget: (x, z) => {
+          this._enqueueCommand({ type: 'ward', x, z });
+          // Stop the hero after placing (harmless if already stationary).
+          const p = this._playerState;
+          this._enqueueCommand({ type: 'moveTo', x: p.pos.x, z: p.pos.z });
+        },
+        onCancel: () => {},
+        onMove: (x, z) => {
+          this._enqueueCommand({ type: 'moveTo', x, z });
+          this._moveIndicators.spawn(
+            new THREE.Vector3(x, this._heightAt(x, z), z),
+          );
+        },
+      },
+      'sentry_wards',
+      p.pos.x, p.pos.z,
+      this._heightAt(p.pos.x, p.pos.z),
+      this._scene,
+    );
   }
 
   private _updateCamera(dt: number): void {
@@ -1331,13 +1430,15 @@ export class Game {
     });
 
     // Spell bar cooldowns
+    const arrowCd = ARROW.cooldownByLevel[Math.max(p.abilityLevel, 1)];
     const cdProgress = p.abilityCooldown <= 0 ? 1
-      : 1 - p.abilityCooldown / ARROW.cooldownByLevel[Math.min(p.abilityLevel, 4)];
+      : 1 - p.abilityCooldown / arrowCd;
     const dodgeCdProgress = p.dodgeCooldown <= 0 ? 1
       : 1 - p.dodgeCooldown / DODGE.cooldownByLevel[Math.min(p.dodgeLevel, 4)];
     this._spellBar.update(
       cdProgress, p.abilityLevel, p.skillPoints,
       dodgeCdProgress, p.dodgeLevel,
+      p.abilityCharges, ARROW.maxCharges,
     );
 
     // Hero portrait

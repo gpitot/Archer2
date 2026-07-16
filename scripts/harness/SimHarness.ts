@@ -49,6 +49,8 @@ export interface TraceLine {
     level: number;
     abilityLevel: number;
     abilityCooldown: number;
+    abilityCharges: number;
+    abilityRecoilTimer: number;
     moving: boolean;
   }[];
   projectiles: { id: string; x: number; z: number; traveled: number }[];
@@ -201,6 +203,8 @@ export class SimHarness {
         level: h.level,
         abilityLevel: h.abilityLevel,
         abilityCooldown: +h.abilityCooldown.toFixed(3),
+        abilityCharges: h.abilityCharges,
+        abilityRecoilTimer: +h.abilityRecoilTimer.toFixed(3),
         moving: h.moving,
       })),
       projectiles: this.state.projectiles.map((p) => ({

@@ -75,6 +75,8 @@ export interface HeroMeta {
   wardCharges: number;
   abilityLevel: number;
   abilityCooldown: number;
+  abilityCharges: number;
+  abilityRecoilTimer: number;
   dodgeActive: boolean;
   dodgeTimer: number;
   dodgeCooldown: number;

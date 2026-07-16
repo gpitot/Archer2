@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 
 export type ClickHandler = (worldPos: THREE.Vector3) => void;
+/** Returns true if the click was consumed (don't pass to regular handlers). */
+export type ClickInterceptor = (worldPos: THREE.Vector3) => boolean;
 export type KeyHandler = () => void;
 /**
  * Captures mouse clicks (ground targeting), mouse movement (aim tracking),
@@ -14,6 +16,8 @@ export class InputManager {
   private _ground: THREE.Object3D | null = null;
 
   private _clickHandlers: ClickHandler[] = [];
+  private _clickInterceptor: ClickInterceptor | null = null;
+  private _rightClickHandlers: (() => void)[] = [];
   // Mouse aim
   private _aimPosition = new THREE.Vector3();
   private _hasAim = false;
@@ -34,6 +38,7 @@ export class InputManager {
     this._camera = camera;
 
     this._canvas.addEventListener('click', this._onClick.bind(this));
+    this._canvas.addEventListener('contextmenu', this._onContextMenu.bind(this));
     this._canvas.addEventListener('mousemove', this._onMouseMove.bind(this));
     window.addEventListener('keydown', this._onKeyDown.bind(this));
     window.addEventListener('keyup', this._onKeyUp.bind(this));
@@ -57,6 +62,16 @@ export class InputManager {
 
   onClick(handler: ClickHandler): void {
     this._clickHandlers.push(handler);
+  }
+
+  /** Set a single interceptor that fires before regular handlers. Returns true → consumed. */
+  setClickInterceptor(interceptor: ClickInterceptor | null): void {
+    this._clickInterceptor = interceptor;
+  }
+
+  /** Register a handler for right-click (contextmenu). */
+  onRightClick(handler: () => void): void {
+    this._rightClickHandlers.push(handler);
   }
 
   // ── Keyboard ───────────────────────────────────────────────────
@@ -165,9 +180,20 @@ export class InputManager {
   private _onClick(event: MouseEvent): void {
     const pt = this._screenToWorld(event.clientX, event.clientY);
     if (pt) {
+      if (this._clickInterceptor) {
+        const consumed = this._clickInterceptor(pt.clone());
+        if (consumed) return;
+      }
       for (const handler of this._clickHandlers) {
         handler(pt.clone());
       }
+    }
+  }
+
+  private _onContextMenu(event: MouseEvent): void {
+    event.preventDefault();
+    for (const handler of this._rightClickHandlers) {
+      handler();
     }
   }
 
@@ -192,6 +218,7 @@ export class InputManager {
 
   destroy(): void {
     this._canvas.removeEventListener('click', this._onClick.bind(this));
+    this._canvas.removeEventListener('contextmenu', this._onContextMenu.bind(this));
     this._canvas.removeEventListener('mousemove', this._onMouseMove.bind(this));
     window.removeEventListener('keydown', this._onKeyDown.bind(this));
     window.removeEventListener('keyup', this._onKeyUp.bind(this));

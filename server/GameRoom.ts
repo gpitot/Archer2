@@ -283,6 +283,8 @@ export class GameRoom extends DurableObject<Env> {
       wardCharges: h.wardCharges,
       abilityLevel: h.abilityLevel,
       abilityCooldown: q(h.abilityCooldown),
+      abilityCharges: h.abilityCharges,
+      abilityRecoilTimer: q(h.abilityRecoilTimer),
       dodgeActive: h.dodgeActive,
       dodgeTimer: q(h.dodgeTimer),
       dodgeCooldown: q(h.dodgeCooldown),

@@ -3,6 +3,7 @@
  *
  * Renders 4 ability slots (QWER) at the bottom centre of the screen.
  * Q is wired to the ArrowAbility; W/E/R are empty placeholders.
+ * Q also has a charge indicator above the slot when the ability has >1 max charge.
  */
 export class SpellBar {
   readonly container: HTMLDivElement;
@@ -38,13 +39,15 @@ export class SpellBar {
     document.body.appendChild(this.container);
   }
 
-  /** Update cooldown, level, and skill points. */
+  /** Update cooldown, level, skill points, and charge state. */
   update(
     cooldownProgress: number,
     abilityLevel: number,
     skillPoints: number,
     dodgeCooldownProgress: number,
     dodgeLevel: number,
+    charges: number,
+    maxCharges: number,
   ): void {
     // Q — Arrow
     const qOnCd = cooldownProgress < 1;
@@ -52,6 +55,7 @@ export class SpellBar {
     this._slots[0].setLevel(abilityLevel);
     this._slots[0].setCanLevel(skillPoints > 0 && abilityLevel < 4);
     this._slots[0].setOnCooldown(qOnCd);
+    this._slots[0].setCharges(charges, maxCharges);
 
     // W — Dodge
     const wOnCd = dodgeCooldownProgress < 1;
@@ -71,6 +75,7 @@ class SpellSlot {
   private _cooldown: HTMLDivElement;
   private _keyLabel: HTMLDivElement;
   private _levelDots: HTMLDivElement;
+  private _chargeLabel: HTMLDivElement;
   private _isActive: boolean;
 
   constructor(key: string, active: boolean) {
@@ -85,7 +90,7 @@ class SpellSlot {
       border-radius: 4px;
       background: ${this._isActive ? 'rgba(20,18,10,0.85)' : 'rgba(20,20,20,0.7)'};
       position: relative;
-      overflow: hidden;
+      overflow: visible;
     `;
 
     // Placeholder icon
@@ -153,6 +158,40 @@ class SpellSlot {
       this._levelDots.appendChild(dot);
     }
     this.el.appendChild(this._levelDots);
+
+    // Charge indicator (above the slot, only shown when maxCharges > 1)
+    this._chargeLabel = document.createElement('div');
+    this._chargeLabel.style.cssText = `
+      position: absolute;
+      top: -18px;
+      right: -4px;
+      font-family: sans-serif;
+      font-size: 11px;
+      font-weight: bold;
+      color: #f0d060;
+      text-shadow: 0 0 4px rgba(0,0,0,0.9);
+      pointer-events: none;
+      display: none;
+    `;
+    this.el.appendChild(this._chargeLabel);
+
+    // Inner wrapper for content that should be clipped (cooldown overlay).
+    const inner = document.createElement('div');
+    inner.style.cssText = `
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      border-radius: 2px;
+      pointer-events: none;
+    `;
+    this.el.appendChild(inner);
+
+    // Move the existing icon, cooldown, key label, and level dots into inner.
+    // (They were already added to this.el — we need to re-parent them.)
+    inner.appendChild(icon);
+    inner.appendChild(this._cooldown);
+    inner.appendChild(this._keyLabel);
+    inner.appendChild(this._levelDots);
   }
 
   setCooldown(progress: number): void {
@@ -186,5 +225,15 @@ class SpellSlot {
   setCanLevel(can: boolean): void {
     this.el.style.borderColor = can ? 'rgba(255,200,60,0.9)' : 'rgba(180,160,100,0.8)';
     this.el.style.boxShadow = can ? '0 0 8px rgba(255,200,60,0.4)' : 'none';
+  }
+
+  /** Show charge count above the slot (only when maxCharges > 1). */
+  setCharges(current: number, max: number): void {
+    if (max <= 1) {
+      this._chargeLabel.style.display = 'none';
+      return;
+    }
+    this._chargeLabel.style.display = '';
+    this._chargeLabel.textContent = String(current);
   }
 }

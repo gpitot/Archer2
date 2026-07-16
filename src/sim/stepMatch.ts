@@ -101,6 +101,12 @@ function applyCommand(
   }
 }
 
+/** Clear movement state so the hero stops wherever they are. */
+function stopMovement(hero: HeroState): void {
+  hero.path = [];
+  hero.moving = false;
+}
+
 function setDestination(hero: HeroState, x: number, z: number, world: SimWorld): void {
   if (!hero.alive) return;
   let path = world.pathfinder.findSmoothedPath(hero.pos.x, hero.pos.z, x, z);
@@ -131,7 +137,12 @@ function fireArrow(
   events: SimEvent[],
 ): void {
   if (!hero.alive) return;
-  if (hero.abilityCooldown > 0 || hero.abilityLevel < 1) return;
+  if (hero.abilityLevel < 1) return;
+  if (hero.abilityCharges <= 0) return;
+  if (hero.abilityRecoilTimer > 0) return;
+
+  // Casting a spell interrupts movement.
+  stopMovement(hero);
 
   let dir = V.sub({ x: aimX, z: aimZ }, hero.pos);
   if (V.length(dir) < 0.01) {
@@ -156,7 +167,12 @@ function fireArrow(
     damage: ARROW.damageByLevel[hero.abilityLevel],
   };
   state.projectiles.push(projectile);
-  hero.abilityCooldown = ARROW.cooldownByLevel[hero.abilityLevel];
+  hero.abilityCharges--;
+  hero.abilityRecoilTimer = ARROW.recoilTime;
+  // Start recharge if not already ticking; never reset a running recharge.
+  if (hero.abilityCharges < ARROW.maxCharges && hero.abilityCooldown <= 0) {
+    hero.abilityCooldown = ARROW.cooldownByLevel[hero.abilityLevel];
+  }
   events.push({ type: 'fire', heroId: hero.id, projectileId: projectile.id });
 }
 
@@ -169,6 +185,9 @@ function placeWard(
 ): void {
   if (!hero.alive) return;
   if (hero.wardCharges <= 0) return;
+
+  // Placing a ward interrupts movement.
+  stopMovement(hero);
 
   let pos: V.Vec2;
   if (targetX !== undefined && targetZ !== undefined) {
@@ -195,6 +214,9 @@ function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]
   const shop = world.shop;
   if (index < 0 || index >= shop.items.length) return;
   if (V.distance(shop.pos, hero.pos) > shop.interactRadius) return;
+
+  // Buying an item interrupts movement (WC3: issuing any order stops the current one).
+  stopMovement(hero);
   const item = shop.items[index];
   if (hero.gold < item.cost) return;
   const owned = hero.inventory.includes(item.id);
@@ -211,6 +233,9 @@ function useItem(hero: HeroState, slot: number, state: MatchState, world: SimWor
   if (slot < 0 || slot >= hero.inventory.length) return;
   const itemId = hero.inventory[slot];
   if (!itemId) return;
+
+  // Using an item interrupts movement.
+  stopMovement(hero);
 
   switch (itemId) {
     case 'sentry_wards':
@@ -234,6 +259,9 @@ function spendSkillPoint(hero: HeroState, ability: 'arrow' | 'dodge'): void {
 function activateDodge(hero: HeroState): void {
   if (!hero.alive) return;
   if (hero.dodgeActive || hero.dodgeCooldown > 0 || hero.dodgeLevel < 1) return;
+
+  // Dodging interrupts movement.
+  stopMovement(hero);
   hero.dodgeActive = true;
   hero.dodgeTimer = DODGE.durationByLevel[hero.dodgeLevel];
   hero.dodgeCooldown = DODGE.cooldownByLevel[hero.dodgeLevel];
@@ -252,8 +280,18 @@ function stepHero(hero: HeroState, dt: number): void {
     if (hero.multiKillTimer <= 0) hero.multiKillCount = 0;
   }
 
+  if (hero.abilityRecoilTimer > 0) {
+    hero.abilityRecoilTimer = Math.max(0, hero.abilityRecoilTimer - dt);
+  }
+
   if (hero.abilityCooldown > 0) {
     hero.abilityCooldown = Math.max(0, hero.abilityCooldown - dt);
+    if (hero.abilityCooldown <= 0 && hero.abilityCharges < ARROW.maxCharges) {
+      hero.abilityCharges++;
+      if (hero.abilityCharges < ARROW.maxCharges) {
+        hero.abilityCooldown = ARROW.cooldownByLevel[Math.max(hero.abilityLevel, 1)];
+      }
+    }
   }
 
   if (hero.dodgeActive) {

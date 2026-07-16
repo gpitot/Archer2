@@ -4,7 +4,7 @@
  * No behaviour lives here — the logic is in `stepMatch`.
  */
 import { Vec2 } from './math';
-import { HERO } from './rules';
+import { HERO, ARROW } from './rules';
 
 /** Six inventory slots holding item ids (null = empty). */
 export type Inventory = (string | null)[];
@@ -51,6 +51,8 @@ export interface HeroState {
   wardCharges: number;
   abilityLevel: number;
   abilityCooldown: number;
+  abilityCharges: number;
+  abilityRecoilTimer: number;
 }
 
 export interface ProjectileState {
@@ -139,6 +141,8 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     wardCharges: 0,
     abilityLevel: 0,
     abilityCooldown: 0,
+    abilityCharges: ARROW.maxCharges,
+    abilityRecoilTimer: 0,
     dodgeActive: false,
     dodgeTimer: 0,
     dodgeCooldown: 0,

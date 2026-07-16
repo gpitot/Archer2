@@ -49,9 +49,13 @@ export const ARROW = {
   damageByLevel: [0, 200, 266, 333, 400],
   /** Max flight range per ability level. */
   rangeByLevel: [0, 800, 1333, 1866, 2400],
-  /** Cooldown per ability level (seconds). */
+  /** Cooldown per ability level (seconds) — also the recharge time per charge. */
   cooldownByLevel: [0, 2.25, 2.0, 1.75, 1.5],
   maxLevel: 4,
+  /** Maximum number of charges the ability holds. */
+  maxCharges: 2,
+  /** Minimum delay between consecutive shots when a charge is available (seconds). */
+  recoilTime: 0.2,
   speed: 900,
   /** Projectile collision radius (world units). */
   collisionRadius: 8,
