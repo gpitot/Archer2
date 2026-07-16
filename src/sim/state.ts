@@ -107,10 +107,15 @@ export interface HeroInput {
 
 // ── Events (sim → clients) ────────────────────────────────────────────
 export type SimEvent =
-  | { type: 'hit'; targetId: string; sourceId: string; damage: number; x: number; z: number }
+  | { type: 'hit'; targetId: string; sourceId: string; projectileId: string; damage: number; x: number; z: number }
   | { type: 'kill'; sourceId: string; victimId: string }
   | { type: 'respawn'; heroId: string }
-  | { type: 'fire'; heroId: string; projectileId: string }
+  /**
+   * Carries the full initial projectile state plus the tick it spawned on.
+   * Projectiles fly deterministically (straight line, constant speed), so
+   * this event is the only wire copy — snapshots don't re-send them.
+   */
+  | { type: 'fire'; heroId: string; tick: number; projectile: ProjectileState }
   | { type: 'purchase'; heroId: string; itemId: string }
   | { type: 'levelUp'; heroId: string; level: number };
 

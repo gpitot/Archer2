@@ -176,7 +176,16 @@ function fireArrow(
   if (hero.abilityCharges < ARROW.maxCharges && hero.abilityCooldown <= 0) {
     hero.abilityCooldown = ARROW.cooldownByLevel[hero.abilityLevel];
   }
-  events.push({ type: 'fire', heroId: hero.id, projectileId: projectile.id });
+  // `state.tick` is pre-increment here: position at time t on the tick
+  // timeline is spawnPos + dir * speed * (t - tick * dt), matching the sim's
+  // same-tick stepProjectiles advance. The event carries a copy — the live
+  // projectile keeps advancing while events await the next snapshot broadcast.
+  events.push({
+    type: 'fire',
+    heroId: hero.id,
+    tick: state.tick,
+    projectile: { ...projectile, pos: { ...projectile.pos }, dir: { ...projectile.dir } },
+  });
 }
 
 function placeWard(
@@ -406,7 +415,7 @@ function stepProjectiles(
     if (target) {
       const source = state.heroes.find((h) => h.id === p.ownerId);
       state.projectiles.splice(i, 1);
-      if (source) applyDamage(state, target, source, p.damage, events);
+      if (source) applyDamage(state, target, source, p, events);
     }
   }
 }
@@ -430,17 +439,18 @@ function applyDamage(
   state: MatchState,
   target: HeroState,
   source: HeroState,
-  amount: number,
+  projectile: ProjectileState,
   events: SimEvent[],
 ): void {
   if (!target.alive || target.invulnerable) return;
 
-  target.hp = Math.max(0, target.hp - amount);
+  target.hp = Math.max(0, target.hp - projectile.damage);
   events.push({
     type: 'hit',
     targetId: target.id,
     sourceId: source.id,
-    damage: amount,
+    projectileId: projectile.id,
+    damage: projectile.damage,
     x: target.pos.x,
     z: target.pos.z,
   });

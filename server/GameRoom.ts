@@ -13,7 +13,7 @@
  * at a low rate, and immediately when an event changes them.
  */
 import { DurableObject, WebSocket } from 'cloudflare:workers';
-import { MatchState, HeroInput, HeroState, SimEvent, createMatchState, createHeroState } from '../src/sim/state';
+import { MatchState, HeroInput, HeroState, SimEvent, ProjectileState, WardState, createMatchState, createHeroState } from '../src/sim/state';
 import { stepMatch } from '../src/sim/stepMatch';
 import { SimWorld, ObstacleAABB, Rect, Shop, findRespawnPosition } from '../src/sim/world';
 import { SHOP_ITEMS } from '../src/sim/shopItems';
@@ -225,13 +225,20 @@ export class GameRoom extends DurableObject<Env> {
     this._pendingEvents.push(...events);
 
     // Broadcast the hot snapshot every SNAPSHOT_EVERY ticks, with all events
-    // accumulated since the previous snapshot aboard.
+    // accumulated since the previous snapshot aboard. Projectiles ride their
+    // `fire` events instead of the snapshot — clients simulate the flight.
     if (this._state.tick % SNAPSHOT_EVERY === 0) {
       const snapshot: SnapshotMessage = {
         type: 'snapshot',
-        ...this._currentSnapshot(),
+        tick: this._state.tick,
+        heroes: this._state.heroes.map((h) => this._wireHero(h)),
+        wards: this._wireWards(),
       };
-      if (this._pendingEvents.length > 0) snapshot.events = this._pendingEvents;
+      if (this._pendingEvents.length > 0) {
+        snapshot.events = this._pendingEvents.map((ev) =>
+          ev.type === 'fire' ? { ...ev, projectile: this._wireProjectile(ev.projectile) } : ev,
+        );
+      }
       this._broadcast(snapshot);
       this._pendingEvents = [];
     }
@@ -244,22 +251,31 @@ export class GameRoom extends DurableObject<Env> {
 
   // ── Wire encoding ─────────────────────────────────────────────────
 
+  /** Full state for the welcome handshake, including in-flight projectiles. */
   private _currentSnapshot(): Snapshot {
     return {
       tick: this._state.tick,
       heroes: this._state.heroes.map((h) => this._wireHero(h)),
-      projectiles: this._state.projectiles.map((p) => ({
-        ...p,
-        pos: { x: q(p.pos.x), z: q(p.pos.z) },
-        dir: { x: q4(p.dir.x), z: q4(p.dir.z) },
-        traveled: q(p.traveled),
-      })),
-      wards: this._state.wards.map((w) => ({
-        ...w,
-        pos: { x: q(w.pos.x), z: q(w.pos.z) },
-        life: q(w.life),
-      })),
+      projectiles: this._state.projectiles.map((p) => this._wireProjectile(p)),
+      wards: this._wireWards(),
     };
+  }
+
+  private _wireProjectile(p: ProjectileState): ProjectileState {
+    return {
+      ...p,
+      pos: { x: q(p.pos.x), z: q(p.pos.z) },
+      dir: { x: q4(p.dir.x), z: q4(p.dir.z) },
+      traveled: q(p.traveled),
+    };
+  }
+
+  private _wireWards(): WardState[] {
+    return this._state.wards.map((w) => ({
+      ...w,
+      pos: { x: q(w.pos.x), z: q(w.pos.z) },
+      life: q(w.life),
+    }));
   }
 
   private _wireHero(h: HeroState): SnapshotHero {
