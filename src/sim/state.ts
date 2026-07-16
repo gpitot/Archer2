@@ -3,6 +3,7 @@
  * `MatchState` (or a per-entity slice) can be sent over the wire as a snapshot.
  * No behaviour lives here — the logic is in `stepMatch`.
  */
+import { CreepTypeId } from './creepRules';
 import { Vec2 } from './math';
 import { HERO, ARROW } from './rules';
 
@@ -59,6 +60,8 @@ export interface HeroState {
 export interface ProjectileState {
   id: string;
   ownerId: string;
+  /** Absent = hero-owned. Creep fireballs skip the hero kill-credit path. */
+  ownerKind?: 'creep';
   team: number;
   pos: Vec2;
   dir: Vec2;
@@ -75,11 +78,32 @@ export interface WardState {
   life: number;
 }
 
+/** A neutral jungle creep. Ids are stable for the whole match. */
+export interface CreepState {
+  id: string;
+  campId: string;
+  type: CreepTypeId;
+  pos: Vec2;
+  facing: number;
+  /** Camp position — leash anchor and respawn point. */
+  spawnPos: Vec2;
+  /** Max HP is derived: `creepMaxHp(type, level)`. */
+  hp: number;
+  level: number;
+  alive: boolean;
+  respawnTimer: number;
+  aggroTargetId: string | null;
+  attackCooldown: number;
+  /** Last tick this creep moved/fought/changed — drives snapshot idle-omission. */
+  lastActiveTick: number;
+}
+
 export interface MatchState {
   tick: number;
   heroes: HeroState[];
   projectiles: ProjectileState[];
   wards: WardState[];
+  creeps: CreepState[];
   /** First blood is a one-time global bonus. */
   firstBlood: boolean;
   /** Accumulates real time toward the next per-second passive-income tick. */
@@ -112,7 +136,19 @@ export type SimEvent =
   | { type: 'respawn'; heroId: string }
   | { type: 'fire'; heroId: string; projectileId: string }
   | { type: 'purchase'; heroId: string; itemId: string }
-  | { type: 'levelUp'; heroId: string; level: number };
+  | { type: 'levelUp'; heroId: string; level: number }
+  | { type: 'creepHit'; creepId: string; sourceId: string; damage: number; x: number; z: number }
+  | {
+      type: 'creepKill';
+      creepId: string;
+      campId: string;
+      killerId: string;
+      gold: number;
+      xp: number;
+      x: number;
+      z: number;
+    }
+  | { type: 'creepRespawn'; creepId: string; level: number };
 
 // ── Factories ─────────────────────────────────────────────────────────
 export function createHeroState(id: string, team: number, pos: Vec2): HeroState {
@@ -159,6 +195,7 @@ export function createMatchState(): MatchState {
     heroes: [],
     projectiles: [],
     wards: [],
+    creeps: [],
     firstBlood: true,
     incomeAccumulator: 0,
     nextProjectileId: 1,
