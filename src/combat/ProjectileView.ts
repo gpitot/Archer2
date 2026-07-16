@@ -7,12 +7,17 @@ import * as THREE from 'three';
 import { ProjectileState } from '../sim/state';
 import { ARROW } from '../sim/rules';
 
+export type ProjectileStyle = 'arrow' | 'fireball';
+
 export class ProjectileView {
   readonly mesh: THREE.Group;
   readonly projectileId: string;
 
   private _light: THREE.PointLight;
   private _trailMat: THREE.MeshStandardMaterial;
+  private _arrowParts!: THREE.Group;
+  private _fireball!: THREE.Mesh;
+  private _style: ProjectileStyle = 'arrow';
 
   constructor(projectileId: string) {
     this.projectileId = projectileId;
@@ -23,8 +28,25 @@ export class ProjectileView {
       .material as THREE.MeshStandardMaterial;
   }
 
+  /**
+   * Switch between the arrow look and the creep fireball look. Views are
+   * pooled, so a style is re-asserted on every acquire (cheap no-op when
+   * unchanged).
+   */
+  setStyle(style: ProjectileStyle): void {
+    if (style === this._style) return;
+    this._style = style;
+    const fireball = style === 'fireball';
+    this._arrowParts.visible = !fireball;
+    this._fireball.visible = fireball;
+    this._trailMat.color.set(fireball ? 0xff6633 : 0xffddaa);
+    this._trailMat.emissive.set(fireball ? 0x662200 : 0x331100);
+    this._light.color.set(fireball ? 0xff5522 : 0xff9944);
+  }
+
   /** Mirror the simulation state onto the mesh for this frame. */
   sync(state: ProjectileState, heightAt: (x: number, z: number) => number): void {
+    this.setStyle(state.ownerKind === 'creep' ? 'fireball' : 'arrow');
     this.mesh.visible = true;
     this.mesh.position.set(
       state.pos.x,
@@ -49,7 +71,23 @@ export class ProjectileView {
   // ── Mesh ────────────────────────────────────────────────────────
 
   private _buildMesh(): THREE.Group {
-    const group = new THREE.Group();
+    const root = new THREE.Group();
+    const group = new THREE.Group(); // arrow-only parts, hidden in fireball style
+    this._arrowParts = group;
+    root.add(group);
+
+    // ── Fireball core (creep projectiles) ──
+    const coreGeo = new THREE.SphereGeometry(7, 10, 8);
+    const coreMat = new THREE.MeshStandardMaterial({
+      color: 0xff7733,
+      emissive: 0xdd3300,
+      emissiveIntensity: 0.9,
+      roughness: 0.4,
+    });
+    this._fireball = new THREE.Mesh(coreGeo, coreMat);
+    this._fireball.position.z = 20;
+    this._fireball.visible = false;
+    root.add(this._fireball);
 
     // ── Shaft (wooden body) ──
     const shaftGeo = new THREE.CylinderGeometry(1.8, 1.8, 32, 8);
@@ -116,14 +154,14 @@ export class ProjectileView {
     trail.rotation.x = Math.PI / 2;
     trail.name = 'arrowTrail';
     trail.renderOrder = 1;
-    group.add(trail);
+    root.add(trail); // shared by both styles
 
     // ── Point light (warm glow around the arrowhead) ──
     const light = new THREE.PointLight(0xff9944, 80, 90);
     light.position.z = 30;
     light.name = 'arrowLight';
-    group.add(light);
+    root.add(light); // shared by both styles
 
-    return group;
+    return root;
   }
 }

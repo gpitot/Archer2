@@ -31,6 +31,13 @@ import {
   ProjectileState,
   SimEvent,
 } from './state';
+import {
+  applyCreepDamage,
+  applyCreepDamageToHero,
+  hitCreep,
+  hitHeroByCreepProjectile,
+  stepCreeps,
+} from './stepCreeps';
 import { findReachableNear, findRespawnPosition, SimWorld, sphereHitsObstacle } from './world';
 import { BLINK_COOLDOWN } from './shopItems';
 
@@ -61,6 +68,9 @@ export function stepMatch(
     }
   }
 
+  // Creeps step before projectiles so a fireball spawned this tick advances
+  // this tick, exactly like a hero arrow fired via command.
+  stepCreeps(state, dt, world, events);
   stepProjectiles(state, dt, world, events);
   stepBlasts(state, dt, events);
   stepWards(state, dt);
@@ -443,11 +453,32 @@ function stepProjectiles(
       continue;
     }
 
+    if (p.ownerKind === 'creep') {
+      // Creep fireball: hits any hero, never hits creeps.
+      const target = hitHeroByCreepProjectile(state, p);
+      if (target) {
+        const creep = state.creeps.find((c) => c.id === p.ownerId);
+        state.projectiles.splice(i, 1);
+        if (creep) applyCreepDamageToHero(state, target, p.damage, creep, p.id, events);
+      }
+      continue;
+    }
+
     const target = hitHero(state, p);
     if (target) {
       const source = state.heroes.find((h) => h.id === p.ownerId);
       state.projectiles.splice(i, 1);
       if (source) applyDamage(state, target, source, p.damage, p.id, events);
+      continue;
+    }
+
+    // Creeps are checked after heroes so an arrow that passes through a
+    // dodging hero flies on and can hit the creep behind them.
+    const creepTarget = hitCreep(state, p);
+    if (creepTarget) {
+      const source = state.heroes.find((h) => h.id === p.ownerId);
+      state.projectiles.splice(i, 1);
+      if (source) applyCreepDamage(state, creepTarget, source, p.damage, events);
     }
   }
 }
@@ -494,12 +525,7 @@ function applyDamage(
   // Death & kill credit. The victim's kill streak is reset *before* the reward
   // is computed and the killer's multi-kill count is incremented *after*,
   // preserving the original game's (quirky) bounty/multi-kill accounting.
-  target.alive = false;
-  target.respawnTimer = HERO.respawnDelay;
-  target.path = [];
-  target.moving = false;
-  target.deaths++;
-  target.killStreak = 0;
+  killHero(target);
 
   source.kills++;
   source.killStreak++;
@@ -509,6 +535,19 @@ function applyDamage(
   source.multiKillCount++;
 
   events.push({ type: 'kill', sourceId: source.id, victimId: target.id });
+}
+
+/**
+ * The victim half of a hero death — shared by hero-vs-hero kills and creep
+ * kills (which carry no killer rewards).
+ */
+export function killHero(target: HeroState): void {
+  target.alive = false;
+  target.respawnTimer = HERO.respawnDelay;
+  target.path = [];
+  target.moving = false;
+  target.deaths++;
+  target.killStreak = 0;
 }
 
 function awardKillGold(state: MatchState, killer: HeroState, victim: HeroState): void {
@@ -536,7 +575,7 @@ function killXpReward(victim: HeroState, killer: HeroState): number {
   return xp;
 }
 
-function addXp(hero: HeroState, amount: number, events: SimEvent[]): void {
+export function addXp(hero: HeroState, amount: number, events: SimEvent[]): void {
   hero.xp += amount;
   while (hero.level < HERO.maxLevel && hero.xp >= XP_TABLE[hero.level + 1]) {
     hero.level++;
@@ -574,6 +613,13 @@ function stepBlasts(state: MatchState, dt: number, events: SimEvent[]): void {
       if (!hero.alive || hero.invulnerable) continue;
       if (V.distanceSq(blast.pos, hero.pos) > r2) continue;
       applyDamage(state, hero, source, BLAST.damage, blast.id, events);
+    }
+
+    // Creeps in the circle.
+    for (const creep of state.creeps) {
+      if (!creep.alive) continue;
+      if (V.distanceSq(blast.pos, creep.pos) > r2) continue;
+      applyCreepDamage(state, creep, source, BLAST.damage, events);
     }
   }
 }

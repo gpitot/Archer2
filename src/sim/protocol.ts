@@ -17,6 +17,7 @@
  * Values are quantized server-side before serialization.
  */
 import { Command, Inventory, ProjectileState, WardState, BlastState, SimEvent } from './state';
+import { CreepTypeId } from './creepRules';
 import { Vec2 } from './math';
 
 // ── Client → Server ──────────────────────────────────────────────────
@@ -89,6 +90,36 @@ export interface HeroMeta {
   blastCooldown: number;
 }
 
+// ── Wire creep representations ───────────────────────────────────────
+
+/**
+ * Per-tick creep fields. Only "active" creeps (recently moved / fought) are
+ * included — an at-rest creep is fully described by its registry entry, so
+ * idle camps cost zero snapshot bytes.
+ */
+export interface SnapshotCreep {
+  id: string;
+  pos: Vec2;
+  facing: number;
+  hp: number;
+}
+
+/**
+ * Cold creep registry entry, sent once in the welcome. Creep ids are stable
+ * for the whole match; level/alive changes afterwards are event-carried
+ * (`creepRespawn` / `creepKill` piggyback on snapshots).
+ */
+export interface CreepMeta {
+  id: string;
+  campId: string;
+  type: CreepTypeId;
+  level: number;
+  alive: boolean;
+  hp: number;
+  pos: Vec2;
+  spawnPos: Vec2;
+}
+
 // ── Server → Client ──────────────────────────────────────────────────
 
 export interface WelcomeMessage {
@@ -104,6 +135,8 @@ export interface WelcomeMessage {
   snapshot: Snapshot;
   /** Cold fields for every hero in the snapshot. */
   meta: HeroMeta[];
+  /** Cold registry for every creep in the match. */
+  creepMeta: CreepMeta[];
 }
 
 export interface SnapshotMessage {
@@ -113,6 +146,8 @@ export interface SnapshotMessage {
   wards: WardState[];
   /** Pending R-spell blast zones — visible to every player. */
   blasts: BlastState[];
+  /** Active creeps only — idle/dead creeps are omitted (see SnapshotCreep). */
+  creeps: SnapshotCreep[];
   /** Sim events since the previous snapshot, if any (piggybacked to save a WS frame). */
   events?: SimEvent[];
 }
@@ -149,6 +184,7 @@ export interface Snapshot {
   projectiles: ProjectileState[];
   wards: WardState[];
   blasts: BlastState[];
+  creeps: SnapshotCreep[];
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
