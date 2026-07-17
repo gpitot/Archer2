@@ -14,6 +14,7 @@ export class ItemBar {
     boots: '🥾',
     sentry_wards: '👁️',
     blink_dagger: '🗡️',
+    crit_gem: '💎',
   };
 
   constructor() {

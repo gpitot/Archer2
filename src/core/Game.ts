@@ -810,6 +810,7 @@ export class Game {
     dst.multiKillCount = src.multiKillCount;
     dst.multiKillTimer = src.multiKillTimer;
     dst.speedBonus = src.speedBonus;
+    dst.critChance = src.critChance;
     dst.inventory = [...src.inventory];
     dst.wardCharges = src.wardCharges;
     dst.abilityLevel = src.abilityLevel;
@@ -1572,7 +1573,7 @@ export class Game {
         // Floating damage number
         const targetView = this._heroViews.get(ev.targetId);
         if (targetView) {
-          this._floatingText.spawn(targetView.mesh.position, ev.damage);
+          this._floatingText.spawn(targetView.mesh.position, ev.damage, undefined, ev.crit);
         }
         // Hit flash on the target's view
         targetView?.flashHit();
@@ -1598,7 +1599,7 @@ export class Game {
       case 'creepHit': {
         const creepView = this._creepViews.get(ev.creepId);
         if (creepView) {
-          this._floatingText.spawn(creepView.mesh.position, ev.damage);
+          this._floatingText.spawn(creepView.mesh.position, ev.damage, undefined, ev.crit);
           creepView.flashHit();
         }
         break;

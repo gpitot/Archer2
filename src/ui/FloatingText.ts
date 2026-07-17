@@ -7,7 +7,7 @@ import * as THREE from 'three';
 export class FloatingText {
   private _el: HTMLDivElement;
 
-  constructor(worldPos: THREE.Vector3, text: string, color = '#ff4444') {
+  constructor(worldPos: THREE.Vector3, text: string, color = '#ff4444', private _crit = false) {
     this._el = document.createElement('div');
     this._el.textContent = text;
     this._el.style.cssText = `
@@ -38,7 +38,9 @@ export class FloatingText {
     this._el.style.left = `${sx}px`;
     this._el.style.top = `${sy - 20 * (1 - alpha)}px`;
     this._el.style.opacity = String(Math.max(0, alpha));
-    this._el.style.fontSize = `${14 + 4 * alpha}px`;
+    const base = this._crit ? 18 : 14;
+    const grow = this._crit ? 8 : 4;
+    this._el.style.fontSize = `${base + grow * alpha}px`;
   }
 
   _updatePosition(worldPos: THREE.Vector3, center: { x: number; y: number }): void {
@@ -59,10 +61,12 @@ export class FloatingTextManager {
 
   /**
    * Spawn a damage number at world position. Lives for ~1 second.
+   * Crits render larger, gold, and with an exclamation mark.
    */
-  spawn(worldPos: THREE.Vector3, amount: number, color?: string): void {
-    const ft = new FloatingText(worldPos, String(Math.round(amount)), color);
-    this._texts.push({ ft, worldPos: worldPos.clone(), elapsed: 0, duration: 1.0 });
+  spawn(worldPos: THREE.Vector3, amount: number, color?: string, crit = false): void {
+    const text = crit ? `${Math.round(amount)}!` : String(Math.round(amount));
+    const ft = new FloatingText(worldPos, text, crit ? '#ffb020' : color, crit);
+    this._texts.push({ ft, worldPos: worldPos.clone(), elapsed: 0, duration: crit ? 1.3 : 1.0 });
   }
 
   update(delta: number, camera: THREE.Camera): void {

@@ -7,6 +7,11 @@ import { ShopItemDef } from './world';
 /** Blink Dagger cooldown in seconds. */
 export const BLINK_COOLDOWN = 10;
 
+/** Crit chance granted by the Gem of Critical Strike (0–1). */
+export const CRIT_CHANCE = 0.2;
+/** Damage multiplier applied on a critical strike. */
+export const CRIT_MULTIPLIER = 2;
+
 export const SHOP_ITEMS: ShopItemDef[] = [
   {
     id: 'boots',
@@ -34,6 +39,15 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     description: 'Click to instantly teleport to target location (450 range, 10s cooldown)',
     apply: (_hero) => {
       // Effect is handled via the 'blink' command in stepMatch.
+    },
+  },
+  {
+    id: 'crit_gem',
+    name: 'Gem of Critical Strike',
+    cost: 20,
+    description: '20% chance to deal double damage with any ability',
+    apply: (hero) => {
+      hero.critChance = Math.min(1, hero.critChance + CRIT_CHANCE);
     },
   },
 ];

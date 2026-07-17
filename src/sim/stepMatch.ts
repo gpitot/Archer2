@@ -39,7 +39,7 @@ import {
   stepCreeps,
 } from './stepCreeps';
 import { findReachableNear, findRespawnPosition, SimWorld, sphereHitsObstacle } from './world';
-import { BLINK_COOLDOWN } from './shopItems';
+import { BLINK_COOLDOWN, CRIT_MULTIPLIER } from './shopItems';
 
 /**
  * Advance the match by `dt` seconds, applying `inputs` queued since the last
@@ -71,8 +71,8 @@ export function stepMatch(
   // Creeps step before projectiles so a fireball spawned this tick advances
   // this tick, exactly like a hero arrow fired via command.
   stepCreeps(state, dt, world, events);
-  stepProjectiles(state, dt, world, events);
-  stepBlasts(state, dt, events);
+  stepProjectiles(state, dt, world, events, rng);
+  stepBlasts(state, dt, events, rng);
   stepWards(state, dt);
   stepIncome(state, dt);
 
@@ -436,6 +436,7 @@ function stepProjectiles(
   dt: number,
   world: SimWorld,
   events: SimEvent[],
+  rng: () => number,
 ): void {
   for (let i = state.projectiles.length - 1; i >= 0; i--) {
     const p = state.projectiles[i];
@@ -468,7 +469,10 @@ function stepProjectiles(
     if (target) {
       const source = state.heroes.find((h) => h.id === p.ownerId);
       state.projectiles.splice(i, 1);
-      if (source) applyDamage(state, target, source, p.damage, p.id, events);
+      if (source) {
+        const crit = rollCrit(source, rng);
+        applyDamage(state, target, source, critDamage(p.damage, crit), p.id, events, crit);
+      }
       continue;
     }
 
@@ -478,7 +482,10 @@ function stepProjectiles(
     if (creepTarget) {
       const source = state.heroes.find((h) => h.id === p.ownerId);
       state.projectiles.splice(i, 1);
-      if (source) applyCreepDamage(state, creepTarget, source, p.damage, events);
+      if (source) {
+        const crit = rollCrit(source, rng);
+        applyCreepDamage(state, creepTarget, source, critDamage(p.damage, crit), events, crit);
+      }
     }
   }
 }
@@ -498,6 +505,16 @@ function hitHero(state: MatchState, p: ProjectileState): HeroState | null {
 
 // ── Damage, kills, rewards ────────────────────────────────────────────
 
+/** Roll a critical strike for a hero-sourced ability hit. */
+function rollCrit(source: HeroState, rng: () => number): boolean {
+  return source.critChance > 0 && rng() < source.critChance;
+}
+
+/** Double the damage on a crit. */
+function critDamage(damage: number, crit: boolean): number {
+  return crit ? damage * CRIT_MULTIPLIER : damage;
+}
+
 function applyDamage(
   state: MatchState,
   target: HeroState,
@@ -506,6 +523,7 @@ function applyDamage(
   /** Id of the projectile (or blast) that dealt it — clients retire the matching arrow. */
   projectileId: string,
   events: SimEvent[],
+  crit = false,
 ): void {
   if (!target.alive || target.invulnerable) return;
 
@@ -518,6 +536,7 @@ function applyDamage(
     damage,
     x: target.pos.x,
     z: target.pos.z,
+    crit,
   });
 
   if (target.hp > 0) return;
@@ -587,7 +606,7 @@ export function addXp(hero: HeroState, amount: number, events: SimEvent[]): void
 // ── Blasts ──────────────────────────────────────────────────────────────
 
 /** Tick pending blast zones; detonate when the fuse runs out. */
-function stepBlasts(state: MatchState, dt: number, events: SimEvent[]): void {
+function stepBlasts(state: MatchState, dt: number, events: SimEvent[], rng: () => number): void {
   for (let i = state.blasts.length - 1; i >= 0; i--) {
     const blast = state.blasts[i];
     blast.timer -= dt;
@@ -612,14 +631,16 @@ function stepBlasts(state: MatchState, dt: number, events: SimEvent[]): void {
       if (hero.team === blast.team) continue;
       if (!hero.alive || hero.invulnerable) continue;
       if (V.distanceSq(blast.pos, hero.pos) > r2) continue;
-      applyDamage(state, hero, source, BLAST.damage, blast.id, events);
+      const crit = rollCrit(source, rng);
+      applyDamage(state, hero, source, critDamage(BLAST.damage, crit), blast.id, events, crit);
     }
 
     // Creeps in the circle.
     for (const creep of state.creeps) {
       if (!creep.alive) continue;
       if (V.distanceSq(blast.pos, creep.pos) > r2) continue;
-      applyCreepDamage(state, creep, source, BLAST.damage, events);
+      const crit = rollCrit(source, rng);
+      applyCreepDamage(state, creep, source, critDamage(BLAST.damage, crit), events, crit);
     }
   }
 }
