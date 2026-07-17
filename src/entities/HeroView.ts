@@ -80,7 +80,7 @@ export class HeroView {
     this._rig.setEmissive(0x22cc88, 0.35);
     // Spawn 1–2 tiny sparkle particles, skipped 25% of the time to keep
     // the effect subtle (avg ~1.1 sparkles per call instead of 1.5).
-    if (Math.random() < 0.25) return;
+    if (Math.random() < 0.9) return;
     const count = Math.random() < 0.5 ? 1 : 2;
     for (let i = 0; i < count; i++) this._spawnHealSparkle();
   }
