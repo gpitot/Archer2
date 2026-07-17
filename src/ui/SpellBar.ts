@@ -21,12 +21,20 @@ export interface SpellSlotInfo {
   maxCharges?: number;
 }
 
+/** What the bar needs to build one slot — derived from an AbilityDef. */
+export interface SpellSlotDef {
+  /** Hotkey label (Q/W/E/R). */
+  key: string;
+  /** Rank-dot count (5 for basics, 3 for the ultimate). */
+  maxLevel: number;
+}
+
 export class SpellBar {
   readonly container: HTMLDivElement;
 
   private _slots: SpellSlot[] = [];
 
-  constructor() {
+  constructor(defs: SpellSlotDef[]) {
     this.container = document.createElement('div');
     this.container.style.cssText = `
       position: fixed;
@@ -40,13 +48,7 @@ export class SpellBar {
       pointer-events: none;
     `;
 
-    const keys: { key: string; maxLevel: number }[] = [
-      { key: 'Q', maxLevel: 5 },
-      { key: 'W', maxLevel: 5 },
-      { key: 'E', maxLevel: 5 },
-      { key: 'R', maxLevel: 3 },
-    ];
-    for (const { key, maxLevel } of keys) {
+    for (const { key, maxLevel } of defs) {
       const slot = new SpellSlot(key, maxLevel);
       this._slots.push(slot);
       this.container.appendChild(slot.el);
@@ -55,12 +57,12 @@ export class SpellBar {
     document.body.appendChild(this.container);
   }
 
-  /** Update cooldown, level, skill points, and charge state per slot. */
-  update(q: SpellSlotInfo, w: SpellSlotInfo, e: SpellSlotInfo, r: SpellSlotInfo): void {
-    const infos = [q, w, e, r];
-    for (let i = 0; i < 4; i++) {
+  /** Update cooldown, level, skill points, and charge state per slot (same order as `defs`). */
+  update(infos: SpellSlotInfo[]): void {
+    for (let i = 0; i < this._slots.length; i++) {
       const info = infos[i];
       const slot = this._slots[i];
+      if (!info) continue;
       slot.setLocked(info.level < 1);
       slot.setCooldown(info.cooldownProgress, info.cooldownRemaining);
       slot.setLevel(info.level);

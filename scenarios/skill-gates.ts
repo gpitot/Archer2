@@ -27,7 +27,7 @@ export function run(h: SimHarness): void {
   expectTrue(hero.blastLevel === 0 && hero.skillPoints === 1, 'R blocked before level 6');
 
   // R is unusable while unlearned — the cast command is ignored.
-  h.issue('p1', { type: 'blast', x: hero.pos.x + 300, z: hero.pos.z });
+  h.issue('p1', { type: 'cast', ability: 'blast', x: hero.pos.x + 300, z: hero.pos.z });
   h.tick();
   expectTrue(h.state.blasts.length === 0, 'unlearned R cannot cast');
 

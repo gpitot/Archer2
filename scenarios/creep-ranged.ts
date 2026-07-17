@@ -72,7 +72,7 @@ export function run(h: SimHarness): void {
     'second fireball',
   );
   const hpAtDodge = hpBeforeDodge();
-  h.issue('p1', { type: 'dodge' });
+  h.issue('p1', { type: 'cast', ability: 'dodge' });
   const dodgeWindow = h.runUntil(
     (s) => !s.projectiles.some((p) => p.ownerId === 'c1'),
     h.seconds(2),

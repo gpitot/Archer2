@@ -7,6 +7,7 @@ import { CreepTypeId } from './creepRules';
 import { RuneTypeId } from './runeRules';
 import { Vec2 } from './math';
 import { HERO, ARROW } from './rules';
+import type { AbilityId } from './abilities';
 
 /** Six inventory slots holding item ids (null = empty). */
 export type Inventory = (string | null)[];
@@ -166,15 +167,13 @@ export interface MatchState {
 // ── Commands (client → sim) ───────────────────────────────────────────
 export type Command =
   | { type: 'moveTo'; x: number; z: number }
-  | { type: 'fire'; aimX: number; aimZ: number }
+  /** Cast any registered ability; (x, z) is the aim/target point when the ability takes one. */
+  | { type: 'cast'; ability: AbilityId; x?: number; z?: number }
   | { type: 'ward'; x?: number; z?: number }
   | { type: 'blink'; x: number; z: number }
   | { type: 'buy'; itemIndex: number }
   | { type: 'useItem'; slot: number }
-  | { type: 'levelAbility'; ability: 'arrow' | 'dodge' | 'reveal' | 'blast' }
-  | { type: 'dodge' }
-  | { type: 'reveal'; aimX: number; aimZ: number }
-  | { type: 'blast'; x: number; z: number };
+  | { type: 'levelAbility'; ability: AbilityId };
 
 /** A command tagged with the hero it applies to, queued for the next tick. */
 export interface HeroInput {

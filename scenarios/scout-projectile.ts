@@ -23,13 +23,13 @@ export function run(h: SimHarness): void {
   }
 
   // Unlearned E: the cast command is ignored.
-  h.issue('p1', { type: 'reveal', aimX: enemy.pos.x, aimZ: enemy.pos.z });
+  h.issue('p1', { type: 'cast', ability: 'reveal', x: enemy.pos.x, z: enemy.pos.z });
   h.tick();
   expectTrue(h.state.projectiles.length === 0, 'unlearned E cannot cast');
 
   // Learn rank 1 and cast at the enemy.
   hero.revealLevel = 1;
-  h.issue('p1', { type: 'reveal', aimX: enemy.pos.x, aimZ: enemy.pos.z });
+  h.issue('p1', { type: 'cast', ability: 'reveal', x: enemy.pos.x, z: enemy.pos.z });
   const events = h.tick();
   const scout = h.state.projectiles[0];
   expectTrue(!!scout && scout.kind === 'scout', 'scout projectile spawned');
@@ -41,7 +41,7 @@ export function run(h: SimHarness): void {
     'fire event carries the scout (so enemy clients render it)');
 
   // Cooldown gates a second cast.
-  h.issue('p1', { type: 'reveal', aimX: enemy.pos.x, aimZ: enemy.pos.z });
+  h.issue('p1', { type: 'cast', ability: 'reveal', x: enemy.pos.x, z: enemy.pos.z });
   h.tick();
   expectTrue(h.state.projectiles.length === 1, 'second cast blocked by cooldown');
 
@@ -68,7 +68,7 @@ export function run(h: SimHarness): void {
 
   // Rank 5: longer flight, shorter cooldown.
   hero.revealLevel = 5;
-  h.issue('p1', { type: 'reveal', aimX: enemy.pos.x, aimZ: enemy.pos.z });
+  h.issue('p1', { type: 'cast', ability: 'reveal', x: enemy.pos.x, z: enemy.pos.z });
   h.tick();
   const scout5 = h.state.projectiles.find((p) => p.kind === 'scout');
   expectTrue(!!scout5 && scout5.maxRange === SCOUT.rangeByLevel[5], 'rank-5 range');

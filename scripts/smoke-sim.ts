@@ -71,7 +71,7 @@ function run(): void {
   console.log('[smoke] firing arrow at dummy...');
   const fireInputs: HeroInput[] = [{
     heroId: 'p1',
-    cmd: { type: 'fire', aimX: dummy.pos.x, aimZ: dummy.pos.z },
+    cmd: { type: 'cast', ability: 'arrow', x: dummy.pos.x, z: dummy.pos.z },
   }];
   stepMatch(state, fireInputs, 1 / 30, world, rng);
   console.log(`  projectiles in flight: ${state.projectiles.length} (expected 1)`);
@@ -82,7 +82,7 @@ function run(): void {
   dummy.hp = 500; // enough to survive a level-1 arrow (200 dmg)
   stepMatch(state, [{
     heroId: 'p1',
-    cmd: { type: 'fire', aimX: dummy.pos.x, aimZ: dummy.pos.z },
+    cmd: { type: 'cast', ability: 'arrow', x: dummy.pos.x, z: dummy.pos.z },
   }], 1 / 30, world, rng);
 
   console.log('[smoke] stepping until arrow resolves...');
@@ -120,7 +120,7 @@ function run(): void {
   dummy.hp = 1; // weaken so the next hit is lethal
   stepMatch(state, [{
     heroId: 'p1',
-    cmd: { type: 'fire', aimX: dummy.pos.x, aimZ: dummy.pos.z },
+    cmd: { type: 'cast', ability: 'arrow', x: dummy.pos.x, z: dummy.pos.z },
   }], 1 / 30, world, rng);
 
   // Step until kill

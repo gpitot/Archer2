@@ -277,7 +277,7 @@ async function main() {
     g.debugIssue({ type: 'levelAbility' });
     await new Promise((r) => setTimeout(r, 150));
     const before = victim.hp;
-    g.debugIssue({ type: 'fire', aimX: pair.lo.x, aimZ: pair.lo.z });
+    g.debugIssue({ type: 'cast', ability: 'arrow', x: pair.lo.x, z: pair.lo.z });
     await new Promise((r) => setTimeout(r, 1000));
     return {
       heightGap: (g._terrain.heightAt(pair.hi.x, pair.hi.z) - g._terrain.heightAt(pair.lo.x, pair.lo.z)).toFixed(1),

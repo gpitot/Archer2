@@ -14,18 +14,17 @@ import {
   basicRankCap,
   BLAST,
   BOUNTY_TABLE,
-  DODGE,
   HERO,
   KILL_GOLD,
   KILL_XP_TABLE,
   MULTI_KILL_WINDOW,
   PASSIVE_INCOME,
-  SCOUT,
   SPREE_BONUS,
   ultimateRankCap,
   WARD,
   XP_TABLE,
 } from './rules';
+import { ABILITIES, ABILITY_ORDER, AbilityId, stopMovement } from './abilities';
 import {
   Command,
   HeroInput,
@@ -101,8 +100,8 @@ function applyCommand(
     case 'moveTo':
       setDestination(hero, cmd.x, cmd.z, world);
       break;
-    case 'fire':
-      fireArrow(state, hero, cmd.aimX, cmd.aimZ, events);
+    case 'cast':
+      ABILITIES[cmd.ability]?.cast({ state, hero, world, events, x: cmd.x, z: cmd.z });
       break;
     case 'ward':
       placeWard(state, hero, world, cmd.x, cmd.z);
@@ -119,43 +118,7 @@ function applyCommand(
     case 'levelAbility':
       spendSkillPoint(hero, cmd.ability);
       break;
-    case 'dodge':
-      activateDodge(hero);
-      break;
-    case 'reveal':
-      fireScout(state, hero, cmd.aimX, cmd.aimZ, events);
-      break;
-    case 'blast':
-      castBlast(state, hero, cmd.x, cmd.z);
-      break;
   }
-}
-
-/** Clear movement state so the hero stops wherever they are. */
-function stopMovement(hero: HeroState): void {
-  hero.path = [];
-  hero.moving = false;
-}
-
-/**
- * Shared cast preamble: casting interrupts movement, and most casts break
- * invisibility (the scout deliberately doesn't — it's a recon tool).
- */
-function beginCast(hero: HeroState, breakInvis: boolean): void {
-  stopMovement(hero);
-  if (breakInvis) breakInvisibility(hero);
-}
-
-/**
- * Normalized aim direction from the hero toward (aimX, aimZ), falling back
- * to the current facing when the aim point sits on the hero.
- */
-function aimDir(hero: HeroState, aimX: number, aimZ: number): V.Vec2 {
-  const dir = V.sub({ x: aimX, z: aimZ }, hero.pos);
-  if (V.length(dir) < 0.01) {
-    return { x: Math.sin(hero.facing), z: Math.cos(hero.facing) };
-  }
-  return V.normalize(dir);
 }
 
 function setDestination(hero: HeroState, x: number, z: number, world: SimWorld): void {
@@ -178,83 +141,6 @@ function setDestination(hero: HeroState, x: number, z: number, world: SimWorld):
     hero.path = [];
     hero.moving = false;
   }
-}
-
-function fireArrow(
-  state: MatchState,
-  hero: HeroState,
-  aimX: number,
-  aimZ: number,
-  events: SimEvent[],
-): void {
-  if (!hero.alive) return;
-  if (hero.abilityLevel < 1) return;
-  if (hero.abilityCharges <= 0) return;
-  if (hero.abilityRecoilTimer > 0) return;
-
-  // Casting interrupts movement; attacking breaks invisibility.
-  beginCast(hero, true);
-
-  // Turn toward the shot (same smoothed turn as movement).
-  const dir = aimDir(hero, aimX, aimZ);
-  hero.targetFacing = V.heading(dir);
-
-  spawnProjectile(state, events, {
-    ownerId: hero.id,
-    team: hero.team,
-    pos: V.add(hero.pos, V.scale(dir, ARROW.spawnOffset)),
-    dir,
-    speed: ARROW.speed,
-    maxRange: ARROW.rangeByLevel[hero.abilityLevel],
-    traveled: 0,
-    damage: ARROW.damageByLevel[hero.abilityLevel],
-  });
-  hero.abilityCharges--;
-  hero.abilityRecoilTimer = ARROW.recoilTime;
-  // Start recharge if not already ticking; never reset a running recharge.
-  if (hero.abilityCharges < ARROW.maxCharges && hero.abilityCooldown <= 0) {
-    hero.abilityCooldown = ARROW.cooldownByLevel[hero.abilityLevel];
-  }
-}
-
-/**
- * E — Scout: fire a damage-free vision projectile toward the aim point. It
- * flies over everything (no obstacle or unit collision) and expires at max
- * range; the client grants fog vision around it while it's in flight.
- */
-function fireScout(
-  state: MatchState,
-  hero: HeroState,
-  aimX: number,
-  aimZ: number,
-  events: SimEvent[],
-): void {
-  if (!hero.alive) return;
-  if (hero.revealLevel < 1) return;
-  if (hero.revealCooldown > 0) return;
-
-  // Casting interrupts movement and turns the hero toward the shot. Note:
-  // unlike other casts the scout does NOT break invisibility (possible bug,
-  // preserved as-is — review separately).
-  beginCast(hero, false);
-  const dir = aimDir(hero, aimX, aimZ);
-  hero.targetFacing = V.heading(dir);
-
-  // Reuses the 'fire' event: it carries the full spawn state, so networked
-  // clients (including enemies — the scout is never fog-hidden) simulate the
-  // flight deterministically without per-tick re-sends.
-  spawnProjectile(state, events, {
-    ownerId: hero.id,
-    kind: 'scout',
-    team: hero.team,
-    pos: V.add(hero.pos, V.scale(dir, ARROW.spawnOffset)),
-    dir,
-    speed: SCOUT.speed,
-    maxRange: SCOUT.rangeByLevel[hero.revealLevel],
-    traveled: 0,
-    damage: 0,
-  });
-  hero.revealCooldown = SCOUT.cooldownByLevel[hero.revealLevel];
 }
 
 function placeWard(
@@ -343,68 +229,20 @@ function useItem(hero: HeroState, slot: number, state: MatchState, world: SimWor
   }
 }
 
-function spendSkillPoint(hero: HeroState, ability: 'arrow' | 'dodge' | 'reveal' | 'blast'): void {
+function spendSkillPoint(hero: HeroState, ability: AbilityId): void {
   if (hero.skillPoints <= 0) return;
+  const def = ABILITIES[ability];
+  if (!def) return;
 
   // MOBA-style gates: basics (Q/W/E) capped at ceil(level/2), the ultimate
   // (R) unlocks ranks at hero levels 6/11/16. Points bank until spendable.
-  const basicCap = Math.min(basicRankCap(hero.level), 5);
-  switch (ability) {
-    case 'arrow':
-      if (hero.abilityLevel >= ARROW.maxLevel || hero.abilityLevel >= basicCap) return;
-      hero.abilityLevel++;
-      break;
-    case 'dodge':
-      if (hero.dodgeLevel >= DODGE.maxLevel || hero.dodgeLevel >= basicCap) return;
-      hero.dodgeLevel++;
-      break;
-    case 'reveal':
-      if (hero.revealLevel >= SCOUT.maxLevel || hero.revealLevel >= basicCap) return;
-      hero.revealLevel++;
-      break;
-    case 'blast':
-      if (hero.blastLevel >= BLAST.maxLevel || hero.blastLevel >= ultimateRankCap(hero.level)) return;
-      hero.blastLevel++;
-      break;
-  }
+  const cap = def.kind === 'ultimate'
+    ? ultimateRankCap(hero.level)
+    : Math.min(basicRankCap(hero.level), 5);
+  const level = def.runtime.getLevel(hero);
+  if (level >= def.maxLevel || level >= cap) return;
+  def.runtime.setLevel(hero, level + 1);
   hero.skillPoints--;
-}
-
-/** R — Blast: mark an AoE circle that detonates after a fixed delay. */
-function castBlast(state: MatchState, hero: HeroState, x: number, z: number): void {
-  if (!hero.alive) return;
-  if (hero.blastLevel < 1) return;
-  if (hero.blastCooldown > 0) return;
-  const target = { x, z };
-  if (V.distance(hero.pos, target) > BLAST.castRange + 1) return;
-
-  // Casting interrupts movement, breaks invisibility, and turns the hero
-  // toward the target.
-  beginCast(hero, true);
-  const dir = V.sub(target, hero.pos);
-  if (V.length(dir) > 0.01) hero.targetFacing = V.heading(dir);
-
-  hero.blastCooldown = BLAST.cooldownByLevel[hero.blastLevel];
-  state.blasts.push({
-    id: `b${state.nextBlastId++}`,
-    ownerId: hero.id,
-    team: hero.team,
-    pos: target,
-    timer: BLAST.delay,
-    damage: BLAST.damageByLevel[hero.blastLevel],
-  });
-}
-
-function activateDodge(hero: HeroState): void {
-  if (!hero.alive) return;
-  if (hero.dodgeActive || hero.dodgeCooldown > 0 || hero.dodgeLevel < 1) return;
-
-  // Dodging interrupts movement (and doesn't break invisibility — it's
-  // defensive, not an attack).
-  beginCast(hero, false);
-  hero.dodgeActive = true;
-  hero.dodgeTimer = DODGE.durationByLevel[hero.dodgeLevel];
-  hero.dodgeCooldown = DODGE.cooldownByLevel[hero.dodgeLevel];
 }
 
 // ── Hero step ─────────────────────────────────────────────────────────
@@ -420,39 +258,15 @@ function stepHero(hero: HeroState, dt: number): void {
     if (hero.multiKillTimer <= 0) hero.multiKillCount = 0;
   }
 
-  if (hero.abilityRecoilTimer > 0) {
-    hero.abilityRecoilTimer = Math.max(0, hero.abilityRecoilTimer - dt);
+  // Ability timers (cooldowns, charge recharge, active windows) tick through
+  // the registry — one loop, fixed ABILITY_ORDER on every peer.
+  for (const id of ABILITY_ORDER) {
+    ABILITIES[id].runtime.tick(hero, dt);
   }
 
-  if (hero.abilityCooldown > 0) {
-    hero.abilityCooldown = Math.max(0, hero.abilityCooldown - dt);
-    if (hero.abilityCooldown <= 0 && hero.abilityCharges < ARROW.maxCharges) {
-      hero.abilityCharges++;
-      if (hero.abilityCharges < ARROW.maxCharges) {
-        hero.abilityCooldown = ARROW.cooldownByLevel[Math.max(hero.abilityLevel, 1)];
-      }
-    }
-  }
-
-  if (hero.dodgeActive) {
-    hero.dodgeTimer -= dt;
-    if (hero.dodgeTimer <= 0) hero.dodgeActive = false;
-  }
-
-  if (hero.dodgeCooldown > 0) {
-    hero.dodgeCooldown = Math.max(0, hero.dodgeCooldown - dt);
-  }
-
+  // Item cooldowns (blink dagger) — generalized in the item-registry phase.
   if (hero.blinkCooldown > 0) {
     hero.blinkCooldown = Math.max(0, hero.blinkCooldown - dt);
-  }
-
-  if (hero.blastCooldown > 0) {
-    hero.blastCooldown = Math.max(0, hero.blastCooldown - dt);
-  }
-
-  if (hero.revealCooldown > 0) {
-    hero.revealCooldown = Math.max(0, hero.revealCooldown - dt);
   }
 
   if (hero.invulnerable) {

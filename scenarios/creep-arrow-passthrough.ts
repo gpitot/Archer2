@@ -27,10 +27,10 @@ export function run(h: SimHarness): void {
   h.tick();
 
   // p2 dodges, p1 fires through them at the ghoul.
-  h.issue('p2', { type: 'dodge' });
+  h.issue('p2', { type: 'cast', ability: 'dodge' });
   h.tick();
   expectTrue(dodger.dodgeActive, 'p2 is dodging');
-  h.issue('p1', { type: 'fire', aimX: ghoul.pos.x, aimZ: ghoul.pos.z });
+  h.issue('p1', { type: 'cast', ability: 'arrow', x: ghoul.pos.x, z: ghoul.pos.z });
 
   const events = h.runUntil(
     (_s, evs) => evs.some((e) => e.type === 'creepHit'),

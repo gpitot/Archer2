@@ -59,7 +59,7 @@ export function run(h: SimHarness): void {
   victim.hp = 150; // pre-wounded: one level-1 arrow (200) is lethal
   h.issue('p1', { type: 'levelAbility', ability: 'arrow' });
   h.tick();
-  h.issue('p1', { type: 'fire', aimX: victim.pos.x, aimZ: victim.pos.z });
+  h.issue('p1', { type: 'cast', ability: 'arrow', x: victim.pos.x, z: victim.pos.z });
   const duel = h.runUntil(
     (_s, evs) => evs.some((e) => e.type === 'kill' && e.victimId === 'p2'),
     h.seconds(3),

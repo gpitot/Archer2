@@ -16,7 +16,7 @@ export function run(h: SimHarness): void {
   h.tick();
   expectTrue(shooter.abilityLevel === 1, 'Q usable at auto-learned rank 1');
 
-  h.issue('p1', { type: 'fire', aimX: target.pos.x, aimZ: target.pos.z });
+  h.issue('p1', { type: 'cast', ability: 'arrow', x: target.pos.x, z: target.pos.z });
   const events = h.runUntil((_s, evs) => evs.some((e) => e.type === 'hit'), h.seconds(2), 'arrow hit');
 
   const hit = expectEvent(events, 'hit');

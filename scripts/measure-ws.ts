@@ -88,7 +88,7 @@ async function main() {
       // Wander and fire: enough to keep heroes moving and 1-2 arrows/s/bot
       // in flight, approximating active combat.
       send(bot, { type: 'moveTo', x: 500 + Math.random() * 2000, z: 500 + Math.random() * 2000 });
-      send(bot, { type: 'fire', aimX: 500 + Math.random() * 2000, aimZ: 500 + Math.random() * 2000 });
+      send(bot, { type: 'cast', ability: 'arrow', x: 500 + Math.random() * 2000, z: 500 + Math.random() * 2000 });
     }
   }, 500);
 

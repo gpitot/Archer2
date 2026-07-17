@@ -46,7 +46,7 @@ export function run(h: SimHarness): void {
     shooter.abilityRecoilTimer = 0;
     target.hp = HERO.maxHp;
 
-    h.issue('p1', { type: 'fire', aimX: target.pos.x, aimZ: target.pos.z });
+    h.issue('p1', { type: 'cast', ability: 'arrow', x: target.pos.x, z: target.pos.z });
     const events = h.runUntil((_s, evs) => evs.some((e) => e.type === 'hit'), h.seconds(2), `hit #${i + 1}`);
     const hit = events.find((e) => e.type === 'hit');
     if (!hit || hit.type !== 'hit') throw new Error('no hit event');

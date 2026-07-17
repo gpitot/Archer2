@@ -148,7 +148,7 @@ async function main(): Promise<void> {
         const dx = s.shop.x - me.x;
         const dz = s.shop.z - me.z;
         const len = Math.hypot(dx, dz) || 1;
-        g.debugIssue({ type: 'fire', aimX: me.x + (dx / len) * 900, aimZ: me.z + (dz / len) * 900 });
+        g.debugIssue({ type: 'cast', ability: 'arrow', x: me.x + (dx / len) * 900, z: me.z + (dz / len) * 900 });
       });
       console.log(`[drive] fired arrow ${shot + 1}/3`);
       await sleep(2500);

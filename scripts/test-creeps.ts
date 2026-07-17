@@ -87,7 +87,7 @@ async function main() {
       return c ? { x: c.pos.x, z: c.pos.z } : null;
     });
     if (!aim) break;
-    await cmd({ type: 'fire', aimX: aim.x, aimZ: aim.z });
+    await cmd({ type: 'cast', ability: 'arrow', x: aim.x, z: aim.z });
     await sleep(700);
     const dead = await page.evaluate(() => (window as any).__game._state.creeps.some((c: any) => !c.alive));
     if (dead) break;

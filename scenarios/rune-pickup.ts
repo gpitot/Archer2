@@ -51,7 +51,7 @@ export function run(h: SimHarness): void {
   applyRuneBuff(hero, 'doubleDamage');
   const enemy = h.spawnHero('p2', 1, h.findWalkableNear(hero.pos.x + 400, hero.pos.z));
   h.tick(); // settle
-  h.issue('p1', { type: 'fire', aimX: enemy.pos.x, aimZ: enemy.pos.z });
+  h.issue('p1', { type: 'cast', ability: 'arrow', x: enemy.pos.x, z: enemy.pos.z });
   const hitEvents = h.runUntil(
     (_s, evs) => evs.some((e) => e.type === 'hit' && (e as any).targetId === 'p2'),
     h.seconds(3),
@@ -65,7 +65,7 @@ export function run(h: SimHarness): void {
   const [ghoul] = h.spawnCamp('camp_t', { x: hero.pos.x + 200, z: hero.pos.z }, ['ghoul']);
   h.tick(h.seconds(1));
   expectTrue(ghoul.aggroTargetId !== 'p1', 'invisible hero draws no creep aggro');
-  h.issue('p1', { type: 'fire', aimX: hero.pos.x + 100, aimZ: hero.pos.z });
+  h.issue('p1', { type: 'cast', ability: 'arrow', x: hero.pos.x + 100, z: hero.pos.z });
   h.tick();
   expectTrue(hero.invisTimer === 0, 'attacking breaks invisibility');
 

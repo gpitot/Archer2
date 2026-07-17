@@ -42,12 +42,12 @@ export function run(h: SimHarness): void {
   // the exact level-1 bounty.
   h.issue('p1', { type: 'levelAbility', ability: 'arrow' });
   h.tick();
-  h.issue('p1', { type: 'fire', aimX: ghoul.pos.x, aimZ: ghoul.pos.z });
+  h.issue('p1', { type: 'cast', ability: 'arrow', x: ghoul.pos.x, z: ghoul.pos.z });
   h.runUntil((_s, evs) => evs.some((e) => e.type === 'creepHit'), h.seconds(2), 'first arrow');
   expectTrue(ghoul.hp === def.baseHp - 200, `ghoul hp after first arrow: ${ghoul.hp}`);
 
   h.tick(7); // let the 0.2s fire recoil clear so the second shot isn't dropped
-  h.issue('p1', { type: 'fire', aimX: ghoul.pos.x, aimZ: ghoul.pos.z });
+  h.issue('p1', { type: 'cast', ability: 'arrow', x: ghoul.pos.x, z: ghoul.pos.z });
   const killEvents = h.runUntil(
     (_s, evs) => evs.some((e) => e.type === 'creepKill'),
     h.seconds(2),

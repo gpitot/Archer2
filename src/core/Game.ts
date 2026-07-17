@@ -27,7 +27,7 @@ import { GoldDisplay } from '../ui/GoldDisplay';
 import { MoveIndicatorManager } from '../ui/MoveIndicator';
 import { DebugPanel } from '../ui/DebugPanel';
 import { HeroPortrait } from '../ui/HeroPortrait';
-import { SpellBar } from '../ui/SpellBar';
+import { SpellBar, SpellSlotInfo } from '../ui/SpellBar';
 
 // ── Sim layer ──
 import { HeroState, ProjectileState, WardState, BlastState, CreepState, RuneState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
@@ -39,7 +39,8 @@ import { RUNE_TYPES, RunePlacement } from '../sim/runeRules';
 import { SimWorld, sphereHitsObstacle, FountainDef, findWalkableNearOnGrid, findWalkableCellNear } from '../sim/world';
 import { advanceProjectile } from '../sim/projectiles';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
-import { HERO, ARROW, DODGE, WARD, SCOUT, BLAST, FOUNTAIN, basicRankCap, ultimateRankCap } from '../sim/rules';
+import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN, basicRankCap, ultimateRankCap } from '../sim/rules';
+import { ABILITIES, ABILITY_ORDER, AbilityDef, canCast } from '../sim/abilities';
 import { BLINK_COOLDOWN, SHOP_ITEMS } from '../sim/shopItems';
 import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta, CreepMeta, RuneMeta } from '../sim/protocol';
 import { creepMaxHp } from '../sim/creepRules';
@@ -455,65 +456,48 @@ export class Game {
       this._moveIndicators.spawn(pos);
     });
 
-    // Q — Shoot Arrow (Shift+Q to spend skill point)
-    this._input.onKeyDown('KeyQ', () => {
-      this._targeting.cancel();
-      if (this._input.isKeyDown('ShiftLeft') || this._input.isKeyDown('ShiftRight')) {
-        this._enqueueCommand({ type: 'levelAbility', ability: 'arrow' });
-      } else {
+    // QWER ability keys — one binding per registry entry; Shift+key spends a
+    // skill point. The def's targeting kind drives the interaction:
+    //   aim   → cast immediately toward the cursor
+    //   self  → cast immediately
+    //   point → toggle ground-targeting (click to cast, e.g. R blast)
+    const SLOT_CODES: Record<AbilityDef['slot'], string> = {
+      Q: 'KeyQ', W: 'KeyW', E: 'KeyE', R: 'KeyR',
+    };
+    for (const abilityId of ABILITY_ORDER) {
+      const def = ABILITIES[abilityId];
+      this._input.onKeyDown(SLOT_CODES[def.slot], () => {
+        if (this._input.isKeyDown('ShiftLeft') || this._input.isKeyDown('ShiftRight')) {
+          this._targeting.cancel();
+          this._enqueueCommand({ type: 'levelAbility', ability: abilityId });
+          return;
+        }
+        if (def.targeting === 'point') {
+          // Toggle: pressing the key again while aiming cancels.
+          if (this._targeting.isActive && this._targeting.sourceItemId === abilityId) {
+            this._targeting.cancel();
+            return;
+          }
+          this._targeting.cancel();
+          this._activateAbilityTargeting(def);
+          return;
+        }
+        this._targeting.cancel();
+        const p = this._playerState;
+        if (!p || !canCast(def, p)) return;
+        if (def.targeting === 'self') {
+          this._enqueueCommand({ type: 'cast', ability: abilityId });
+          return;
+        }
         const aim = this._input.aimPosition;
         this._enqueueCommand({
-          type: 'fire',
-          aimX: aim ? aim.x : this._playerState.pos.x + Math.sin(this._playerState.facing) * 100,
-          aimZ: aim ? aim.z : this._playerState.pos.z + Math.cos(this._playerState.facing) * 100,
+          type: 'cast',
+          ability: abilityId,
+          x: aim ? aim.x : p.pos.x + Math.sin(p.facing) * 100,
+          z: aim ? aim.z : p.pos.z + Math.cos(p.facing) * 100,
         });
-      }
-    });
-
-    // W — Dodge (Shift+W to level up)
-    this._input.onKeyDown('KeyW', () => {
-      this._targeting.cancel();
-      if (this._input.isKeyDown('ShiftLeft') || this._input.isKeyDown('ShiftRight')) {
-        this._enqueueCommand({ type: 'levelAbility', ability: 'dodge' });
-      } else {
-        this._enqueueCommand({ type: 'dodge' });
-      }
-    });
-
-    // E — Scout: fire a vision projectile toward the cursor (Shift+E to level up)
-    this._input.onKeyDown('KeyE', () => {
-      this._targeting.cancel();
-      if (this._input.isKeyDown('ShiftLeft') || this._input.isKeyDown('ShiftRight')) {
-        this._enqueueCommand({ type: 'levelAbility', ability: 'reveal' });
-        return;
-      }
-      const p = this._playerState;
-      if (!p.alive) return;
-      if (p.revealLevel < 1) return;
-      if (p.revealCooldown > 0) return;
-      const aim = this._input.aimPosition;
-      this._enqueueCommand({
-        type: 'reveal',
-        aimX: aim ? aim.x : p.pos.x + Math.sin(p.facing) * 100,
-        aimZ: aim ? aim.z : p.pos.z + Math.cos(p.facing) * 100,
       });
-    });
-
-    // R — Blast: ground-targeted AoE with a detonation delay (Shift+R to level up)
-    this._input.onKeyDown('KeyR', () => {
-      if (this._input.isKeyDown('ShiftLeft') || this._input.isKeyDown('ShiftRight')) {
-        this._targeting.cancel();
-        this._enqueueCommand({ type: 'levelAbility', ability: 'blast' });
-        return;
-      }
-      // Toggle: pressing R again while aiming cancels.
-      if (this._targeting.isActive && this._targeting.sourceItemId === 'blast') {
-        this._targeting.cancel();
-        return;
-      }
-      this._targeting.cancel();
-      this._activateBlastTargeting();
-    });
+    }
 
     // B — Open shop when near
     this._input.onKeyDown('KeyB', () => {
@@ -569,7 +553,10 @@ export class Game {
     }
 
     // ── UI ──
-    this._spellBar = new SpellBar();
+    this._spellBar = new SpellBar(ABILITY_ORDER.map((id) => ({
+      key: ABILITIES[id].slot,
+      maxLevel: ABILITIES[id].maxLevel,
+    })));
     this._portrait = new HeroPortrait();
     this._goldDisplay = new GoldDisplay();
     this._itemBar = new ItemBar();
@@ -911,26 +898,13 @@ export class Game {
       // next move and the fire guard wrongly rejects follow-up shots.
       const idle = this._state.heroes.find((h) => h.id === this._playerId);
       if (idle) {
-        if (idle.abilityRecoilTimer > 0) {
-          idle.abilityRecoilTimer = Math.max(0, idle.abilityRecoilTimer - dt);
-        }
-        if (idle.abilityCooldown > 0) {
-          idle.abilityCooldown = Math.max(0, idle.abilityCooldown - dt);
-          if (idle.abilityCooldown <= 0 && idle.abilityCharges < ARROW.maxCharges) {
-            idle.abilityCharges++;
-            if (idle.abilityCharges < ARROW.maxCharges) {
-              idle.abilityCooldown = ARROW.cooldownByLevel[Math.max(idle.abilityLevel, 1)];
-            }
-          }
+        // Same registry loop the sim runs — the idle prediction can't drift
+        // from stepHero's recharge/cooldown behavior.
+        for (const id of ABILITY_ORDER) {
+          ABILITIES[id].runtime.tick(idle, dt);
         }
         if (idle.blinkCooldown > 0) {
           idle.blinkCooldown = Math.max(0, idle.blinkCooldown - dt);
-        }
-        if (idle.blastCooldown > 0) {
-          idle.blastCooldown = Math.max(0, idle.blastCooldown - dt);
-        }
-        if (idle.revealCooldown > 0) {
-          idle.revealCooldown = Math.max(0, idle.revealCooldown - dt);
         }
       }
       return;
@@ -1162,17 +1136,15 @@ export class Game {
   // ── Cosmetic projectiles ────────────────────────────────────────────
 
   /** Spawn a local arrow instantly when the player fires. */
-  private _spawnCosmeticProjectile(cmd: Command & { type: 'fire' }): void {
+  private _spawnCosmeticProjectile(cmd: Command & { type: 'cast' }): void {
     const player = this._playerState;
-    if (!player || !player.alive) return;
-    // Mirror the server's fire guard (stepMatch.fireArrow) so we don't show a
-    // ghost arrow for a shot the server will reject.
-    if (player.abilityLevel < 1) return;
-    if (player.abilityCharges <= 0) return;
-    if (player.abilityRecoilTimer > 0) return;
+    if (!player) return;
+    // Mirror the sim's arrow guard so we don't show a ghost arrow for a shot
+    // the server will reject.
+    if (!canCast(ABILITIES.arrow, player)) return;
 
-    const dirX = cmd.aimX - player.pos.x;
-    const dirZ = cmd.aimZ - player.pos.z;
+    const dirX = (cmd.x ?? player.pos.x) - player.pos.x;
+    const dirZ = (cmd.z ?? player.pos.z) - player.pos.z;
     const len = Math.hypot(dirX, dirZ);
     const dir = len < 0.01
       ? { x: Math.sin(player.facing), z: Math.cos(player.facing) }
@@ -1329,7 +1301,7 @@ export class Game {
     const localInputs: HeroInput[] = [];
     for (const cmd of this._pendingCommands) {
       localInputs.push({ heroId: this._playerId, cmd });
-      if (cmd.type === 'fire') {
+      if (cmd.type === 'cast' && cmd.ability === 'arrow') {
         this._spawnCosmeticProjectile(cmd);
       }
     }
@@ -1569,18 +1541,16 @@ export class Game {
     );
   }
 
-  /** Activate ground-targeting for the R blast. */
-  private _activateBlastTargeting(): void {
+  /** Activate ground-targeting for a point-targeted ability (e.g. R blast). */
+  private _activateAbilityTargeting(def: AbilityDef): void {
     const p = this._playerState;
-    if (!p || !p.alive) return;
-    if (p.blastLevel < 1) return;
-    if (p.blastCooldown > 0) return;
+    if (!p || !canCast(def, p)) return;
     this._targeting.activate(
       {
-        range: BLAST.castRange,
+        range: def.castRange ?? 0,
         indicatorColor: 0xff5522,
         onTarget: (x, z) => {
-          this._enqueueCommand({ type: 'blast', x, z });
+          this._enqueueCommand({ type: 'cast', ability: def.id, x, z });
         },
         onCancel: () => {},
         onMove: (x, z) => {
@@ -1590,7 +1560,7 @@ export class Game {
           );
         },
       },
-      'blast',
+      def.id,
       p.pos.x, p.pos.z,
       this._heightAt(p.pos.x, p.pos.z),
       this._scene,
@@ -2044,47 +2014,29 @@ export class Game {
       halfW: this._camera.viewHalfWidth(),
     });
 
-    // Spell bar cooldowns, levels, and skill-point gates
-    const arrowCd = ARROW.cooldownByLevel[Math.max(p.abilityLevel, 1)];
-    const cdProgress = p.abilityCooldown <= 0 ? 1
-      : 1 - p.abilityCooldown / arrowCd;
-    const dodgeCdProgress = p.dodgeCooldown <= 0 ? 1
-      : 1 - p.dodgeCooldown / DODGE.cooldownByLevel[Math.max(p.dodgeLevel, 1)];
-    const revealCdProgress = p.revealCooldown <= 0 ? 1
-      : 1 - p.revealCooldown / SCOUT.cooldownByLevel[Math.max(p.revealLevel, 1)];
-    const blastCdProgress = p.blastCooldown <= 0 ? 1
-      : 1 - p.blastCooldown / BLAST.cooldownByLevel[Math.max(p.blastLevel, 1)];
+    // Spell bar cooldowns, levels, and skill-point gates — one loop over the
+    // ability registry (adding a spell never touches this code).
     const basicCap = basicRankCap(p.level);
     const ultCap = ultimateRankCap(p.level);
     const hasPoint = p.skillPoints > 0;
-    this._spellBar.update(
-      {
-        cooldownProgress: cdProgress,
-        cooldownRemaining: Math.max(p.abilityCooldown, 0),
-        level: p.abilityLevel,
-        canLevel: hasPoint && p.abilityLevel < Math.min(ARROW.maxLevel, basicCap),
-        charges: p.abilityCharges,
-        maxCharges: ARROW.maxCharges,
-      },
-      {
-        cooldownProgress: dodgeCdProgress,
-        cooldownRemaining: Math.max(p.dodgeCooldown, 0),
-        level: p.dodgeLevel,
-        canLevel: hasPoint && p.dodgeLevel < Math.min(DODGE.maxLevel, basicCap),
-      },
-      {
-        cooldownProgress: revealCdProgress,
-        cooldownRemaining: Math.max(p.revealCooldown, 0),
-        level: p.revealLevel,
-        canLevel: hasPoint && p.revealLevel < Math.min(SCOUT.maxLevel, basicCap),
-      },
-      {
-        cooldownProgress: blastCdProgress,
-        cooldownRemaining: Math.max(p.blastCooldown, 0),
-        level: p.blastLevel,
-        canLevel: hasPoint && p.blastLevel < Math.min(BLAST.maxLevel, ultCap),
-      },
-    );
+    this._spellBar.update(ABILITY_ORDER.map((id) => {
+      const def = ABILITIES[id];
+      const level = def.runtime.getLevel(p);
+      const cooldown = def.runtime.getCooldown(p);
+      const total = def.cooldownByLevel[Math.max(level, 1)];
+      const cap = def.kind === 'ultimate' ? ultCap : basicCap;
+      const info: SpellSlotInfo = {
+        cooldownProgress: cooldown <= 0 ? 1 : 1 - cooldown / total,
+        cooldownRemaining: Math.max(cooldown, 0),
+        level,
+        canLevel: hasPoint && level < Math.min(def.maxLevel, cap),
+      };
+      if (def.charges && def.runtime.getCharges) {
+        info.charges = def.runtime.getCharges(p);
+        info.maxCharges = def.charges.max;
+      }
+      return info;
+    }));
 
     // Hero portrait
     this._portrait.update(
