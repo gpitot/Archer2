@@ -42,6 +42,7 @@ import { RUNE_TYPES, RunePlacement } from '../sim/runeRules';
 import { SimWorld, sphereHitsObstacle, FountainDef, findWalkableNearOnGrid, findWalkableCellNear } from '../sim/world';
 import { advanceProjectile } from '../sim/projectiles';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
+import { AiController } from '../sim/ai/AiController';
 import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN } from '../sim/rules';
 import { ABILITIES, ABILITY_ORDER, AbilityDef, abilityTooltip, canCast } from '../sim/abilities';
 import { SHOP_ITEMS } from '../sim/shopItems';
@@ -112,6 +113,9 @@ export class Game {
   private _state!: MatchState;
   private _playerId!: string;
   private _pendingCommands: Command[] = [];
+
+  /** Offline AI opponent driving the enemy hero (null in network mode). */
+  private _ai: AiController | null = null;
 
   // ── Networking ──
   private _network: NetworkClient | null = null;
@@ -409,6 +413,9 @@ export class Game {
         : this._findWalkableNear(heroSpawn.x + 400, heroSpawn.z + 200);
       const dummyState = createHeroState('dummy', 1, { x: dummySpawn.x, z: dummySpawn.z });
       this._state.heroes.push(dummyState);
+
+      // Offline: the enemy hero is played by the perfect-information AI.
+      this._ai = new AiController('dummy');
 
       // Create hero views
       for (const hs of this._state.heroes) {
@@ -1186,6 +1193,9 @@ export class Game {
       inputs.push({ heroId: this._playerId, cmd });
     }
     this._pendingCommands = [];
+
+    // ── AI opponent: append the enemy hero's commands for this tick ──
+    if (this._ai) inputs.push(...this._ai.think(this._state, this._world, dt));
 
     // ── Step the simulation ──
     const events = stepMatch(this._state, inputs, dt, this._world);

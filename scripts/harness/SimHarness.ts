@@ -29,6 +29,7 @@ import { ARROW } from '../../src/sim/rules';
 import { CreepState } from '../../src/sim/state';
 import { CREEP, CreepTypeId } from '../../src/sim/creepRules';
 import { createCreep } from '../../src/sim/stepCreeps';
+import { AiController, AiOptions } from '../../src/sim/ai/AiController';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -75,6 +76,7 @@ export class SimHarness {
   readonly trace: TraceLine[] = [];
 
   private _pendingInputs: HeroInput[] = [];
+  private _controllers: AiController[] = [];
   private _seed: number;
   private _ticks = 0;
 
@@ -182,10 +184,32 @@ export class SimHarness {
     this._pendingInputs.push({ heroId, cmd });
   }
 
+  /**
+   * Attach an AI opponent to a hero, driven identically to Game.ts: its
+   * `think` runs once per tick and its commands feed the same input stream.
+   * The controller gets its own deterministic RNG (derived from the seed) so
+   * it never perturbs the sim's rng stream.
+   */
+  attachAi(heroId: string, opts: AiOptions = {}): AiController {
+    let s = (this._seed ^ 0x9e3779b1) >>> 0 || 1;
+    const rng = () => {
+      s = (Math.imul(s, 16807) % 2147483647) >>> 0 || 1;
+      return (s - 1) / 2147483646;
+    };
+    const controller = new AiController(heroId, { rng, ...opts });
+    this._controllers.push(controller);
+    return controller;
+  }
+
   /** Advance the sim by `n` ticks, recording a trace line per tick. */
   tick(n = 1): SimEvent[] {
     const all: SimEvent[] = [];
     for (let i = 0; i < n; i++) {
+      // Attached AI controllers produce their commands for this tick first,
+      // exactly as Game.ts appends them before stepMatch.
+      for (const c of this._controllers) {
+        for (const inp of c.think(this.state, this.world, DT)) this._pendingInputs.push(inp);
+      }
       const inputs = this._pendingInputs;
       this._pendingInputs = [];
       const events = stepMatch(this.state, inputs, DT, this.world, this.rng);
