@@ -137,7 +137,7 @@ export class HeroView {
     this._syncBuffs(state);
 
     // Dodge visual — purple tint while dodging
-    if (state.dodgeActive) {
+    if (state.abilities.dodge.active) {
       this._rig.setEmissive(0x8833cc, 0.7);
     } else if (!state.invulnerable && this._hitFlashTimer <= 0 && this._healFlashTimer <= 0) {
       this._rig.setEmissive(0x000000, 0);

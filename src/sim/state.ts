@@ -6,13 +6,56 @@
 import { CreepTypeId } from './creepRules';
 import { RuneTypeId } from './runeRules';
 import { Vec2 } from './math';
-import { HERO, ARROW } from './rules';
-import type { AbilityId } from './abilities';
+import { HERO } from './rules';
+import { createAbilityRuntimes, type AbilityId } from './abilities';
 
 /** Six inventory slots holding item ids (null = empty). */
 export type Inventory = (string | null)[];
 
-export interface HeroState {
+// ── Unit substrate ───────────────────────────────────────────────────
+
+/**
+ * Shared base for every in-game unit (hero or creep). Fields that both
+ * types carry verbatim live here so damage and movement helpers can be
+ * written once against this interface.
+ *
+ * To add a new unit type:
+ *   1. Define its state interface, extending `UnitCore`.
+ *   2. Add a per-type array to `MatchState` and factory + step functions.
+ *   3. Keep per-type arrays separate (heroes[], creeps[], …) — never merge
+ *      them into one generic list (iteration-order determinism).
+ */
+export interface UnitCore {
+  id: string;
+  pos: Vec2;
+  facing: number;
+  hp: number;
+  alive: boolean;
+  respawnTimer: number;
+  level: number;
+}
+
+/**
+ * Per-ability mutable state. One record entry per registered ability —
+ * adding a spell adds a key here automatically (via `createAbilityRuntimes`)
+ * instead of a hand-threaded set of HeroState fields.
+ */
+export interface AbilityRuntime {
+  /** Current rank (0 = unlearned). */
+  level: number;
+  /** Seconds until ready (doubles as the recharge timer for charge abilities). */
+  cooldown: number;
+  /** Charges in the magazine (charge abilities only). */
+  charges?: number;
+  /** Minimum delay between consecutive casts (charge abilities only). */
+  recoil?: number;
+  /** True while the ability's active window is open (e.g. dodge). */
+  active?: boolean;
+  /** Seconds left in the active window. */
+  activeTimer?: number;
+}
+
+export interface HeroState extends UnitCore {
   id: string;
   team: number;
   pos: Vec2;
@@ -48,16 +91,10 @@ export interface HeroState {
   speedBonus: number;
   /** Chance (0–1) for any ability to deal double damage. */
   critChance: number;
-  dodgeActive: boolean;
-  dodgeTimer: number;
-  dodgeCooldown: number;
-  dodgeLevel: number;
-  revealLevel: number;
-  /** E — scout projectile cooldown (seconds remaining). */
-  revealCooldown: number;
-  blastLevel: number;
-  blinkCooldown: number;
-  blastCooldown: number;
+  /** Per-ability rank/cooldown/charge state, keyed in ABILITY_ORDER. */
+  abilities: Record<AbilityId, AbilityRuntime>;
+  /** Active-item cooldowns keyed by item id (e.g. blink_dagger). */
+  itemCooldowns: Record<string, number>;
   inventory: Inventory;
   wardCharges: number;
   /** Rune buff timers (seconds remaining; 0 = inactive). */
@@ -65,10 +102,6 @@ export interface HeroState {
   hasteTimer: number;
   invisTimer: number;
   slowTimer: number;
-  abilityLevel: number;
-  abilityCooldown: number;
-  abilityCharges: number;
-  abilityRecoilTimer: number;
 }
 
 export interface ProjectileState {
@@ -126,7 +159,7 @@ export interface RuneState {
 }
 
 /** A neutral jungle creep. Ids are stable for the whole match. */
-export interface CreepState {
+export interface CreepState extends UnitCore {
   id: string;
   campId: string;
   type: CreepTypeId;
@@ -169,10 +202,10 @@ export type Command =
   | { type: 'moveTo'; x: number; z: number }
   /** Cast any registered ability; (x, z) is the aim/target point when the ability takes one. */
   | { type: 'cast'; ability: AbilityId; x?: number; z?: number }
-  | { type: 'ward'; x?: number; z?: number }
-  | { type: 'blink'; x: number; z: number }
   | { type: 'buy'; itemIndex: number }
-  | { type: 'useItem'; slot: number }
+  /** Use the item in the given inventory slot. For point-targeted items (blink, wards),
+   *  (x, z) is the ground target; omit to self-cast (wards at hero position). */
+  | { type: 'useItem'; slot: number; x?: number; z?: number }
   | { type: 'levelAbility'; ability: AbilityId };
 
 /** A command tagged with the hero it applies to, queued for the next tick. */
@@ -242,27 +275,17 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     multiKillTimer: 0,
     speedBonus: 0,
     critChance: 0,
+    // Built in ABILITY_ORDER so key iteration is identical on every peer.
+    // The level-1 skill point is auto-spent on Q (it's the basic attack), so
+    // heroes start with Q rank 1 and 0 banked points — next point at level 2.
+    abilities: createAbilityRuntimes(),
+    itemCooldowns: {},
     inventory: [null, null, null, null, null, null],
     wardCharges: 0,
     ddTimer: 0,
     hasteTimer: 0,
     invisTimer: 0,
     slowTimer: 0,
-    // The level-1 skill point is auto-spent on Q (it's the basic attack), so
-    // heroes start with Q rank 1 and 0 banked points — next point at level 2.
-    abilityLevel: 1,
-    abilityCooldown: 0,
-    abilityCharges: ARROW.maxCharges,
-    abilityRecoilTimer: 0,
-    dodgeActive: false,
-    dodgeTimer: 0,
-    dodgeCooldown: 0,
-    dodgeLevel: 0,
-    revealLevel: 0,
-    revealCooldown: 0,
-    blastLevel: 0,
-    blinkCooldown: 0,
-    blastCooldown: 0,
   };
 }
 

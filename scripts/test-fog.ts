@@ -317,7 +317,8 @@ async function main() {
     // Stand at A, place a ward, then walk far away to B.
     tp(spotA.x, spotA.z);
     hs.wardCharges = 5;
-    g.debugIssue({ type: 'ward' });
+    hs.inventory[0] = 'sentry_wards';
+    g.debugIssue({ type: 'useItem', slot: 0 });
     await new Promise((r) => setTimeout(r, 300)); // sim tick processes the command
     tp(spotB.x, spotB.z);
     fog.recomputeNow();

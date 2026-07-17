@@ -7,21 +7,26 @@
  *
  * Behaviour was ported to match the original single-player game exactly,
  * including a couple of quirks in the kill-reward ordering (noted inline).
+ *
+ * ── Adding a new unit type ───────────────────────────────────────────
+ * 1. Define its state interface in `state.ts`, extending `UnitCore`.
+ * 2. Add a per-type array to `MatchState` (heroes[], creeps[], …).
+ *    Never merge into one generic list — iteration order must be
+ *    deterministic on every peer.
+ * 3. Write `create` / `step` / `respawn` helpers (patterns in stepCreeps.ts).
+ * 4. Call step helpers from `stepMatch()`; handle death via the unified
+ *    `dealDamageToHero` / `dealDamageToCreep` in `damage.ts`.
+ * 5. If the unit type needs client views, add per-type diff loops in
+ *    `Game.ts` (Phase 6 will extract a generic ViewSync for this).
  */
 import * as V from './math';
 import {
   ARROW,
   basicRankCap,
   BLAST,
-  BOUNTY_TABLE,
   HERO,
-  KILL_GOLD,
-  KILL_XP_TABLE,
-  MULTI_KILL_WINDOW,
   PASSIVE_INCOME,
-  SPREE_BONUS,
   ultimateRankCap,
-  WARD,
   XP_TABLE,
 } from './rules';
 import { ABILITIES, ABILITY_ORDER, AbilityId, stopMovement } from './abilities';
@@ -39,12 +44,13 @@ import {
   hitCreep,
   stepCreeps,
 } from './stepCreeps';
-import { findReachableNear, findRespawnPosition, SimWorld, sphereHitsObstacle } from './world';
-import { BLINK_COOLDOWN, ICE_BOW_SLOW_DURATION, ICE_BOW_SLOW_FACTOR } from './shopItems';
-import { breakInvisibility, stepRuneBuffs, stepRunes } from './stepRunes';
+import { findReachableNear, findRespawnPosition, SimWorld } from './world';
+import { ICE_BOW_SLOW_FACTOR, SHOP_ITEMS_BY_ID, addItem, removeItem } from './shopItems';
+import { stepRuneBuffs, stepRunes } from './stepRunes';
 import { RUNE } from './runeRules';
-import { rollAbilityDamage } from './damage';
-import { advanceProjectile, findHitHero, spawnProjectile } from './projectiles';
+import { rollAbilityDamage, dealDamageToHero, killHero, addXp } from './damage';
+import { advanceProjectile, findHitHero } from './projectiles';
+import { turnToward, stepToward } from './movement';
 
 /**
  * Advance the match by `dt` seconds, applying `inputs` queued since the last
@@ -103,17 +109,11 @@ function applyCommand(
     case 'cast':
       ABILITIES[cmd.ability]?.cast({ state, hero, world, events, x: cmd.x, z: cmd.z });
       break;
-    case 'ward':
-      placeWard(state, hero, world, cmd.x, cmd.z);
-      break;
-    case 'blink':
-      blink(hero, cmd.x, cmd.z, world);
-      break;
     case 'buy':
       buy(hero, cmd.itemIndex, world, events);
       break;
     case 'useItem':
-      useItem(hero, cmd.slot, state, world, events);
+      useItem(hero, cmd.slot, state, world, events, cmd.x, cmd.z);
       break;
     case 'levelAbility':
       spendSkillPoint(hero, cmd.ability);
@@ -143,55 +143,6 @@ function setDestination(hero: HeroState, x: number, z: number, world: SimWorld):
   }
 }
 
-function placeWard(
-  state: MatchState,
-  hero: HeroState,
-  world: SimWorld,
-  targetX?: number,
-  targetZ?: number,
-): void {
-  if (!hero.alive) return;
-  if (hero.wardCharges <= 0) return;
-
-  // Placing a ward interrupts movement.
-  stopMovement(hero);
-
-  let pos: V.Vec2;
-  if (targetX !== undefined && targetZ !== undefined) {
-    // Validate range — reject if the target is too far.
-    if (V.distance(hero.pos, { x: targetX, z: targetZ }) > WARD.placeRange + 1) return;
-    // Reject placement inside solid obstacles (trees, rocks).
-    if (sphereHitsObstacle(world, { x: targetX, z: targetZ }, WARD.placementRadius)) return;
-    pos = { x: targetX, z: targetZ };
-  } else {
-    pos = { x: hero.pos.x, z: hero.pos.z };
-  }
-
-  hero.wardCharges--;
-  if (hero.wardCharges === 0) removeItem(hero, 'sentry_wards');
-  // Placing a ward breaks invisibility.
-  breakInvisibility(hero);
-  state.wards.push({
-    id: `w${state.nextWardId++}`,
-    team: hero.team,
-    pos,
-    life: WARD.duration,
-  });
-}
-
-function blink(hero: HeroState, tx: number, tz: number, world: SimWorld): void {
-  if (!hero.alive) return;
-  if (hero.blinkCooldown > 0) return;
-  // Snap to nearest walkable, reachable cell.
-  const snapped = findReachableNear(world, tx, tz, hero.pos.x, hero.pos.z);
-  if (!snapped) return;
-
-  // Teleport instantly — clear movement state.
-  stopMovement(hero);
-  hero.pos = { x: snapped.x, z: snapped.z };
-  hero.blinkCooldown = BLINK_COOLDOWN;
-}
-
 function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]): void {
   const shop = world.shop;
   if (index < 0 || index >= shop.items.length) return;
@@ -210,23 +161,33 @@ function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]
 }
 
 /** Use the item in a specific inventory slot (hotkey 1–6). */
-function useItem(hero: HeroState, slot: number, state: MatchState, world: SimWorld, events: SimEvent[]): void {
+function useItem(
+  hero: HeroState,
+  slot: number,
+  state: MatchState,
+  world: SimWorld,
+  events: SimEvent[],
+  x?: number,
+  z?: number,
+): void {
   if (!hero.alive) return;
   if (slot < 0 || slot >= hero.inventory.length) return;
   const itemId = hero.inventory[slot];
   if (!itemId) return;
 
-  // Using an item interrupts movement.
+  // Using any item interrupts movement (matches old behaviour).
   stopMovement(hero);
 
-  switch (itemId) {
-    case 'sentry_wards':
-      placeWard(state, hero, world);
-      break;
-    default:
-      // Passive items (e.g. boots) — nothing to do.
-      break;
-  }
+  const def = SHOP_ITEMS_BY_ID[itemId];
+  if (!def?.use) return;
+
+  // Check readiness generically: cooldown, then any extra gate (ward charges).
+  const cd = def.use.cooldown;
+  if (cd && (hero.itemCooldowns[itemId] ?? 0) > 0) return;
+  if (def.use.canUse && !def.use.canUse(hero)) return;
+
+  // Dispatch through the registry — the execute callback handles everything.
+  def.use.execute({ state, hero, world, events, x, z });
 }
 
 function spendSkillPoint(hero: HeroState, ability: AbilityId): void {
@@ -239,9 +200,9 @@ function spendSkillPoint(hero: HeroState, ability: AbilityId): void {
   const cap = def.kind === 'ultimate'
     ? ultimateRankCap(hero.level)
     : Math.min(basicRankCap(hero.level), 5);
-  const level = def.runtime.getLevel(hero);
-  if (level >= def.maxLevel || level >= cap) return;
-  def.runtime.setLevel(hero, level + 1);
+  const runtime = hero.abilities[ability];
+  if (runtime.level >= def.maxLevel || runtime.level >= cap) return;
+  runtime.level++;
   hero.skillPoints--;
 }
 
@@ -261,12 +222,15 @@ function stepHero(hero: HeroState, dt: number): void {
   // Ability timers (cooldowns, charge recharge, active windows) tick through
   // the registry — one loop, fixed ABILITY_ORDER on every peer.
   for (const id of ABILITY_ORDER) {
-    ABILITIES[id].runtime.tick(hero, dt);
+    ABILITIES[id].tick(hero, dt);
   }
 
-  // Item cooldowns (blink dagger) — generalized in the item-registry phase.
-  if (hero.blinkCooldown > 0) {
-    hero.blinkCooldown = Math.max(0, hero.blinkCooldown - dt);
+  // Item cooldowns (blink dagger, future active items). Plain string keys
+  // iterate in insertion order — identical on every peer.
+  for (const itemId in hero.itemCooldowns) {
+    if (hero.itemCooldowns[itemId] > 0) {
+      hero.itemCooldowns[itemId] = Math.max(0, hero.itemCooldowns[itemId] - dt);
+    }
   }
 
   if (hero.invulnerable) {
@@ -307,16 +271,7 @@ function moveAlongPath(hero: HeroState, dt: number): void {
 }
 
 function updateFacing(hero: HeroState, dt: number): void {
-  let diff = hero.targetFacing - hero.facing;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-
-  const maxTurn = HERO.turnSpeed * dt;
-  if (Math.abs(diff) < maxTurn) {
-    hero.facing = hero.targetFacing;
-  } else {
-    hero.facing += Math.sign(diff) * maxTurn;
-  }
+  hero.facing = turnToward(hero.facing, hero.targetFacing, HERO.turnSpeed, dt);
 }
 
 function respawn(hero: HeroState, pos: V.Vec2): void {
@@ -371,8 +326,10 @@ function stepProjectiles(
       const source = state.heroes.find((h) => h.id === p.ownerId);
       state.projectiles.splice(i, 1);
       if (source) {
-        if (source.inventory.includes('ice_bow')) {
-          target.slowTimer = ICE_BOW_SLOW_DURATION;
+        // On-hit item hooks (ice bow slow, …) in inventory slot order.
+        for (const slotItemId of source.inventory) {
+          if (!slotItemId) continue;
+          SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, target);
         }
         const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
         applyDamage(state, target, source, damage, p.id, events, crit);
@@ -387,8 +344,10 @@ function stepProjectiles(
       const source = state.heroes.find((h) => h.id === p.ownerId);
       state.projectiles.splice(i, 1);
       if (source) {
-        if (source.inventory.includes('ice_bow')) {
-          creepTarget.slowTimer = ICE_BOW_SLOW_DURATION;
+        // On-hit item hooks (ice bow slow, …) in inventory slot order.
+        for (const slotItemId of source.inventory) {
+          if (!slotItemId) continue;
+          SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, creepTarget);
         }
         const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
         applyCreepDamage(state, creepTarget, source, damage, events, crit);
@@ -404,99 +363,20 @@ function applyDamage(
   target: HeroState,
   source: HeroState,
   damage: number,
-  /** Id of the projectile (or blast) that dealt it — clients retire the matching arrow. */
   projectileId: string,
   events: SimEvent[],
   crit = false,
 ): void {
-  if (!target.alive || target.invulnerable) return;
-
-  target.hp = Math.max(0, target.hp - damage);
-  events.push({
-    type: 'hit',
-    targetId: target.id,
-    sourceId: source.id,
-    projectileId,
-    damage,
-    x: target.pos.x,
-    z: target.pos.z,
-    crit,
-  });
-
-  if (target.hp > 0) return;
-
-  // Death & kill credit. The victim's kill streak is reset *before* the reward
-  // is computed and the killer's multi-kill count is incremented *after*,
-  // preserving the original game's (quirky) bounty/multi-kill accounting.
-  killHero(target);
-
-  source.kills++;
-  source.killStreak++;
-  const wasFirstBlood = state.firstBlood; // consumed by awardKillGold below
-  const gold = awardKillGold(state, source, target);
-  addXp(source, killXpReward(target, source), events);
-  source.multiKillTimer = MULTI_KILL_WINDOW;
-  source.multiKillCount++;
-
-  events.push({
-    type: 'kill',
-    sourceId: source.id,
-    victimId: target.id,
-    gold,
-    firstBlood: wasFirstBlood || undefined,
-    // Mirror the original's caps: streak sounds repeat at 9+, multi-kill at 3+.
-    streak: Math.min(source.killStreak, 9),
-    multiKill: Math.min(source.multiKillCount, 3),
-  });
+  dealDamageToHero(state, target, { kind: 'hero', hero: source }, damage, projectileId, events, crit);
 }
 
 /**
  * The victim half of a hero death — shared by hero-vs-hero kills and creep
- * kills (which carry no killer rewards).
+ * kills (which carry no killer rewards). Moved to damage.ts; re-exported
+ * for stepCreeps compat.
  */
-export function killHero(target: HeroState): void {
-  target.alive = false;
-  target.respawnTimer = HERO.respawnDelay;
-  target.path = [];
-  target.moving = false;
-  target.deaths++;
-  target.killStreak = 0;
-}
 
-function awardKillGold(state: MatchState, killer: HeroState, victim: HeroState): number {
-  let total = KILL_GOLD.base;
-
-  if (state.firstBlood) {
-    state.firstBlood = false;
-    total += KILL_GOLD.firstBlood;
-  }
-  if (killer.killStreak >= 3) {
-    total += SPREE_BONUS[Math.min(killer.killStreak, 10)] ?? 7;
-  }
-  if (victim.killStreak >= 4) {
-    total += BOUNTY_TABLE[Math.min(victim.killStreak, 10)] ?? 28;
-  }
-  if (killer.multiKillCount === 2) total += KILL_GOLD.doubleKill;
-  else if (killer.multiKillCount >= 3) total += KILL_GOLD.tripleKill;
-
-  killer.gold += total;
-  return total;
-}
-
-function killXpReward(victim: HeroState, killer: HeroState): number {
-  let xp = KILL_XP_TABLE[Math.min(victim.level, KILL_XP_TABLE.length - 1)];
-  if (victim.level > killer.level) xp += (victim.level - killer.level) * 50;
-  return xp;
-}
-
-export function addXp(hero: HeroState, amount: number, events: SimEvent[]): void {
-  hero.xp += amount;
-  while (hero.level < HERO.maxLevel && hero.xp >= XP_TABLE[hero.level + 1]) {
-    hero.level++;
-    hero.skillPoints++;
-    events.push({ type: 'levelUp', heroId: hero.id, level: hero.level });
-  }
-}
+export { killHero, addXp } from './damage';
 
 // ── Blasts ──────────────────────────────────────────────────────────────
 
@@ -595,18 +475,5 @@ export function xpForLevel(level: number): number {
 }
 
 // ── Inventory helpers ─────────────────────────────────────────────────
-
-export function addItem(hero: HeroState, itemId: string): number {
-  for (let i = 0; i < hero.inventory.length; i++) {
-    if (hero.inventory[i] === null) {
-      hero.inventory[i] = itemId;
-      return i;
-    }
-  }
-  return -1;
-}
-
-export function removeItem(hero: HeroState, itemId: string): void {
-  const i = hero.inventory.indexOf(itemId);
-  if (i !== -1) hero.inventory[i] = null;
-}
+// (Live in the item registry now — re-exported for existing importers.)
+export { addItem, removeItem };

@@ -13,7 +13,8 @@
  * at a low rate, and immediately when an event changes them.
  */
 import { DurableObject, WebSocket } from 'cloudflare:workers';
-import { MatchState, HeroInput, HeroState, SimEvent, ProjectileState, WardState, BlastState, createMatchState, createHeroState } from '../src/sim/state';
+import { MatchState, HeroInput, HeroState, SimEvent, ProjectileState, WardState, BlastState, AbilityRuntime, createMatchState, createHeroState } from '../src/sim/state';
+import { ABILITY_ORDER, AbilityId } from '../src/sim/abilities';
 import { stepMatch } from '../src/sim/stepMatch';
 import { spawnCamps } from '../src/sim/stepCreeps';
 import { spawnRunes } from '../src/sim/stepRunes';
@@ -411,20 +412,33 @@ export class GameRoom extends DurableObject<Env> {
       hasteTimer: q(h.hasteTimer),
       invisTimer: q(h.invisTimer),
       slowTimer: q(h.slowTimer),
-      abilityLevel: h.abilityLevel,
-      abilityCooldown: q(h.abilityCooldown),
-      abilityCharges: h.abilityCharges,
-      abilityRecoilTimer: q(h.abilityRecoilTimer),
-      dodgeActive: h.dodgeActive,
-      dodgeTimer: q(h.dodgeTimer),
-      dodgeCooldown: q(h.dodgeCooldown),
-      dodgeLevel: h.dodgeLevel,
-      revealLevel: h.revealLevel,
-      revealCooldown: q(h.revealCooldown),
-      blastLevel: h.blastLevel,
-      blinkCooldown: q(h.blinkCooldown),
-      blastCooldown: q(h.blastCooldown),
+      abilities: this._wireAbilities(h),
+      itemCooldowns: this._wireItemCooldowns(h),
     }));
+  }
+
+  /**
+   * Quantized copy of the per-ability runtime record. Generic over abilities
+   * — a new spell rides ABILITY_ORDER with no wire-encoding change.
+   */
+  private _wireAbilities(h: HeroState): Record<AbilityId, AbilityRuntime> {
+    const out = {} as Record<AbilityId, AbilityRuntime>;
+    for (const id of ABILITY_ORDER) {
+      const a = h.abilities[id];
+      const wire: AbilityRuntime = { level: a.level, cooldown: q(a.cooldown) };
+      if (a.charges !== undefined) wire.charges = a.charges;
+      if (a.recoil !== undefined) wire.recoil = q(a.recoil);
+      if (a.active !== undefined) wire.active = a.active;
+      if (a.activeTimer !== undefined) wire.activeTimer = q(a.activeTimer);
+      out[id] = wire;
+    }
+    return out;
+  }
+
+  private _wireItemCooldowns(h: HeroState): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const itemId in h.itemCooldowns) out[itemId] = q(h.itemCooldowns[itemId]);
+    return out;
   }
 
   private _broadcast(msg: ServerMessage, exclude?: WebSocket): void {

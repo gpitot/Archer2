@@ -236,10 +236,12 @@ export class SimHarness {
         alive: h.alive,
         gold: h.gold,
         level: h.level,
-        abilityLevel: h.abilityLevel,
-        abilityCooldown: +h.abilityCooldown.toFixed(3),
-        abilityCharges: h.abilityCharges,
-        abilityRecoilTimer: +h.abilityRecoilTimer.toFixed(3),
+        // Same trace keys as before the abilities-record migration, so
+        // golden traces stay byte-comparable across it.
+        abilityLevel: h.abilities.arrow.level,
+        abilityCooldown: +h.abilities.arrow.cooldown.toFixed(3),
+        abilityCharges: h.abilities.arrow.charges ?? 0,
+        abilityRecoilTimer: +(h.abilities.arrow.recoil ?? 0).toFixed(3),
         moving: h.moving,
       })),
       projectiles: this.state.projectiles.map((p) => ({

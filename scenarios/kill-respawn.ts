@@ -15,7 +15,7 @@ export function run(h: SimHarness): void {
 
   // Fire whenever ready until the victim dies (level 1 needs one hit).
   h.runUntil((_s, evs) => {
-    if (shooter.abilityCharges > 0 && shooter.abilityRecoilTimer <= 0 && victim.alive) {
+    if (shooter.abilities.arrow.charges! > 0 && shooter.abilities.arrow.recoil! <= 0 && victim.alive) {
       h.issue('p1', { type: 'cast', ability: 'arrow', x: victim.pos.x, z: victim.pos.z });
     }
     return evs.some((e) => e.type === 'kill');

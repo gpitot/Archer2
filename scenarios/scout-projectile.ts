@@ -28,7 +28,7 @@ export function run(h: SimHarness): void {
   expectTrue(h.state.projectiles.length === 0, 'unlearned E cannot cast');
 
   // Learn rank 1 and cast at the enemy.
-  hero.revealLevel = 1;
+  hero.abilities.reveal.level = 1;
   h.issue('p1', { type: 'cast', ability: 'reveal', x: enemy.pos.x, z: enemy.pos.z });
   const events = h.tick();
   const scout = h.state.projectiles[0];
@@ -36,7 +36,7 @@ export function run(h: SimHarness): void {
   expectTrue(scout.damage === 0, 'scout deals no damage');
   expectTrue(scout.speed === SCOUT.speed, 'scout flies at SCOUT.speed');
   expectTrue(scout.maxRange === SCOUT.rangeByLevel[1], 'rank-1 range');
-  expectTrue(hero.revealCooldown > SCOUT.cooldownByLevel[1] - 0.1, 'rank-1 cooldown started');
+  expectTrue(hero.abilities.reveal.cooldown > SCOUT.cooldownByLevel[1] - 0.1, 'rank-1 cooldown started');
   expectTrue(events.some((e) => e.type === 'fire' && e.projectile.kind === 'scout'),
     'fire event carries the scout (so enemy clients render it)');
 
@@ -62,15 +62,15 @@ export function run(h: SimHarness): void {
   void crossedObstacle;
 
   // Cooldown ticks down and eventually frees the ability.
-  expectTrue(hero.revealCooldown < SCOUT.cooldownByLevel[1], 'cooldown ticking');
+  expectTrue(hero.abilities.reveal.cooldown < SCOUT.cooldownByLevel[1], 'cooldown ticking');
   h.tick(h.seconds(SCOUT.cooldownByLevel[1]));
-  expectTrue(hero.revealCooldown === 0, 'cooldown expired');
+  expectTrue(hero.abilities.reveal.cooldown === 0, 'cooldown expired');
 
   // Rank 5: longer flight, shorter cooldown.
-  hero.revealLevel = 5;
+  hero.abilities.reveal.level = 5;
   h.issue('p1', { type: 'cast', ability: 'reveal', x: enemy.pos.x, z: enemy.pos.z });
   h.tick();
   const scout5 = h.state.projectiles.find((p) => p.kind === 'scout');
   expectTrue(!!scout5 && scout5.maxRange === SCOUT.rangeByLevel[5], 'rank-5 range');
-  expectTrue(hero.revealCooldown > SCOUT.cooldownByLevel[5] - 0.1, 'rank-5 cooldown');
+  expectTrue(hero.abilities.reveal.cooldown > SCOUT.cooldownByLevel[5] - 0.1, 'rank-5 cooldown');
 }

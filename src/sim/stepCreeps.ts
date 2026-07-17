@@ -19,7 +19,7 @@ import {
 import * as V from './math';
 import { ARROW } from './rules';
 import { CreepState, HeroState, MatchState, ProjectileState, SimEvent } from './state';
-import { addXp, killHero } from './stepMatch';
+import { addXp, killHero, dealDamageToHero, dealDamageToCreep } from './damage';
 import { spawnProjectile } from './projectiles';
 import { findReachableNear, findWalkableNear, SimWorld, sphereHitsObstacle } from './world';
 
@@ -194,17 +194,17 @@ function moveCreep(
   dt: number,
   world: SimWorld,
 ): void {
+  const speed = creep.slowTimer > 0 ? def.speed * 0.8 : def.speed;
   const dir = V.sub(targetPos, creep.pos);
   const dist = V.length(dir);
   if (dist < 1e-3) return;
-  const unit = V.scale(dir, 1 / dist);
-  const speed = creep.slowTimer > 0 ? def.speed * 0.8 : def.speed;
-  const next = V.add(creep.pos, V.scale(unit, Math.min(speed * dt, dist)));
+  const unitDir = V.scale(dir, 1 / dist);
+  const next = V.add(creep.pos, V.scale(unitDir, Math.min(speed * dt, dist)));
   if (sphereHitsObstacle(world, next, def.bodyRadius)) return;
   const { gx, gz } = world.navGrid.worldToGrid(next.x, next.z);
   if (!world.navGrid.isWalkable(gx, gz)) return;
   creep.pos = next;
-  creep.facing = V.heading(unit);
+  creep.facing = V.heading(unitDir);
 }
 
 function fireCreepProjectile(
@@ -247,41 +247,23 @@ function respawnCreep(state: MatchState, creep: CreepState, events: SimEvent[]):
 // ── Damage ────────────────────────────────────────────────────────────
 
 /**
- * Creep → hero damage (melee swings and fireball impacts). Deliberately NOT
- * `applyDamage`: a creep kill carries no kill credit — no kills++, no bounty
- * gold, no kill XP, no multi-kill window, and first blood stays hero-vs-hero.
+ * Creep → hero damage (melee swings and fireball impacts). Thin wrapper
+ * over `dealDamageToHero` — the unified function handles the guard, clamp,
+ * hit event, killHero, and kill-credit gating.
  */
 export function applyCreepDamageToHero(
   state: MatchState,
   target: HeroState,
   amount: number,
   creep: CreepState,
-  /** Fireball id so clients retire the flying projectile; melee passes the creep id (matches nothing). */
   projectileId: string,
   events: SimEvent[],
 ): void {
-  if (!target.alive || target.invulnerable) return;
-
-  target.hp = Math.max(0, target.hp - amount);
-  events.push({
-    type: 'hit',
-    targetId: target.id,
-    sourceId: creep.id,
-    projectileId,
-    damage: amount,
-    x: target.pos.x,
-    z: target.pos.z,
-  });
-
-  if (target.hp > 0) return;
-
-  killHero(target);
-  events.push({ type: 'kill', sourceId: creep.id, victimId: target.id });
+  dealDamageToHero(state, target, { kind: 'creep', creep }, amount, projectileId, events);
 }
 
 /**
- * Hero → creep damage (arrows). The last-hitter takes the full reward:
- * gold + XP scale with the creep's level.
+ * Hero → creep damage (arrows). Thin wrapper over `dealDamageToCreep`.
  */
 export function applyCreepDamage(
   state: MatchState,
@@ -291,46 +273,7 @@ export function applyCreepDamage(
   events: SimEvent[],
   crit = false,
 ): void {
-  if (!creep.alive) return;
-
-  creep.hp = Math.max(0, creep.hp - damage);
-  creep.lastActiveTick = state.tick;
-  // Retaliate: being shot from outside aggro range still pulls the creep
-  // (leash still bounds the chase), so camps can't be sniped risk-free.
-  if (creep.aggroTargetId === null && creep.hp > 0) {
-    creep.aggroTargetId = source.id;
-  }
-  events.push({
-    type: 'creepHit',
-    creepId: creep.id,
-    sourceId: source.id,
-    damage,
-    x: creep.pos.x,
-    z: creep.pos.z,
-    crit,
-  });
-
-  if (creep.hp > 0) return;
-
-  creep.alive = false;
-  creep.respawnTimer = CREEP.respawnInterval;
-  creep.aggroTargetId = null;
-  creep.attackCooldown = 0;
-
-  const gold = creepGold(creep.type, creep.level);
-  const xp = creepXp(creep.type, creep.level);
-  source.gold += gold;
-  addXp(source, xp, events);
-  events.push({
-    type: 'creepKill',
-    creepId: creep.id,
-    campId: creep.campId,
-    killerId: source.id,
-    gold,
-    xp,
-    x: creep.pos.x,
-    z: creep.pos.z,
-  });
+  dealDamageToCreep(state, creep, { kind: 'hero', hero: source }, damage, events, crit);
 }
 
 // ── Projectile collision helpers (called from stepProjectiles) ────────
