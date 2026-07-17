@@ -1,18 +1,18 @@
 /**
  * The hero ability registry — the single place an ability is defined.
  * Command dispatch, skill-point spending, per-tick cooldown updates, client
- * keybindings, cast guards, and the spell bar all iterate `ABILITIES` /
- * `ABILITY_ORDER` instead of hardcoding each spell.
+ * keybindings, cast guards, the spell bar, and the wire encoding all iterate
+ * `ABILITIES` / `ABILITY_ORDER` instead of hardcoding each spell.
  *
- * Phase-2 shape: ability state still lives in named `HeroState` fields
- * (abilityLevel, dodgeCooldown, …); each def bridges to them through
- * `runtime`. A later phase replaces the flat fields with a generic
- * `Record<AbilityId, AbilityRuntime>` and deletes the bridge.
+ * Ability state lives in `hero.abilities[id]` (an `AbilityRuntime` record
+ * entry created by `createAbilityRuntimes`) — adding a spell means adding a
+ * def here and nothing else: state, wire meta, cooldown ticking, keybinding,
+ * and HUD slot all follow from the registry.
  */
 import * as V from './math';
 import { ARROW, BLAST, DODGE, SCOUT } from './rules';
-import { HeroState, MatchState, SimEvent } from './state';
-import { SimWorld } from './world';
+import type { AbilityRuntime, HeroState, MatchState, SimEvent } from './state';
+import type { SimWorld } from './world';
 import { spawnProjectile } from './projectiles';
 import { breakInvisibility } from './stepRunes';
 
@@ -20,8 +20,8 @@ export type AbilityId = 'arrow' | 'dodge' | 'reveal' | 'blast';
 
 /**
  * Canonical iteration order (QWER). Deterministic ordering matters: the sim
- * ticks ability timers in this order on every peer, and later phases build
- * the wire record from it.
+ * ticks ability timers in this order on every peer, and hero state / wire
+ * records are built with keys in this order.
  */
 export const ABILITY_ORDER: readonly AbilityId[] = ['arrow', 'dodge', 'reveal', 'blast'];
 
@@ -34,16 +34,6 @@ export interface CastContext {
   /** Ground/aim point for 'aim' and 'point' targeting (absent for 'self'). */
   x?: number;
   z?: number;
-}
-
-/** Phase-2 bridge from the registry to the named HeroState fields. */
-export interface AbilityRuntimeBridge {
-  getLevel(hero: HeroState): number;
-  setLevel(hero: HeroState, level: number): void;
-  getCooldown(hero: HeroState): number;
-  getCharges?(hero: HeroState): number;
-  /** Advance this ability's timers by `dt` (cooldowns, recharge, windows). */
-  tick(hero: HeroState, dt: number): void;
 }
 
 export interface AbilityDef {
@@ -61,16 +51,44 @@ export interface AbilityDef {
   targeting: 'aim' | 'point' | 'self';
   castRange?: number;
   charges?: { max: number; recoil: number };
+  /** The ability keeps an active window open after casting (e.g. dodge). */
+  hasActiveWindow?: boolean;
   /** Readiness guards beyond being alive (level learned, off cooldown, …). */
   canCast(hero: HeroState): boolean;
   /** Full validation + effect. Mirrors the sim exactly — used by both sides. */
   cast(ctx: CastContext): void;
-  runtime: AbilityRuntimeBridge;
+  /** Advance this ability's timers by `dt` (cooldowns, recharge, windows). */
+  tick(hero: HeroState, dt: number): void;
 }
 
 /** Client-side pre-check for a cast: alive + the ability's own guards. */
 export function canCast(def: AbilityDef, hero: HeroState): boolean {
   return hero.alive && def.canCast(hero);
+}
+
+/**
+ * Fresh per-ability runtime record for a new hero, keyed in ABILITY_ORDER
+ * (deterministic key iteration on every peer). The level-1 skill point is
+ * auto-spent on Q, so arrow starts at rank 1 with a full magazine.
+ */
+export function createAbilityRuntimes(): Record<AbilityId, AbilityRuntime> {
+  const out = {} as Record<AbilityId, AbilityRuntime>;
+  for (const id of ABILITY_ORDER) {
+    const def = ABILITIES[id];
+    const runtime: AbilityRuntime = { level: 0, cooldown: 0 };
+    if (def.charges) {
+      runtime.charges = 0;
+      runtime.recoil = 0;
+    }
+    if (def.hasActiveWindow) {
+      runtime.active = false;
+      runtime.activeTimer = 0;
+    }
+    out[id] = runtime;
+  }
+  out.arrow.level = 1;
+  out.arrow.charges = ARROW.maxCharges;
+  return out;
 }
 
 // ── Shared cast helpers ───────────────────────────────────────────────
@@ -102,15 +120,24 @@ function aimDir(hero: HeroState, aimX: number, aimZ: number): V.Vec2 {
   return V.normalize(dir);
 }
 
+/** Standard cooldown decrement (no recharge semantics). */
+function tickCooldown(runtime: AbilityRuntime, dt: number): void {
+  if (runtime.cooldown > 0) {
+    runtime.cooldown = Math.max(0, runtime.cooldown - dt);
+  }
+}
+
 // ── Q — Shoot Arrow ───────────────────────────────────────────────────
 
 function canCastArrow(hero: HeroState): boolean {
-  return hero.abilityLevel >= 1 && hero.abilityCharges > 0 && hero.abilityRecoilTimer <= 0;
+  const a = hero.abilities.arrow;
+  return a.level >= 1 && (a.charges ?? 0) > 0 && (a.recoil ?? 0) <= 0;
 }
 
 function castArrow(ctx: CastContext): void {
   const { state, hero, events } = ctx;
   if (!hero.alive || !canCastArrow(hero)) return;
+  const a = hero.abilities.arrow;
 
   // Casting interrupts movement; attacking breaks invisibility.
   beginCast(hero, true);
@@ -125,40 +152,43 @@ function castArrow(ctx: CastContext): void {
     pos: V.add(hero.pos, V.scale(dir, ARROW.spawnOffset)),
     dir,
     speed: ARROW.speed,
-    maxRange: ARROW.rangeByLevel[hero.abilityLevel],
+    maxRange: ARROW.rangeByLevel[a.level],
     traveled: 0,
-    damage: ARROW.damageByLevel[hero.abilityLevel],
+    damage: ARROW.damageByLevel[a.level],
   });
-  hero.abilityCharges--;
-  hero.abilityRecoilTimer = ARROW.recoilTime;
+  a.charges!--;
+  a.recoil = ARROW.recoilTime;
   // Start recharge if not already ticking; never reset a running recharge.
-  if (hero.abilityCharges < ARROW.maxCharges && hero.abilityCooldown <= 0) {
-    hero.abilityCooldown = ARROW.cooldownByLevel[hero.abilityLevel];
+  if (a.charges! < ARROW.maxCharges && a.cooldown <= 0) {
+    a.cooldown = ARROW.cooldownByLevel[a.level];
   }
 }
 
 // ── W — Dodge ─────────────────────────────────────────────────────────
 
 function canCastDodge(hero: HeroState): boolean {
-  return !hero.dodgeActive && hero.dodgeCooldown <= 0 && hero.dodgeLevel >= 1;
+  const a = hero.abilities.dodge;
+  return !a.active && a.cooldown <= 0 && a.level >= 1;
 }
 
 function castDodge(ctx: CastContext): void {
   const hero = ctx.hero;
   if (!hero.alive || !canCastDodge(hero)) return;
+  const a = hero.abilities.dodge;
 
   // Dodging interrupts movement (and doesn't break invisibility — it's
   // defensive, not an attack).
   beginCast(hero, false);
-  hero.dodgeActive = true;
-  hero.dodgeTimer = DODGE.durationByLevel[hero.dodgeLevel];
-  hero.dodgeCooldown = DODGE.cooldownByLevel[hero.dodgeLevel];
+  a.active = true;
+  a.activeTimer = DODGE.durationByLevel[a.level];
+  a.cooldown = DODGE.cooldownByLevel[a.level];
 }
 
 // ── E — Scout ─────────────────────────────────────────────────────────
 
 function canCastScout(hero: HeroState): boolean {
-  return hero.revealLevel >= 1 && hero.revealCooldown <= 0;
+  const a = hero.abilities.reveal;
+  return a.level >= 1 && a.cooldown <= 0;
 }
 
 /**
@@ -169,6 +199,7 @@ function canCastScout(hero: HeroState): boolean {
 function castScout(ctx: CastContext): void {
   const { state, hero, events } = ctx;
   if (!hero.alive || !canCastScout(hero)) return;
+  const a = hero.abilities.reveal;
 
   // Casting interrupts movement and turns the hero toward the shot. Note:
   // unlike other casts the scout does NOT break invisibility (possible bug,
@@ -187,17 +218,18 @@ function castScout(ctx: CastContext): void {
     pos: V.add(hero.pos, V.scale(dir, ARROW.spawnOffset)),
     dir,
     speed: SCOUT.speed,
-    maxRange: SCOUT.rangeByLevel[hero.revealLevel],
+    maxRange: SCOUT.rangeByLevel[a.level],
     traveled: 0,
     damage: 0,
   });
-  hero.revealCooldown = SCOUT.cooldownByLevel[hero.revealLevel];
+  a.cooldown = SCOUT.cooldownByLevel[a.level];
 }
 
 // ── R — Blast ─────────────────────────────────────────────────────────
 
 function canCastBlast(hero: HeroState): boolean {
-  return hero.blastLevel >= 1 && hero.blastCooldown <= 0;
+  const a = hero.abilities.blast;
+  return a.level >= 1 && a.cooldown <= 0;
 }
 
 /** Mark an AoE circle that detonates after a fixed delay. */
@@ -207,6 +239,7 @@ function castBlast(ctx: CastContext): void {
   if (ctx.x === undefined || ctx.z === undefined) return;
   const target = { x: ctx.x, z: ctx.z };
   if (V.distance(hero.pos, target) > BLAST.castRange + 1) return;
+  const a = hero.abilities.blast;
 
   // Casting interrupts movement, breaks invisibility, and turns the hero
   // toward the target.
@@ -214,14 +247,14 @@ function castBlast(ctx: CastContext): void {
   const dir = V.sub(target, hero.pos);
   if (V.length(dir) > 0.01) hero.targetFacing = V.heading(dir);
 
-  hero.blastCooldown = BLAST.cooldownByLevel[hero.blastLevel];
+  a.cooldown = BLAST.cooldownByLevel[a.level];
   state.blasts.push({
     id: `b${state.nextBlastId++}`,
     ownerId: hero.id,
     team: hero.team,
     pos: target,
     timer: BLAST.delay,
-    damage: BLAST.damageByLevel[hero.blastLevel],
+    damage: BLAST.damageByLevel[a.level],
   });
 }
 
@@ -238,25 +271,20 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     charges: { max: ARROW.maxCharges, recoil: ARROW.recoilTime },
     canCast: canCastArrow,
     cast: castArrow,
-    runtime: {
-      getLevel: (h) => h.abilityLevel,
-      setLevel: (h, v) => { h.abilityLevel = v; },
-      getCooldown: (h) => h.abilityCooldown,
-      getCharges: (h) => h.abilityCharges,
-      tick: (h, dt) => {
-        if (h.abilityRecoilTimer > 0) {
-          h.abilityRecoilTimer = Math.max(0, h.abilityRecoilTimer - dt);
-        }
-        if (h.abilityCooldown > 0) {
-          h.abilityCooldown = Math.max(0, h.abilityCooldown - dt);
-          if (h.abilityCooldown <= 0 && h.abilityCharges < ARROW.maxCharges) {
-            h.abilityCharges++;
-            if (h.abilityCharges < ARROW.maxCharges) {
-              h.abilityCooldown = ARROW.cooldownByLevel[Math.max(h.abilityLevel, 1)];
-            }
+    tick: (h, dt) => {
+      const a = h.abilities.arrow;
+      if (a.recoil! > 0) {
+        a.recoil = Math.max(0, a.recoil! - dt);
+      }
+      if (a.cooldown > 0) {
+        a.cooldown = Math.max(0, a.cooldown - dt);
+        if (a.cooldown <= 0 && a.charges! < ARROW.maxCharges) {
+          a.charges!++;
+          if (a.charges! < ARROW.maxCharges) {
+            a.cooldown = ARROW.cooldownByLevel[Math.max(a.level, 1)];
           }
         }
-      },
+      }
     },
   },
   dodge: {
@@ -266,21 +294,16 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     maxLevel: DODGE.maxLevel,
     cooldownByLevel: DODGE.cooldownByLevel,
     targeting: 'self',
+    hasActiveWindow: true,
     canCast: canCastDodge,
     cast: castDodge,
-    runtime: {
-      getLevel: (h) => h.dodgeLevel,
-      setLevel: (h, v) => { h.dodgeLevel = v; },
-      getCooldown: (h) => h.dodgeCooldown,
-      tick: (h, dt) => {
-        if (h.dodgeActive) {
-          h.dodgeTimer -= dt;
-          if (h.dodgeTimer <= 0) h.dodgeActive = false;
-        }
-        if (h.dodgeCooldown > 0) {
-          h.dodgeCooldown = Math.max(0, h.dodgeCooldown - dt);
-        }
-      },
+    tick: (h, dt) => {
+      const a = h.abilities.dodge;
+      if (a.active) {
+        a.activeTimer! -= dt;
+        if (a.activeTimer! <= 0) a.active = false;
+      }
+      tickCooldown(a, dt);
     },
   },
   reveal: {
@@ -292,16 +315,7 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     targeting: 'aim',
     canCast: canCastScout,
     cast: castScout,
-    runtime: {
-      getLevel: (h) => h.revealLevel,
-      setLevel: (h, v) => { h.revealLevel = v; },
-      getCooldown: (h) => h.revealCooldown,
-      tick: (h, dt) => {
-        if (h.revealCooldown > 0) {
-          h.revealCooldown = Math.max(0, h.revealCooldown - dt);
-        }
-      },
-    },
+    tick: (h, dt) => tickCooldown(h.abilities.reveal, dt),
   },
   blast: {
     id: 'blast',
@@ -313,15 +327,6 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     castRange: BLAST.castRange,
     canCast: canCastBlast,
     cast: castBlast,
-    runtime: {
-      getLevel: (h) => h.blastLevel,
-      setLevel: (h, v) => { h.blastLevel = v; },
-      getCooldown: (h) => h.blastCooldown,
-      tick: (h, dt) => {
-        if (h.blastCooldown > 0) {
-          h.blastCooldown = Math.max(0, h.blastCooldown - dt);
-        }
-      },
-    },
+    tick: (h, dt) => tickCooldown(h.abilities.blast, dt),
   },
 };

@@ -6,11 +6,31 @@
 import { CreepTypeId } from './creepRules';
 import { RuneTypeId } from './runeRules';
 import { Vec2 } from './math';
-import { HERO, ARROW } from './rules';
-import type { AbilityId } from './abilities';
+import { HERO } from './rules';
+import { createAbilityRuntimes, type AbilityId } from './abilities';
 
 /** Six inventory slots holding item ids (null = empty). */
 export type Inventory = (string | null)[];
+
+/**
+ * Per-ability mutable state. One record entry per registered ability —
+ * adding a spell adds a key here automatically (via `createAbilityRuntimes`)
+ * instead of a hand-threaded set of HeroState fields.
+ */
+export interface AbilityRuntime {
+  /** Current rank (0 = unlearned). */
+  level: number;
+  /** Seconds until ready (doubles as the recharge timer for charge abilities). */
+  cooldown: number;
+  /** Charges in the magazine (charge abilities only). */
+  charges?: number;
+  /** Minimum delay between consecutive casts (charge abilities only). */
+  recoil?: number;
+  /** True while the ability's active window is open (e.g. dodge). */
+  active?: boolean;
+  /** Seconds left in the active window. */
+  activeTimer?: number;
+}
 
 export interface HeroState {
   id: string;
@@ -48,16 +68,10 @@ export interface HeroState {
   speedBonus: number;
   /** Chance (0–1) for any ability to deal double damage. */
   critChance: number;
-  dodgeActive: boolean;
-  dodgeTimer: number;
-  dodgeCooldown: number;
-  dodgeLevel: number;
-  revealLevel: number;
-  /** E — scout projectile cooldown (seconds remaining). */
-  revealCooldown: number;
-  blastLevel: number;
-  blinkCooldown: number;
-  blastCooldown: number;
+  /** Per-ability rank/cooldown/charge state, keyed in ABILITY_ORDER. */
+  abilities: Record<AbilityId, AbilityRuntime>;
+  /** Active-item cooldowns keyed by item id (e.g. blink_dagger). */
+  itemCooldowns: Record<string, number>;
   inventory: Inventory;
   wardCharges: number;
   /** Rune buff timers (seconds remaining; 0 = inactive). */
@@ -65,10 +79,6 @@ export interface HeroState {
   hasteTimer: number;
   invisTimer: number;
   slowTimer: number;
-  abilityLevel: number;
-  abilityCooldown: number;
-  abilityCharges: number;
-  abilityRecoilTimer: number;
 }
 
 export interface ProjectileState {
@@ -236,27 +246,17 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     multiKillTimer: 0,
     speedBonus: 0,
     critChance: 0,
+    // Built in ABILITY_ORDER so key iteration is identical on every peer.
+    // The level-1 skill point is auto-spent on Q (it's the basic attack), so
+    // heroes start with Q rank 1 and 0 banked points — next point at level 2.
+    abilities: createAbilityRuntimes(),
+    itemCooldowns: {},
     inventory: [null, null, null, null, null, null],
     wardCharges: 0,
     ddTimer: 0,
     hasteTimer: 0,
     invisTimer: 0,
     slowTimer: 0,
-    // The level-1 skill point is auto-spent on Q (it's the basic attack), so
-    // heroes start with Q rank 1 and 0 banked points — next point at level 2.
-    abilityLevel: 1,
-    abilityCooldown: 0,
-    abilityCharges: ARROW.maxCharges,
-    abilityRecoilTimer: 0,
-    dodgeActive: false,
-    dodgeTimer: 0,
-    dodgeCooldown: 0,
-    dodgeLevel: 0,
-    revealLevel: 0,
-    revealCooldown: 0,
-    blastLevel: 0,
-    blinkCooldown: 0,
-    blastCooldown: 0,
   };
 }
 

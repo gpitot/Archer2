@@ -181,7 +181,7 @@ function placeWard(
 
 function blink(hero: HeroState, tx: number, tz: number, world: SimWorld): void {
   if (!hero.alive) return;
-  if (hero.blinkCooldown > 0) return;
+  if ((hero.itemCooldowns['blink_dagger'] ?? 0) > 0) return;
   // Snap to nearest walkable, reachable cell.
   const snapped = findReachableNear(world, tx, tz, hero.pos.x, hero.pos.z);
   if (!snapped) return;
@@ -189,7 +189,7 @@ function blink(hero: HeroState, tx: number, tz: number, world: SimWorld): void {
   // Teleport instantly — clear movement state.
   stopMovement(hero);
   hero.pos = { x: snapped.x, z: snapped.z };
-  hero.blinkCooldown = BLINK_COOLDOWN;
+  hero.itemCooldowns['blink_dagger'] = BLINK_COOLDOWN;
 }
 
 function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]): void {
@@ -239,9 +239,9 @@ function spendSkillPoint(hero: HeroState, ability: AbilityId): void {
   const cap = def.kind === 'ultimate'
     ? ultimateRankCap(hero.level)
     : Math.min(basicRankCap(hero.level), 5);
-  const level = def.runtime.getLevel(hero);
-  if (level >= def.maxLevel || level >= cap) return;
-  def.runtime.setLevel(hero, level + 1);
+  const runtime = hero.abilities[ability];
+  if (runtime.level >= def.maxLevel || runtime.level >= cap) return;
+  runtime.level++;
   hero.skillPoints--;
 }
 
@@ -261,12 +261,15 @@ function stepHero(hero: HeroState, dt: number): void {
   // Ability timers (cooldowns, charge recharge, active windows) tick through
   // the registry — one loop, fixed ABILITY_ORDER on every peer.
   for (const id of ABILITY_ORDER) {
-    ABILITIES[id].runtime.tick(hero, dt);
+    ABILITIES[id].tick(hero, dt);
   }
 
-  // Item cooldowns (blink dagger) — generalized in the item-registry phase.
-  if (hero.blinkCooldown > 0) {
-    hero.blinkCooldown = Math.max(0, hero.blinkCooldown - dt);
+  // Item cooldowns (blink dagger, future active items). Plain string keys
+  // iterate in insertion order — identical on every peer.
+  for (const itemId in hero.itemCooldowns) {
+    if (hero.itemCooldowns[itemId] > 0) {
+      hero.itemCooldowns[itemId] = Math.max(0, hero.itemCooldowns[itemId] - dt);
+    }
   }
 
   if (hero.invulnerable) {

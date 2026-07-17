@@ -72,7 +72,7 @@ export function findHitHero(
   for (const hero of state.heroes) {
     if (skipOwnerId !== undefined && hero.id === skipOwnerId) continue;
     if (!hero.alive || hero.invulnerable) continue;
-    if (hero.dodgeActive) continue;
+    if (hero.abilities.dodge.active) continue;
     if (V.distanceSq(p.pos, hero.pos) < r2) return hero;
   }
   return null;

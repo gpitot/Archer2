@@ -65,8 +65,8 @@ function run(): void {
   console.log('[smoke] learning ability...');
   player.skillPoints = 1;
   stepMatch(state, [{ heroId: 'p1', cmd: { type: 'levelAbility', ability: 'arrow' } }], 1 / 30, world, rng);
-  console.log(`  ability level: ${player.abilityLevel} (expected 1)`);
-  if (player.abilityLevel !== 1) throw new Error('ability not learned');
+  console.log(`  ability level: ${player.abilities.arrow.level} (expected 1)`);
+  if (player.abilities.arrow.level !== 1) throw new Error('ability not learned');
 
   console.log('[smoke] firing arrow at dummy...');
   const fireInputs: HeroInput[] = [{
@@ -76,7 +76,7 @@ function run(): void {
   stepMatch(state, fireInputs, 1 / 30, world, rng);
   console.log(`  projectiles in flight: ${state.projectiles.length} (expected 1)`);
   if (state.projectiles.length !== 1) throw new Error('arrow not created');
-  if (player.abilityCooldown <= 0) throw new Error('ability not on cooldown');
+  if (player.abilities.arrow.cooldown <= 0) throw new Error('ability not on cooldown');
 
   // Phase 3: Step until arrow hits. Use high HP so we test hit + kill separately.
   dummy.hp = 500; // enough to survive a level-1 arrow (200 dmg)
@@ -110,7 +110,7 @@ function run(): void {
   // Phase 4: Award a kill to test gold/XP.
   console.log('[smoke] testing kill rewards...');
   // Wait for ability cooldown to expire.
-  while (player.abilityCooldown > 0) {
+  while (player.abilities.arrow.cooldown > 0) {
     stepMatch(state, [], 1 / 30, world, rng);
     totalTicks++;
   }

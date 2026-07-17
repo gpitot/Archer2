@@ -42,8 +42,8 @@ export function run(h: SimHarness): void {
 
   for (let i = 0; i < shots; i++) {
     // Refill so we never wait on recharge, and keep the target alive.
-    shooter.abilityCharges = ARROW.maxCharges;
-    shooter.abilityRecoilTimer = 0;
+    shooter.abilities.arrow.charges = ARROW.maxCharges;
+    shooter.abilities.arrow.recoil = 0;
     target.hp = HERO.maxHp;
 
     h.issue('p1', { type: 'cast', ability: 'arrow', x: target.pos.x, z: target.pos.z });

@@ -870,24 +870,25 @@ export class Game {
     dst.hasteTimer = src.hasteTimer;
     dst.invisTimer = src.invisTimer;
     dst.slowTimer = src.slowTimer;
-    dst.abilityLevel = src.abilityLevel;
-    // Don't reconcile the local player's charge / cooldown / recoil timers —
-    // prediction ticks them correctly and the server's value could be stale
-    // (not yet processed our fire command).
-    if (dst.id !== this._playerId) {
-      dst.abilityCharges = src.abilityCharges;
-      dst.abilityRecoilTimer = src.abilityRecoilTimer;
-      dst.abilityCooldown = src.abilityCooldown;
+    for (const id of ABILITY_ORDER) {
+      const srcAbility = src.abilities[id];
+      if (!srcAbility) continue;
+      const a = dst.abilities[id];
+      a.level = srcAbility.level;
+      // Don't reconcile the local player's arrow charge / cooldown / recoil —
+      // prediction ticks them correctly and the server's value could be stale
+      // (not yet processed our fire command). Other abilities' cooldowns keep
+      // adopting the server value, exactly as before the record migration.
+      const skipPredicted = id === 'arrow' && dst.id === this._playerId;
+      if (!skipPredicted) {
+        a.cooldown = srcAbility.cooldown;
+        if (srcAbility.charges !== undefined) a.charges = srcAbility.charges;
+        if (srcAbility.recoil !== undefined) a.recoil = srcAbility.recoil;
+      }
+      if (srcAbility.active !== undefined) a.active = srcAbility.active;
+      if (srcAbility.activeTimer !== undefined) a.activeTimer = srcAbility.activeTimer;
     }
-    dst.dodgeActive = src.dodgeActive;
-    dst.dodgeTimer = src.dodgeTimer;
-    dst.dodgeCooldown = src.dodgeCooldown;
-    dst.dodgeLevel = src.dodgeLevel;
-    dst.revealLevel = src.revealLevel;
-    dst.revealCooldown = src.revealCooldown;
-    dst.blastLevel = src.blastLevel;
-    dst.blinkCooldown = src.blinkCooldown;
-    dst.blastCooldown = src.blastCooldown;
+    dst.itemCooldowns = { ...src.itemCooldowns };
   }
 
   /** Run local stepMatch for the player's hero only (instant movement feel). */
@@ -901,10 +902,12 @@ export class Game {
         // Same registry loop the sim runs — the idle prediction can't drift
         // from stepHero's recharge/cooldown behavior.
         for (const id of ABILITY_ORDER) {
-          ABILITIES[id].runtime.tick(idle, dt);
+          ABILITIES[id].tick(idle, dt);
         }
-        if (idle.blinkCooldown > 0) {
-          idle.blinkCooldown = Math.max(0, idle.blinkCooldown - dt);
+        for (const itemId in idle.itemCooldowns) {
+          if (idle.itemCooldowns[itemId] > 0) {
+            idle.itemCooldowns[itemId] = Math.max(0, idle.itemCooldowns[itemId] - dt);
+          }
         }
       }
       return;
@@ -928,9 +931,7 @@ export class Game {
     player.moving = temp.heroes[0].moving;
     // Also sync predicted charge / cooldown / recoil so the cosmetic guard
     // and UI stay in lockstep with what the sim accepted or rejected.
-    player.abilityCharges = temp.heroes[0].abilityCharges;
-    player.abilityCooldown = temp.heroes[0].abilityCooldown;
-    player.abilityRecoilTimer = temp.heroes[0].abilityRecoilTimer;
+    player.abilities.arrow = { ...temp.heroes[0].abilities.arrow };
   }
 
   /**
@@ -1172,7 +1173,7 @@ export class Game {
       dir,
       speed: ARROW.speed,
       traveled: 0,
-      maxRange: ARROW.rangeByLevel[Math.min(player.abilityLevel, ARROW.maxLevel)],
+      maxRange: ARROW.rangeByLevel[Math.min(player.abilities.arrow.level, ARROW.maxLevel)],
       serverId: null,
     });
   }
@@ -1442,7 +1443,7 @@ export class Game {
       shop: { ...this._world.shop.pos },
       heroes: this._state.heroes.map((h) => ({
         id: h.id, x: h.pos.x, z: h.pos.z, hp: h.hp, alive: h.alive,
-        abilityLevel: h.abilityLevel, abilityCooldown: h.abilityCooldown,
+        abilityLevel: h.abilities.arrow.level, abilityCooldown: h.abilities.arrow.cooldown,
       })),
     };
   }
@@ -1516,7 +1517,7 @@ export class Game {
   private _activateBlinkTargeting(): void {
     const p = this._playerState;
     if (!p || !p.alive) return;
-    if (p.blinkCooldown > 0) return;
+    if ((p.itemCooldowns['blink_dagger'] ?? 0) > 0) return;
     const BLINK_RANGE = 450;
     this._targeting.activate(
       {
@@ -2021,8 +2022,7 @@ export class Game {
     const hasPoint = p.skillPoints > 0;
     this._spellBar.update(ABILITY_ORDER.map((id) => {
       const def = ABILITIES[id];
-      const level = def.runtime.getLevel(p);
-      const cooldown = def.runtime.getCooldown(p);
+      const { level, cooldown, charges } = p.abilities[id];
       const total = def.cooldownByLevel[Math.max(level, 1)];
       const cap = def.kind === 'ultimate' ? ultCap : basicCap;
       const info: SpellSlotInfo = {
@@ -2031,8 +2031,8 @@ export class Game {
         level,
         canLevel: hasPoint && level < Math.min(def.maxLevel, cap),
       };
-      if (def.charges && def.runtime.getCharges) {
-        info.charges = def.runtime.getCharges(p);
+      if (def.charges) {
+        info.charges = charges ?? 0;
         info.maxCharges = def.charges.max;
       }
       return info;
@@ -2048,12 +2048,13 @@ export class Game {
     );
 
     this._goldDisplay.update(p.gold);
-    const blinkCdProgress = p.blinkCooldown <= 0 ? 1 : 1 - p.blinkCooldown / BLINK_COOLDOWN;
+    const blinkCooldown = p.itemCooldowns['blink_dagger'] ?? 0;
+    const blinkCdProgress = blinkCooldown <= 0 ? 1 : 1 - blinkCooldown / BLINK_COOLDOWN;
     this._itemBar.update(
       p.inventory,
       { sentry_wards: p.wardCharges },
       { blink_dagger: blinkCdProgress },
-      { blink_dagger: Math.max(p.blinkCooldown, 0) },
+      { blink_dagger: Math.max(blinkCooldown, 0) },
     );
     this._kdDisplay.update(p.kills, p.deaths);
 

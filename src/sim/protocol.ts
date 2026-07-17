@@ -16,7 +16,8 @@
  *    economy, progression, inventory — which change rarely.
  * Values are quantized server-side before serialization.
  */
-import { Command, Inventory, ProjectileState, WardState, BlastState, SimEvent } from './state';
+import { AbilityRuntime, Command, Inventory, ProjectileState, WardState, BlastState, SimEvent } from './state';
+import type { AbilityId } from './abilities';
 import { CreepTypeId } from './creepRules';
 import { RuneTypeId } from './runeRules';
 import { Vec2 } from './math';
@@ -86,19 +87,10 @@ export interface HeroMeta {
   invisTimer: number;
   /** Slow debuff timer from Ice Bow (seconds remaining; 0 = inactive). */
   slowTimer: number;
-  abilityLevel: number;
-  abilityCooldown: number;
-  abilityCharges: number;
-  abilityRecoilTimer: number;
-  dodgeActive: boolean;
-  dodgeTimer: number;
-  dodgeCooldown: number;
-  dodgeLevel: number;
-  revealLevel: number;
-  revealCooldown: number;
-  blastLevel: number;
-  blinkCooldown: number;
-  blastCooldown: number;
+  /** Per-ability rank/cooldown/charge state — mirrors `HeroState.abilities`. */
+  abilities: Record<AbilityId, AbilityRuntime>;
+  /** Active-item cooldowns keyed by item id — mirrors `HeroState.itemCooldowns`. */
+  itemCooldowns: Record<string, number>;
 }
 
 // ── Wire creep representations ───────────────────────────────────────
