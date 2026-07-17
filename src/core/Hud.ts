@@ -154,7 +154,7 @@ export function updateHud(ctx: HudContext): void {
   // ── Shop ─────────────────────────────────────────────────────────
 
   if (isPlayerNearShop) {
-    ctx.shopOverlay.show(SHOP_ITEMS as ShopItem[]);
+    ctx.shopOverlay.show();
   } else {
     ctx.shopOverlay.hide();
     if (ctx.shopWindow.visible) ctx.shopWindow.close();
