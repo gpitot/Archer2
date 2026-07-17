@@ -17,7 +17,7 @@ import { MatchState, HeroInput, HeroState, SimEvent, ProjectileState, WardState,
 import { stepMatch } from '../src/sim/stepMatch';
 import { spawnCamps } from '../src/sim/stepCreeps';
 import { CREEP } from '../src/sim/creepRules';
-import { SimWorld, ObstacleAABB, Rect, Shop, findRespawnPosition } from '../src/sim/world';
+import { SimWorld, ObstacleAABB, Rect, Shop, findRespawnPosition, findWalkableNear } from '../src/sim/world';
 import { SHOP_ITEMS } from '../src/sim/shopItems';
 import { NavGrid } from '../src/navigation/NavGrid';
 import { Pathfinder } from '../src/navigation/Pathfinder';
@@ -91,7 +91,7 @@ export class GameRoom extends DurableObject<Env> {
   /** Fresh match state for the current world — including creep camps. */
   private _resetMatch(): void {
     this._state = createMatchState();
-    spawnCamps(this._state, this._world);
+    spawnCamps(this._state, this._world, NAVDATA[this._mapName].camps);
   }
 
   // ── HTTP / WebSocket upgrade ──────────────────────────────────────
@@ -128,7 +128,9 @@ export class GameRoom extends DurableObject<Env> {
           return;
         }
         // The first joiner picks the room's map; later joiners must match.
-        const requestedMap: NavdataMapName = msg.map === 'test' ? 'test' : 'arena';
+        // Any map baked into navdata is joinable ('arena', 'test', customs).
+        const requestedMap: NavdataMapName =
+          msg.map && msg.map in NAVDATA ? (msg.map as NavdataMapName) : 'arena';
         if (this._players.size === 0) {
           if (requestedMap !== this._mapName) {
             this._buildWorld(requestedMap);
@@ -143,13 +145,17 @@ export class GameRoom extends DurableObject<Env> {
         this._players.set(ws, info);
         this._playerSockets.set(playerId, ws);
 
-        // Spawn hero on a random walkable position. Assign the lowest free
-        // team id (FFA = one team per player) so a leave-then-join never hands
-        // a newcomer a team that's still in use by an existing player.
-        const spawn = findRespawnPosition(this._world);
+        // Assign the lowest free team id (FFA = one team per player) so a
+        // leave-then-join never hands a newcomer a team that's still in use
+        // by an existing player. Maps with authored spawns place heroes
+        // there (by team, wrapping); otherwise spawn on random walkable.
         const used = new Set(this._state.heroes.map((h) => h.team));
         let team = 0;
         while (used.has(team)) team++;
+        const fixed = NAVDATA[this._mapName].spawns;
+        const spawn = fixed
+          ? findWalkableNear(this._world, fixed[team % fixed.length].x, fixed[team % fixed.length].z)
+          : findRespawnPosition(this._world);
         const hero = createHeroState(playerId, team, spawn);
         this._state.heroes.push(hero);
 

@@ -1,5 +1,14 @@
 # Map Editor — High-Level Plan
 
+> **Status: implemented (2026-07-17), all four phases.**
+> - `pnpm editor` — open the editor (dev only, never deployed)
+> - `?map=<name>` — play a custom map (offline or `&room=` multiplayer)
+> - `pnpm test:map` / `pnpm tsx scripts/test-editor.ts` / `scripts/test-map-net.ts` — format, editor, and multiplayer tests
+> - `pnpm publish:map <name>` — JSON → .amap (the editor's Save writes both)
+> - `pnpm build:navdata` — bake maps (incl. `maps/*.map.json`) for the server
+>
+> Example: `maps/glade.map.json` (3.4 KB working file → 229 B published .amap).
+
 A local-only, browser-based map editor for creating custom Archer maps: drag/paint
 terrain (cliffs, ramps, water), place doodads (trees, rocks, bushes) and gameplay
 entities (jungle camps, spawns), with hotkeys for everything, then save to a

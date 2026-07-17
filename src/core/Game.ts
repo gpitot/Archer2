@@ -33,6 +33,7 @@ import { SpellBar } from '../ui/SpellBar';
 import { HeroState, ProjectileState, WardState, BlastState, CreepState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
 import { stepMatch, xpForLevel, heroSpeed } from '../sim/stepMatch';
 import { spawnCamps } from '../sim/stepCreeps';
+import type { CampPlacement } from '../sim/creepRules';
 import { SimWorld, sphereHitsObstacle } from '../sim/world';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
 import { HERO, ARROW, DODGE, WARD, REVEAL, BLAST } from '../sim/rules';
@@ -81,6 +82,7 @@ export class Game {
   private _arena: ArenaRect = ARENA_TERRAIN1;
   /** Fixed spawn points from the map definition (test map); null → random. */
   private _mapSpawns: { x: number; z: number }[] | null = null;
+  private _mapCamps: CampPlacement[] | null = null;
   private _terrain!: GroundProvider;
   private _water!: Water;
 
@@ -246,6 +248,7 @@ export class Game {
     this._map = loaded.data;
     this._arena = loaded.arena;
     this._mapSpawns = loaded.spawns;
+    this._mapCamps = loaded.camps;
     const bounds = this._map.bounds;
 
     // ── Renderer ──
@@ -329,7 +332,7 @@ export class Game {
       await this._initNetwork();
     } else {
       // ── Offline mode: jungle creep camps, simulated by the local stepMatch ──
-      spawnCamps(this._state, this._world);
+      spawnCamps(this._state, this._world, this._mapCamps);
 
       // ── Offline mode: create local heroes ──
       // Maps with fixed spawns (test map) place the heroes deterministically.

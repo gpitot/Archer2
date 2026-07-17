@@ -124,6 +124,14 @@ export interface CampDef {
   units: CreepTypeId[];
 }
 
+/** A camp pinned to world coordinates (custom maps place these directly). */
+export interface CampPlacement {
+  id: string;
+  x: number;
+  z: number;
+  units: readonly CreepTypeId[];
+}
+
 // Note: fractions are chosen so no camp's aggro radius reaches a spawn point
 // on the small test map (spawns sit at ~fz 0.73) — ranged camps (550 aggro)
 // stay in the far north corners, the mid-height flank camps are melee-only.

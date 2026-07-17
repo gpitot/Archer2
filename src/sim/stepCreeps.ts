@@ -6,6 +6,7 @@
  */
 import {
   CAMP_DEFS,
+  CampPlacement,
   CREEP,
   CREEP_TYPES,
   CreepTypeDef,
@@ -42,16 +43,25 @@ export function createCreep(id: string, campId: string, type: CreepTypeId, pos: 
 }
 
 /**
- * Populate `state.creeps` from `CAMP_DEFS`. Camp centers are fractions of the
- * arena rect, snapped to the walkable component reachable from the shop so a
- * camp never lands on a cliff top or islet. Ids (`c1`, `c2`, …) follow
- * definition order, so every peer derives the same ids independently.
+ * Populate `state.creeps` from camp definitions. By default camps come from
+ * `CAMP_DEFS` (centers as fractions of the arena rect, so the same defs work
+ * on every built-in map); custom maps pass their authored world-coordinate
+ * placements instead. Centers are snapped to the walkable component
+ * reachable from the shop so a camp never lands on a cliff top or islet.
+ * Ids (`c1`, `c2`, …) follow definition order, so every peer derives the
+ * same ids independently.
  */
-export function spawnCamps(state: MatchState, world: SimWorld): void {
+export function spawnCamps(state: MatchState, world: SimWorld, camps?: readonly CampPlacement[] | null): void {
+  const defs: readonly CampPlacement[] = camps ?? CAMP_DEFS.map((def) => ({
+    id: def.id,
+    x: world.arena.minX + def.fx * world.arena.width,
+    z: world.arena.minZ + def.fz * world.arena.height,
+    units: def.units,
+  }));
   let nextId = 1;
-  for (const def of CAMP_DEFS) {
-    const nx = world.arena.minX + def.fx * world.arena.width;
-    const nz = world.arena.minZ + def.fz * world.arena.height;
+  for (const def of defs) {
+    const nx = def.x;
+    const nz = def.z;
     const center =
       findReachableNear(world, nx, nz, world.shop.pos.x, world.shop.pos.z) ??
       findWalkableNear(world, nx, nz);
