@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { HeroState } from '../sim/state';
 import { HERO } from '../sim/rules';
-import { RUNE, RUNE_TYPES, RuneTypeId } from '../sim/runeRules';
+import { RUNE_TYPES, RuneTypeId } from '../sim/runeRules';
+import { heroSpeed } from '../sim/stepMatch';
 import { HealthBar } from './HealthBar';
 import { createHeroRig, HeroRig, MESH_SCALE } from './HeroRig';
 
@@ -115,8 +116,9 @@ export class HeroView {
     const y = this._heightAt(state.pos.x, state.pos.z) + HERO.groundOffset;
     this.mesh.position.set(state.pos.x, y, state.pos.z);
     this.mesh.rotation.y = state.facing;
-    const speed = HERO.baseSpeed + state.speedBonus + (state.hasteTimer > 0 ? RUNE.hasteSpeedBonus : 0);
-    this._rig.update(dt, state.moving, state.slowTimer > 0 ? speed * 0.8 : speed);
+    // Animation cadence follows the sim's authoritative speed formula so new
+    // speed modifiers can never silently desync the run animation.
+    this._rig.update(dt, state.moving, heroSpeed(state));
 
     // Invulnerability flicker (mirrors the sim's invulnerable timer).
     if (state.invulnerable) {

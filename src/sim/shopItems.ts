@@ -12,6 +12,11 @@ export const CRIT_CHANCE = 0.2;
 /** Damage multiplier applied on a critical strike. */
 export const CRIT_MULTIPLIER = 2;
 
+/** Slow duration (seconds) applied by Ice Bow on arrow hit. */
+export const ICE_BOW_SLOW_DURATION = 2;
+/** Speed multiplier while slowed. */
+export const ICE_BOW_SLOW_FACTOR = 0.8;
+
 export const SHOP_ITEMS: ShopItemDef[] = [
   {
     id: 'boots',

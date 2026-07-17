@@ -36,7 +36,8 @@ import { spawnCamps } from '../sim/stepCreeps';
 import { spawnRunes } from '../sim/stepRunes';
 import type { CampPlacement } from '../sim/creepRules';
 import { RUNE_TYPES, RunePlacement } from '../sim/runeRules';
-import { SimWorld, sphereHitsObstacle, FountainDef } from '../sim/world';
+import { SimWorld, sphereHitsObstacle, FountainDef, findWalkableNearOnGrid, findWalkableCellNear } from '../sim/world';
+import { advanceProjectile } from '../sim/projectiles';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
 import { HERO, ARROW, DODGE, WARD, SCOUT, BLAST, FOUNTAIN, basicRankCap, ultimateRankCap } from '../sim/rules';
 import { BLINK_COOLDOWN, SHOP_ITEMS } from '../sim/shopItems';
@@ -1213,16 +1214,7 @@ export class Game {
   private _tickCosmeticProjectiles(dt: number): void {
     for (let i = this._cosmeticProjectiles.length - 1; i >= 0; i--) {
       const c = this._cosmeticProjectiles[i];
-      c.traveled += c.speed * dt;
-      if (c.traveled >= c.maxRange) {
-        this._retireCosmetic(c);
-        continue;
-      }
-      c.pos = {
-        x: c.pos.x + c.dir.x * c.speed * dt,
-        z: c.pos.z + c.dir.z * c.speed * dt,
-      };
-      if (sphereHitsObstacle(this._world, c.pos, ARROW.collisionRadius)) {
+      if (advanceProjectile(c, dt, this._world, ARROW.collisionRadius) !== 'flying') {
         this._retireCosmetic(c);
         continue;
       }
@@ -2209,21 +2201,8 @@ export class Game {
   }
 
   private _findWalkableNear(wx: number, wz: number): THREE.Vector3 {
-    const start = this._navGrid.worldToGrid(wx, wz);
-    for (let radius = 0; radius < 64; radius++) {
-      for (let dz = -radius; dz <= radius; dz++) {
-        for (let dx = -radius; dx <= radius; dx++) {
-          if (Math.max(Math.abs(dx), Math.abs(dz)) !== radius) continue;
-          const gx = start.gx + dx;
-          const gz = start.gz + dz;
-          if (this._navGrid.isWalkable(gx, gz)) {
-            const { wx: cx, wz: cz } = this._navGrid.gridToWorld(gx, gz);
-            return new THREE.Vector3(cx, this._heightAt(cx, cz), cz);
-          }
-        }
-      }
-    }
-    return new THREE.Vector3(wx, this._heightAt(wx, wz), wz);
+    const { x, z } = findWalkableNearOnGrid(this._navGrid, wx, wz);
+    return new THREE.Vector3(x, this._heightAt(x, z), z);
   }
 
   // ── Debug helpers ───────────────────────────────────────────────
@@ -2266,27 +2245,13 @@ function buildDefaultFountains(arena: ArenaRect, navGrid: NavGrid): FountainDef[
   // Place at 25% and 75% of the arena width, on the horizontal midline.
   for (const fx of [0.25, 0.75]) {
     const wx = arena.minX + fx * arena.width;
-    const wz = arena.centerZ;
-    const start = navGrid.worldToGrid(wx, wz);
-    for (let radius = 0; radius < 64; radius++) {
-      let found = false;
-      for (let dz = -radius; dz <= radius && !found; dz++) {
-        for (let dx = -radius; dx <= radius && !found; dx++) {
-          if (Math.max(Math.abs(dx), Math.abs(dz)) !== radius) continue;
-          const gx = start.gx + dx;
-          const gz = start.gz + dz;
-          if (navGrid.isWalkable(gx, gz)) {
-            const { wx: cx, wz: cz } = navGrid.gridToWorld(gx, gz);
-            fountains.push({
-              pos: { x: cx, z: cz },
-              healRadius: FOUNTAIN.healRadius,
-              healPerSecond: FOUNTAIN.healPerSecond,
-            });
-            found = true;
-          }
-        }
-      }
-      if (found) break;
+    const pos = findWalkableCellNear(navGrid, wx, arena.centerZ);
+    if (pos) {
+      fountains.push({
+        pos,
+        healRadius: FOUNTAIN.healRadius,
+        healPerSecond: FOUNTAIN.healPerSecond,
+      });
     }
   }
   return fountains;

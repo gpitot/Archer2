@@ -38,18 +38,14 @@ import {
   applyCreepDamage,
   applyCreepDamageToHero,
   hitCreep,
-  hitHeroByCreepProjectile,
   stepCreeps,
 } from './stepCreeps';
 import { findReachableNear, findRespawnPosition, SimWorld, sphereHitsObstacle } from './world';
-import { BLINK_COOLDOWN, CRIT_MULTIPLIER } from './shopItems';
-import { breakInvisibility, runeDamageMultiplier, stepRuneBuffs, stepRunes } from './stepRunes';
+import { BLINK_COOLDOWN, ICE_BOW_SLOW_DURATION, ICE_BOW_SLOW_FACTOR } from './shopItems';
+import { breakInvisibility, stepRuneBuffs, stepRunes } from './stepRunes';
 import { RUNE } from './runeRules';
-
-/** Slow duration (seconds) applied by Ice Bow on arrow hit. */
-const ICE_BOW_SLOW_DURATION = 2;
-/** Speed multiplier while slowed. */
-const ICE_BOW_SLOW_FACTOR = 0.8;
+import { rollAbilityDamage } from './damage';
+import { advanceProjectile, findHitHero, spawnProjectile } from './projectiles';
 
 /**
  * Advance the match by `dt` seconds, applying `inputs` queued since the last
@@ -141,6 +137,27 @@ function stopMovement(hero: HeroState): void {
   hero.moving = false;
 }
 
+/**
+ * Shared cast preamble: casting interrupts movement, and most casts break
+ * invisibility (the scout deliberately doesn't — it's a recon tool).
+ */
+function beginCast(hero: HeroState, breakInvis: boolean): void {
+  stopMovement(hero);
+  if (breakInvis) breakInvisibility(hero);
+}
+
+/**
+ * Normalized aim direction from the hero toward (aimX, aimZ), falling back
+ * to the current facing when the aim point sits on the hero.
+ */
+function aimDir(hero: HeroState, aimX: number, aimZ: number): V.Vec2 {
+  const dir = V.sub({ x: aimX, z: aimZ }, hero.pos);
+  if (V.length(dir) < 0.01) {
+    return { x: Math.sin(hero.facing), z: Math.cos(hero.facing) };
+  }
+  return V.normalize(dir);
+}
+
 function setDestination(hero: HeroState, x: number, z: number, world: SimWorld): void {
   if (!hero.alive) return;
   let path = world.pathfinder.findSmoothedPath(hero.pos.x, hero.pos.z, x, z);
@@ -175,50 +192,29 @@ function fireArrow(
   if (hero.abilityCharges <= 0) return;
   if (hero.abilityRecoilTimer > 0) return;
 
-  // Casting a spell interrupts movement.
-  stopMovement(hero);
-  // Attacking breaks invisibility.
-  breakInvisibility(hero);
-
-  let dir = V.sub({ x: aimX, z: aimZ }, hero.pos);
-  if (V.length(dir) < 0.01) {
-    dir = { x: Math.sin(hero.facing), z: Math.cos(hero.facing) };
-  } else {
-    dir = V.normalize(dir);
-  }
+  // Casting interrupts movement; attacking breaks invisibility.
+  beginCast(hero, true);
 
   // Turn toward the shot (same smoothed turn as movement).
+  const dir = aimDir(hero, aimX, aimZ);
   hero.targetFacing = V.heading(dir);
 
-  const spawn = V.add(hero.pos, V.scale(dir, ARROW.spawnOffset));
-  const projectile: ProjectileState = {
-    id: `p${state.nextProjectileId++}`,
+  spawnProjectile(state, events, {
     ownerId: hero.id,
     team: hero.team,
-    pos: spawn,
+    pos: V.add(hero.pos, V.scale(dir, ARROW.spawnOffset)),
     dir,
     speed: ARROW.speed,
     maxRange: ARROW.rangeByLevel[hero.abilityLevel],
     traveled: 0,
     damage: ARROW.damageByLevel[hero.abilityLevel],
-  };
-  state.projectiles.push(projectile);
+  });
   hero.abilityCharges--;
   hero.abilityRecoilTimer = ARROW.recoilTime;
   // Start recharge if not already ticking; never reset a running recharge.
   if (hero.abilityCharges < ARROW.maxCharges && hero.abilityCooldown <= 0) {
     hero.abilityCooldown = ARROW.cooldownByLevel[hero.abilityLevel];
   }
-  // `state.tick` is pre-increment here: position at time t on the tick
-  // timeline is spawnPos + dir * speed * (t - tick * dt), matching the sim's
-  // same-tick stepProjectiles advance. The event carries a copy — the live
-  // projectile keeps advancing while events await the next snapshot broadcast.
-  events.push({
-    type: 'fire',
-    heroId: hero.id,
-    tick: state.tick,
-    projectile: { ...projectile, pos: { ...projectile.pos }, dir: { ...projectile.dir } },
-  });
 }
 
 /**
@@ -237,19 +233,17 @@ function fireScout(
   if (hero.revealLevel < 1) return;
   if (hero.revealCooldown > 0) return;
 
-  // Casting interrupts movement and turns the hero toward the shot.
-  stopMovement(hero);
-
-  let dir = V.sub({ x: aimX, z: aimZ }, hero.pos);
-  if (V.length(dir) < 0.01) {
-    dir = { x: Math.sin(hero.facing), z: Math.cos(hero.facing) };
-  } else {
-    dir = V.normalize(dir);
-  }
+  // Casting interrupts movement and turns the hero toward the shot. Note:
+  // unlike other casts the scout does NOT break invisibility (possible bug,
+  // preserved as-is — review separately).
+  beginCast(hero, false);
+  const dir = aimDir(hero, aimX, aimZ);
   hero.targetFacing = V.heading(dir);
 
-  const projectile: ProjectileState = {
-    id: `p${state.nextProjectileId++}`,
+  // Reuses the 'fire' event: it carries the full spawn state, so networked
+  // clients (including enemies — the scout is never fog-hidden) simulate the
+  // flight deterministically without per-tick re-sends.
+  spawnProjectile(state, events, {
     ownerId: hero.id,
     kind: 'scout',
     team: hero.team,
@@ -259,19 +253,8 @@ function fireScout(
     maxRange: SCOUT.rangeByLevel[hero.revealLevel],
     traveled: 0,
     damage: 0,
-  };
-  state.projectiles.push(projectile);
-  hero.revealCooldown = SCOUT.cooldownByLevel[hero.revealLevel];
-
-  // Reuses the 'fire' event: it carries the full spawn state, so networked
-  // clients (including enemies — the scout is never fog-hidden) simulate the
-  // flight deterministically without per-tick re-sends.
-  events.push({
-    type: 'fire',
-    heroId: hero.id,
-    tick: state.tick,
-    projectile: { ...projectile, pos: { ...projectile.pos }, dir: { ...projectile.dir } },
   });
+  hero.revealCooldown = SCOUT.cooldownByLevel[hero.revealLevel];
 }
 
 function placeWard(
@@ -395,10 +378,9 @@ function castBlast(state: MatchState, hero: HeroState, x: number, z: number): vo
   const target = { x, z };
   if (V.distance(hero.pos, target) > BLAST.castRange + 1) return;
 
-  // Casting interrupts movement and turns the hero toward the target.
-  stopMovement(hero);
-  // Casting breaks invisibility.
-  breakInvisibility(hero);
+  // Casting interrupts movement, breaks invisibility, and turns the hero
+  // toward the target.
+  beginCast(hero, true);
   const dir = V.sub(target, hero.pos);
   if (V.length(dir) > 0.01) hero.targetFacing = V.heading(dir);
 
@@ -417,8 +399,9 @@ function activateDodge(hero: HeroState): void {
   if (!hero.alive) return;
   if (hero.dodgeActive || hero.dodgeCooldown > 0 || hero.dodgeLevel < 1) return;
 
-  // Dodging interrupts movement.
-  stopMovement(hero);
+  // Dodging interrupts movement (and doesn't break invisibility — it's
+  // defensive, not an attack).
+  beginCast(hero, false);
   hero.dodgeActive = true;
   hero.dodgeTimer = DODGE.durationByLevel[hero.dodgeLevel];
   hero.dodgeCooldown = DODGE.cooldownByLevel[hero.dodgeLevel];
@@ -549,27 +532,18 @@ function stepProjectiles(
 ): void {
   for (let i = state.projectiles.length - 1; i >= 0; i--) {
     const p = state.projectiles[i];
-    p.traveled += p.speed * dt;
-
-    if (p.traveled >= p.maxRange) {
+    // Scout projectiles are vision-only: they fly over obstacles (null world
+    // skips collision) and pass through every unit, expiring only at range.
+    const flight = advanceProjectile(p, dt, p.kind === 'scout' ? null : world, ARROW.collisionRadius);
+    if (flight !== 'flying') {
       state.projectiles.splice(i, 1);
       continue;
     }
-
-    p.pos = V.add(p.pos, V.scale(p.dir, p.speed * dt));
-
-    // Scout projectiles are vision-only: they fly over obstacles and pass
-    // through every unit, expiring only at max range (handled above).
     if (p.kind === 'scout') continue;
 
-    if (sphereHitsObstacle(world, p.pos, ARROW.collisionRadius)) {
-      state.projectiles.splice(i, 1);
-      continue;
-    }
-
     if (p.ownerKind === 'creep') {
-      // Creep fireball: hits any hero, never hits creeps.
-      const target = hitHeroByCreepProjectile(state, p);
+      // Creep fireball: hits any hero (no owner-skip), never hits creeps.
+      const target = findHitHero(state, p);
       if (target) {
         const creep = state.creeps.find((c) => c.id === p.ownerId);
         state.projectiles.splice(i, 1);
@@ -578,7 +552,7 @@ function stepProjectiles(
       continue;
     }
 
-    const target = hitHero(state, p);
+    const target = findHitHero(state, p, p.ownerId);
     if (target) {
       const source = state.heroes.find((h) => h.id === p.ownerId);
       state.projectiles.splice(i, 1);
@@ -586,8 +560,7 @@ function stepProjectiles(
         if (source.inventory.includes('ice_bow')) {
           target.slowTimer = ICE_BOW_SLOW_DURATION;
         }
-        const crit = rollCrit(source, rng);
-        const damage = critDamage(p.damage, crit) * runeDamageMultiplier(source);
+        const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
         applyDamage(state, target, source, damage, p.id, events, crit);
       }
       continue;
@@ -603,38 +576,14 @@ function stepProjectiles(
         if (source.inventory.includes('ice_bow')) {
           creepTarget.slowTimer = ICE_BOW_SLOW_DURATION;
         }
-        const crit = rollCrit(source, rng);
-        const damage = critDamage(p.damage, crit) * runeDamageMultiplier(source);
+        const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
         applyCreepDamage(state, creepTarget, source, damage, events, crit);
       }
     }
   }
 }
 
-/** First live enemy hero the projectile overlaps (2D), or null. */
-function hitHero(state: MatchState, p: ProjectileState): HeroState | null {
-  const hitRadius = HERO.bodyRadius + ARROW.collisionRadius;
-  const r2 = hitRadius * hitRadius;
-  for (const hero of state.heroes) {
-    if (hero.id === p.ownerId) continue;
-    if (!hero.alive || hero.invulnerable) continue;
-    if (hero.dodgeActive) continue; // pass through dodging heroes
-    if (V.distanceSq(p.pos, hero.pos) < r2) return hero;
-  }
-  return null;
-}
-
 // ── Damage, kills, rewards ────────────────────────────────────────────
-
-/** Roll a critical strike for a hero-sourced ability hit. */
-function rollCrit(source: HeroState, rng: () => number): boolean {
-  return source.critChance > 0 && rng() < source.critChance;
-}
-
-/** Double the damage on a crit. */
-function critDamage(damage: number, crit: boolean): number {
-  return crit ? damage * CRIT_MULTIPLIER : damage;
-}
 
 function applyDamage(
   state: MatchState,
@@ -753,8 +702,7 @@ function stepBlasts(state: MatchState, dt: number, events: SimEvent[], rng: () =
       if (hero.team === blast.team) continue;
       if (!hero.alive || hero.invulnerable) continue;
       if (V.distanceSq(blast.pos, hero.pos) > r2) continue;
-      const crit = rollCrit(source, rng);
-      const damage = critDamage(blast.damage, crit) * runeDamageMultiplier(source);
+      const { damage, crit } = rollAbilityDamage(source, blast.damage, rng);
       applyDamage(state, hero, source, damage, blast.id, events, crit);
     }
 
@@ -762,8 +710,7 @@ function stepBlasts(state: MatchState, dt: number, events: SimEvent[], rng: () =
     for (const creep of state.creeps) {
       if (!creep.alive) continue;
       if (V.distanceSq(blast.pos, creep.pos) > r2) continue;
-      const crit = rollCrit(source, rng);
-      const damage = critDamage(blast.damage, crit) * runeDamageMultiplier(source);
+      const { damage, crit } = rollAbilityDamage(source, blast.damage, rng);
       applyCreepDamage(state, creep, source, damage, events, crit);
     }
   }

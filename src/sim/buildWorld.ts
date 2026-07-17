@@ -8,7 +8,9 @@ import { NavGrid } from '../navigation/NavGrid';
 import { Pathfinder } from '../navigation/Pathfinder';
 import { PATH_CELL_SIZE, isCellWalkable, WpmPathing } from '../world/wc3/WpmParser';
 import { SHOP_ITEMS } from './shopItems';
-import { SimWorld, ObstacleAABB, Rect, Shop } from './world';
+import { SimWorld, ObstacleAABB, Rect, Shop, findWalkableNearOnGrid } from './world';
+
+export { findWalkableNearOnGrid } from './world';
 import { TreeDoodadLike, stampTreeFootprints, treeFootprints } from './treeFootprints';
 
 /**
@@ -125,23 +127,3 @@ export function buildObstaclesFromSolids(
   }));
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────
-
-/** Nearest walkable cell center on a bare NavGrid (spiral search). */
-export function findWalkableNearOnGrid(navGrid: NavGrid, wx: number, wz: number): { x: number; z: number } {
-  const start = navGrid.worldToGrid(wx, wz);
-  for (let radius = 0; radius < 64; radius++) {
-    for (let dz = -radius; dz <= radius; dz++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dz)) !== radius) continue;
-        const gx = start.gx + dx;
-        const gz = start.gz + dz;
-        if (navGrid.isWalkable(gx, gz)) {
-          const { wx: cx, wz: cz } = navGrid.gridToWorld(gx, gz);
-          return { x: cx, z: cz };
-        }
-      }
-    }
-  }
-  return { x: wx, z: wz };
-}

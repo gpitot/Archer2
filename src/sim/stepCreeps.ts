@@ -17,9 +17,10 @@ import {
   creepXp,
 } from './creepRules';
 import * as V from './math';
-import { ARROW, HERO } from './rules';
+import { ARROW } from './rules';
 import { CreepState, HeroState, MatchState, ProjectileState, SimEvent } from './state';
 import { addXp, killHero } from './stepMatch';
+import { spawnProjectile } from './projectiles';
 import { findReachableNear, findWalkableNear, SimWorld, sphereHitsObstacle } from './world';
 
 // ── Camp construction ─────────────────────────────────────────────────
@@ -214,10 +215,10 @@ function fireCreepProjectile(
   events: SimEvent[],
 ): void {
   // Aim at the target's position at fire time — straight flight at a speed
-  // below ARROW.speed makes the fireball sidesteppable.
+  // below ARROW.speed makes the fireball sidesteppable. Fireballs announce
+  // themselves on the wire via the same `fire` event as hero arrows.
   const dir = V.normalize(V.sub(target.pos, creep.pos));
-  const projectile: ProjectileState = {
-    id: `p${state.nextProjectileId++}`,
+  spawnProjectile(state, events, {
     ownerId: creep.id,
     ownerKind: 'creep',
     team: -1,
@@ -227,15 +228,6 @@ function fireCreepProjectile(
     maxRange: def.attackRange * (def.projectileRangeSlack ?? 1),
     traveled: 0,
     damage: creepDamage(creep.type, creep.level),
-  };
-  state.projectiles.push(projectile);
-  // Projectiles travel the wire only via `fire` events (snapshots never
-  // re-send them), so fireballs announce themselves like hero arrows do.
-  events.push({
-    type: 'fire',
-    heroId: creep.id,
-    tick: state.tick,
-    projectile: { ...projectile, pos: { ...projectile.pos }, dir: { ...projectile.dir } },
   });
 }
 
@@ -349,22 +341,6 @@ export function hitCreep(state: MatchState, p: ProjectileState): CreepState | nu
     if (!creep.alive) continue;
     const hitRadius = CREEP_TYPES[creep.type].bodyRadius + ARROW.collisionRadius;
     if (V.distanceSq(p.pos, creep.pos) < hitRadius * hitRadius) return creep;
-  }
-  return null;
-}
-
-/**
- * Hero hit check for creep-owned projectiles: hits ANY hero (the owner is a
- * creep, so no owner-skip), with the same dead/invulnerable/dodge rules as
- * `hitHero`.
- */
-export function hitHeroByCreepProjectile(state: MatchState, p: ProjectileState): HeroState | null {
-  const hitRadius = HERO.bodyRadius + ARROW.collisionRadius;
-  const r2 = hitRadius * hitRadius;
-  for (const hero of state.heroes) {
-    if (!hero.alive || hero.invulnerable) continue;
-    if (hero.dodgeActive) continue; // fireballs are dodgeable too
-    if (V.distanceSq(p.pos, hero.pos) < r2) return hero;
   }
   return null;
 }

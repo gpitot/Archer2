@@ -97,19 +97,18 @@ export function findRespawnPosition(world: SimWorld, rng: () => number = Math.ra
 }
 
 /**
- * Nearest cell center to (wx, wz) that is walkable AND in the same connected
- * component as (fromX, fromZ) — so a click on a cliff or an isolated islet
- * resolves to a spot the mover can actually stand on. Null if the spiral
- * (radius 64 cells) finds nothing.
+ * The one spiral-search core behind every "nearest walkable cell" helper.
+ * Visits walkable cell centers in expanding Chebyshev rings around (wx, wz)
+ * — scan order (ring radius, then dz, then dx) is load-bearing: all peers
+ * must resolve the same cell. Returns the first cell `accept` approves, or
+ * null if the spiral (radius 64 cells) finds nothing.
  */
-export function findReachableNear(
-  world: SimWorld,
+function spiralSearch(
+  navGrid: NavGrid,
   wx: number,
   wz: number,
-  fromX: number,
-  fromZ: number,
+  accept: (cx: number, cz: number) => boolean,
 ): Vec2 | null {
-  const { navGrid, pathfinder } = world;
   const start = navGrid.worldToGrid(wx, wz);
   for (let radius = 0; radius < 64; radius++) {
     for (let dz = -radius; dz <= radius; dz++) {
@@ -119,31 +118,44 @@ export function findReachableNear(
         const gz = start.gz + dz;
         if (!navGrid.isWalkable(gx, gz)) continue;
         const { wx: cx, wz: cz } = navGrid.gridToWorld(gx, gz);
-        if (pathfinder.isReachable(cx, cz, fromX, fromZ)) {
-          return { x: cx, z: cz };
-        }
+        if (accept(cx, cz)) return { x: cx, z: cz };
       }
     }
   }
   return null;
 }
 
+/**
+ * Nearest cell center to (wx, wz) that is walkable AND in the same connected
+ * component as (fromX, fromZ) — so a click on a cliff or an isolated islet
+ * resolves to a spot the mover can actually stand on. Null if nothing found.
+ */
+export function findReachableNear(
+  world: SimWorld,
+  wx: number,
+  wz: number,
+  fromX: number,
+  fromZ: number,
+): Vec2 | null {
+  const { navGrid, pathfinder } = world;
+  return spiralSearch(navGrid, wx, wz, (cx, cz) => pathfinder.isReachable(cx, cz, fromX, fromZ));
+}
+
 /** Nearest walkable cell center to a world position (spiral search). */
 export function findWalkableNear(world: SimWorld, wx: number, wz: number): Vec2 {
-  const { navGrid } = world;
-  const start = navGrid.worldToGrid(wx, wz);
-  for (let radius = 0; radius < 64; radius++) {
-    for (let dz = -radius; dz <= radius; dz++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dz)) !== radius) continue;
-        const gx = start.gx + dx;
-        const gz = start.gz + dz;
-        if (navGrid.isWalkable(gx, gz)) {
-          const { wx: cx, wz: cz } = navGrid.gridToWorld(gx, gz);
-          return { x: cx, z: cz };
-        }
-      }
-    }
-  }
-  return { x: wx, z: wz };
+  return findWalkableNearOnGrid(world.navGrid, wx, wz);
+}
+
+/**
+ * Nearest walkable cell center on a bare NavGrid — for callers that have no
+ * SimWorld yet (world building, navdata baking, client spawn helpers). Falls
+ * back to the query point itself if the spiral finds nothing.
+ */
+export function findWalkableNearOnGrid(navGrid: NavGrid, wx: number, wz: number): Vec2 {
+  return findWalkableCellNear(navGrid, wx, wz) ?? { x: wx, z: wz };
+}
+
+/** Like `findWalkableNearOnGrid`, but null (no fallback) when nothing is found. */
+export function findWalkableCellNear(navGrid: NavGrid, wx: number, wz: number): Vec2 | null {
+  return spiralSearch(navGrid, wx, wz, () => true);
 }
