@@ -27,11 +27,11 @@ import { GoldDisplay } from '../ui/GoldDisplay';
 import { MoveIndicatorManager } from '../ui/MoveIndicator';
 import { DebugPanel } from '../ui/DebugPanel';
 import { HeroPortrait } from '../ui/HeroPortrait';
-import { SpellBar, SpellSlotInfo } from '../ui/SpellBar';
+import { SpellBar } from '../ui/SpellBar';
 
 // ── Sim layer ──
 import { HeroState, ProjectileState, WardState, BlastState, CreepState, RuneState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
-import { stepMatch, xpForLevel, heroSpeed } from '../sim/stepMatch';
+import { stepMatch, heroSpeed } from '../sim/stepMatch';
 import { spawnCamps } from '../sim/stepCreeps';
 import { spawnRunes } from '../sim/stepRunes';
 import type { CampPlacement } from '../sim/creepRules';
@@ -39,12 +39,12 @@ import { RUNE_TYPES, RunePlacement } from '../sim/runeRules';
 import { SimWorld, sphereHitsObstacle, FountainDef, findWalkableNearOnGrid, findWalkableCellNear } from '../sim/world';
 import { advanceProjectile } from '../sim/projectiles';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
-import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN, basicRankCap, ultimateRankCap } from '../sim/rules';
+import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN } from '../sim/rules';
 import { ABILITIES, ABILITY_ORDER, AbilityDef, canCast } from '../sim/abilities';
-import { BLINK_RANGE, SHOP_ITEMS, SHOP_ITEMS_BY_ID } from '../sim/shopItems';
+import { SHOP_ITEMS } from '../sim/shopItems';
 import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta, CreepMeta, RuneMeta } from '../sim/protocol';
 import { creepMaxHp } from '../sim/creepRules';
-import { Vec2, distance, clamp } from '../sim/math';
+import { Vec2, distance } from '../sim/math';
 
 // ── Networking ──
 import { NetworkClient } from '../net/NetworkClient';
@@ -58,6 +58,10 @@ import { RuneView } from '../entities/RuneView';
 import { FountainView } from '../entities/FountainView';
 import { ExplosionEffects } from '../rendering/ExplosionEffect';
 import { CreepView } from '../entities/CreepView';
+import { syncKeyedViews, syncStableViews } from './ViewSync';
+import { findStraddlingPair, pruneSnapshots, RenderClock, lerpHero, lerpCreep } from './NetSync';
+import { updateHud, type HudContext } from './Hud';
+import { bindInput, type InputCallbacks } from './InputBindings';
 
 // ── Debug tooling ──
 import { ClientTrace } from '../testing/ClientTrace';
@@ -132,13 +136,9 @@ export class Game {
 
   // ── Render clock ──
   // Remote entities are rendered _interpDelay behind the server tick
-  // timeline. The clock must advance with *local* time every frame — deriving
-  // it from the newest snapshot's tick freezes it between snapshot arrivals,
-  // which renders remote motion as freeze-then-teleport steps.
-  /** Accumulated local update time (seconds). */
-  private _localTime = 0;
-  /** Smoothed (serverTime − localTime); null until the first snapshot. */
-  private _serverTimeOffset: number | null = null;
+  // timeline. The clock advances with local time every frame so remote
+  // motion never freezes between snapshot arrivals.
+  private _clock!: RenderClock;
 
   // ── Own projectiles (fully client-rendered) ──
   // Our arrows fly locally from the moment of input: straight line, same
@@ -195,7 +195,7 @@ export class Game {
   private _explosions!: ExplosionEffects;
   private _creepViews = new Map<string, CreepView>();
   private _runeViews = new Map<string, RuneView>();
-  private _fountainViews: FountainView[] = [];
+  private _fountainViews = new Map<number, FountainView>();
   private _projectilePool: ProjectileView[] = [];
 
   // ── Player helpers ──
@@ -408,10 +408,11 @@ export class Game {
     this._fogLayer.applyTo(this._shop.mesh);
 
     // ── Fountain views (static map objects) ──
-    for (const fountain of this._world.fountains) {
+    for (let i = 0; i < this._world.fountains.length; i++) {
+      const fountain = this._world.fountains[i];
       const fv = new FountainView();
       this._scene.add(fv.mesh);
-      this._fountainViews.push(fv);
+      this._fountainViews.set(i, fv);
       this._fogLayer.applyTo(fv.mesh);
     }
 
@@ -436,16 +437,11 @@ export class Game {
     this._input = new InputManager(this._renderer.domElement, this._camera.camera);
     this._input.setGround(this._terrain.mesh);
 
-    // ── Targeting system (wards, blink, AoE) ──
+    // ── Targeting system ──
     this._targeting = new TargetingSystem();
-    // Always intercept clicks — handleClick returns false when idle so
-    // regular click handlers still fire.
-    this._input.setClickInterceptor((pos) => this._targeting.handleClick(pos.x, pos.z));
-    this._input.onRightClick(() => this._targeting.cancel());
 
+    // Click to move: left-click walks the hero (right-click cancels targeting).
     this._input.onClick((pos) => {
-      // If click near shop and hero is also near shop, open the shop window.
-      // If click near shop but hero is far, move hero near the shop first.
       const shopWPt = this._world.shop.pos;
       const heroDist = Math.hypot(this._playerState.pos.x - shopWPt.x, this._playerState.pos.z - shopWPt.z);
       const clickDist = Math.hypot(pos.x - shopWPt.x, pos.z - shopWPt.z);
@@ -454,7 +450,6 @@ export class Game {
           this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory);
           return;
         }
-        // Hero is far — walk to a walkable spot near the shop, then open.
         const nearShop = this._findWalkableNear(shopWPt.x, shopWPt.z);
         this._enqueueCommand({ type: 'moveTo', x: nearShop.x, z: nearShop.z });
         this._moveIndicators.spawn(new THREE.Vector3(nearShop.x, this._heightAt(nearShop.x, nearShop.z), nearShop.z));
@@ -464,98 +459,19 @@ export class Game {
       this._moveIndicators.spawn(pos);
     });
 
-    // QWER ability keys — one binding per registry entry; Shift+key spends a
-    // skill point. The def's targeting kind drives the interaction:
-    //   aim   → cast immediately toward the cursor
-    //   self  → cast immediately
-    //   point → toggle ground-targeting (click to cast, e.g. R blast)
-    const SLOT_CODES: Record<AbilityDef['slot'], string> = {
-      Q: 'KeyQ', W: 'KeyW', E: 'KeyE', R: 'KeyR',
+    // ── Keyboard bindings ──
+    const inputCb: InputCallbacks = {
+      getPlayerState: () => this._playerState,
+      enqueueCommand: (cmd) => this._enqueueCommand(cmd),
+      activateAbilityTargeting: (def) => this._activateAbilityTargeting(def),
+      activateItemTargeting: (def, slot) => this._activateItemTargeting(def, slot),
+      openShop: () => this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory),
+      closeShop: () => { if (this._shopWindow.visible) this._shopWindow.close(); },
+      isPlayerNearShop: () => this._isPlayerNearShop(),
+      isShopVisible: () => this._shopWindow.visible,
+      cameraLock: () => { this._cameraLocked = true; },
     };
-    for (const abilityId of ABILITY_ORDER) {
-      const def = ABILITIES[abilityId];
-      this._input.onKeyDown(SLOT_CODES[def.slot], () => {
-        if (this._input.isKeyDown('ShiftLeft') || this._input.isKeyDown('ShiftRight')) {
-          this._targeting.cancel();
-          this._enqueueCommand({ type: 'levelAbility', ability: abilityId });
-          return;
-        }
-        if (def.targeting === 'point') {
-          // Toggle: pressing the key again while aiming cancels.
-          if (this._targeting.isActive && this._targeting.sourceItemId === abilityId) {
-            this._targeting.cancel();
-            return;
-          }
-          this._targeting.cancel();
-          this._activateAbilityTargeting(def);
-          return;
-        }
-        this._targeting.cancel();
-        const p = this._playerState;
-        if (!p || !canCast(def, p)) return;
-        if (def.targeting === 'self') {
-          this._enqueueCommand({ type: 'cast', ability: abilityId });
-          return;
-        }
-        const aim = this._input.aimPosition;
-        this._enqueueCommand({
-          type: 'cast',
-          ability: abilityId,
-          x: aim ? aim.x : p.pos.x + Math.sin(p.facing) * 100,
-          z: aim ? aim.z : p.pos.z + Math.cos(p.facing) * 100,
-        });
-      });
-    }
-
-    // B — Open shop when near
-    this._input.onKeyDown('KeyB', () => {
-      if (this._shopWindow.visible) {
-        this._shopWindow.close();
-      } else if (this._isPlayerNearShop()) {
-        this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory);
-      }
-    });
-
-    // Escape — cancel targeting or close shop
-    this._input.onKeyDown('Escape', () => {
-      if (this._targeting.isActive) {
-        this._targeting.cancel();
-        return;
-      }
-      if (this._shopWindow.visible) this._shopWindow.close();
-    });
-
-    // Space — re-center camera
-    this._input.onKeyDown('Space', () => { this._cameraLocked = true; });
-
-    // Number keys 1–6: buy from shop when open, or use item / activate targeting
-    for (let i = 1; i <= 6; i++) {
-      this._input.onKeyDown(`Digit${i}`, () => {
-        if (this._shopWindow.visible) {
-          this._enqueueCommand({ type: 'buy', itemIndex: i - 1 });
-          this._shopWindow.close();
-          return;
-        }
-        const slot = i - 1;
-        const itemId = this._playerState.inventory[slot];
-        const def = itemId ? SHOP_ITEMS_BY_ID[itemId] : undefined;
-
-        // Toggle: if same item's targeting is already active, cancel.
-        if (this._targeting.isActive && itemId && this._targeting.sourceItemId === itemId) {
-          this._targeting.cancel();
-          return;
-        }
-        this._targeting.cancel();
-
-        if (def?.use?.targeting === 'point') {
-          this._activateItemTargeting(def, slot);
-          return;
-        }
-        // Self-targeted actives and passives alike go through the sim
-        // (passives no-op there, but still interrupt movement — as before).
-        this._enqueueCommand({ type: 'useItem', slot });
-      });
-    }
+    bindInput(this._input, this._targeting, inputCb);
 
     // ── UI ──
     this._spellBar = new SpellBar(ABILITY_ORDER.map((id) => ({
@@ -619,6 +535,7 @@ export class Game {
     this._tickDt = 1 / welcome.tickRate;
     const snapshotDt = 1 / (welcome.snapshotRate ?? welcome.tickRate);
     this._interpDelay = Math.max(0.05, 3 * snapshotDt);
+    this._clock = new RenderClock(this._tickDt, this._interpDelay);
 
     // Apply the welcome snapshot to initialise our state and views.
     this._playerId = welcome.playerId;
@@ -945,41 +862,14 @@ export class Game {
    * at any display refresh rate.
    */
   private _interpolateHeroes(renderTime: number): void {
-    if (this._snapshots.length < 2) return;
-
-    // Default to the oldest adjacent pair; overwrite if a straddling pair is
-    // found. Clamped `t` handles renderTime outside the buffered range.
-    let prev = this._snapshots[0];
-    let next = this._snapshots[1];
-    for (let i = 0; i < this._snapshots.length - 1; i++) {
-      const a = this._snapshots[i];
-      const b = this._snapshots[i + 1];
-      if (a.tick * this._tickDt <= renderTime && renderTime <= b.tick * this._tickDt) {
-        prev = a;
-        next = b;
-        break;
-      }
-      // renderTime is newer than everything buffered — use the newest pair.
-      if (i === this._snapshots.length - 2) {
-        prev = a;
-        next = b;
-      }
-    }
-
-    const prevTime = prev.tick * this._tickDt;
-    const nextTime = next.tick * this._tickDt;
-    const span = nextTime - prevTime;
-    const t = span > 0 ? clamp((renderTime - prevTime) / span, 0, 1) : 0;
-
+    const pair = findStraddlingPair(this._snapshots, renderTime, this._tickDt);
+    if (!pair) return;
     for (const hero of this._state.heroes) {
       if (hero.id === this._playerId) continue;
-      const prevH = prev.heroes.find((h) => h.id === hero.id);
-      const nextH = next.heroes.find((h) => h.id === hero.id);
+      const prevH = pair.prev.heroes.find((h) => h.id === hero.id);
+      const nextH = pair.next.heroes.find((h) => h.id === hero.id);
       if (!prevH || !nextH) continue;
-      hero.pos.x = prevH.pos.x + (nextH.pos.x - prevH.pos.x) * t;
-      hero.pos.z = prevH.pos.z + (nextH.pos.z - prevH.pos.z) * t;
-      // lerp angle
-      hero.facing = _lerpAngle(prevH.facing, nextH.facing, t);
+      lerpHero(hero, prevH, nextH, pair.t);
     }
   }
 
@@ -990,36 +880,13 @@ export class Game {
    * snapshot is idle or dead and simply holds its last state.
    */
   private _interpolateCreeps(renderTime: number): void {
-    if (this._snapshots.length < 2) return;
-
-    let prev = this._snapshots[0];
-    let next = this._snapshots[1];
-    for (let i = 0; i < this._snapshots.length - 1; i++) {
-      const a = this._snapshots[i];
-      const b = this._snapshots[i + 1];
-      if (a.tick * this._tickDt <= renderTime && renderTime <= b.tick * this._tickDt) {
-        prev = a;
-        next = b;
-        break;
-      }
-      if (i === this._snapshots.length - 2) {
-        prev = a;
-        next = b;
-      }
-    }
-
-    const prevTime = prev.tick * this._tickDt;
-    const nextTime = next.tick * this._tickDt;
-    const span = nextTime - prevTime;
-    const t = span > 0 ? clamp((renderTime - prevTime) / span, 0, 1) : 0;
-
+    const pair = findStraddlingPair(this._snapshots, renderTime, this._tickDt);
+    if (!pair) return;
     for (const creep of this._state.creeps) {
-      const prevC = prev.creeps?.find((c) => c.id === creep.id);
-      const nextC = next.creeps?.find((c) => c.id === creep.id);
+      const prevC = pair.prev.creeps?.find((c) => c.id === creep.id);
+      const nextC = pair.next.creeps?.find((c) => c.id === creep.id);
       if (!prevC || !nextC) continue;
-      creep.pos.x = prevC.pos.x + (nextC.pos.x - prevC.pos.x) * t;
-      creep.pos.z = prevC.pos.z + (nextC.pos.z - prevC.pos.z) * t;
-      creep.facing = _lerpAngle(prevC.facing, nextC.facing, t);
+      lerpCreep(creep, prevC, nextC, pair.t);
     }
   }
 
@@ -1275,23 +1142,8 @@ export class Game {
     // ── Process events ──
     for (const ev of events) this._handleEvent(ev, dt);
 
-    // ── Fountain healing sparkle for the local player ──
-    this._updateHealSparkle(dt);
-
-    // ── Sync views ──
-    this._syncAllViews(dt);
-
-    // ── Fog ──
-    this._fog.update(dt);
-    this._fogLayer.update(dt);
-    this._applyFogVisibility();
-
-    // ── Misc ──
-    this._floatingText.update(dt, this._camera.camera);
-    this._water.update(dt);
-    this._moveIndicators.update(dt);
-
-    this._recordTraceFrame([], events);
+    // ── Common tail ──
+    this._updateCommon(dt, events, []);
   }
 
   private _updateNetwork(dt: number): void {
@@ -1300,7 +1152,7 @@ export class Game {
 
     // ── Camera ──
     this._updateCamera(dt);
-    this._localTime += dt;
+    const renderTime = this._clock.advance(dt);
 
     // ── Drain pending commands for prediction & cosmetics ──
     // (Commands already went on the wire in `_enqueueCommand`.)
@@ -1319,14 +1171,7 @@ export class Game {
       this._snapshots.push(snap);
       this._reconcileFromSnapshot(snap);
       this._trackProjectileEvents(snap);
-      // Track (serverTime − localTime) with a light EMA: smooths arrival
-      // jitter, hard-resets on gross desync (join, tab suspend).
-      const sample = snap.tick * this._tickDt - this._localTime;
-      if (this._serverTimeOffset === null || Math.abs(sample - this._serverTimeOffset) > 0.5) {
-        this._serverTimeOffset = sample;
-      } else {
-        this._serverTimeOffset += (sample - this._serverTimeOffset) * 0.1;
-      }
+      this._clock.feedSample(snap.tick * this._tickDt);
     }
 
     // ── Apply server state for remote entities ──
@@ -1343,18 +1188,8 @@ export class Game {
       }
     }
 
-    // Render clock: advances every frame with local time (never frozen
-    // between snapshot arrivals), offset onto the server tick timeline.
-    const renderTime = this._serverTimeOffset === null
-      ? null
-      : this._localTime + this._serverTimeOffset - this._interpDelay;
-
     // Prune snapshots that fell behind the straddling pair.
-    if (renderTime !== null) {
-      while (this._snapshots.length > 2 && this._snapshots[1].tick * this._tickDt <= renderTime) {
-        this._snapshots.shift();
-      }
-    }
+    if (renderTime !== null) pruneSnapshots(this._snapshots, renderTime, this._tickDt);
 
     // ── Drain events (own-arrow bookkeeping first: it may retire arrows) ──
     const frameEvents = this._network?.drainEvents() ?? [];
@@ -1377,23 +1212,8 @@ export class Game {
     this._tickCosmeticProjectiles(dt);
     if (renderTime !== null) this._renderProjectiles(renderTime);
 
-    // ── Fountain healing sparkle for the local player ──
-    this._updateHealSparkle(dt);
-
-    // ── Sync views ──
-    this._syncAllViews(dt);
-
-    // ── Fog ──
-    this._fog.update(dt);
-    this._fogLayer.update(dt);
-    this._applyFogVisibility();
-
-    // ── Misc ──
-    this._floatingText.update(dt, this._camera.camera);
-    this._water.update(dt);
-    this._moveIndicators.update(dt);
-
-    this._recordTraceFrame(snaps.map((s) => s.tick), frameEvents);
+    // ── Common tail ──
+    this._updateCommon(dt, frameEvents, snaps.map((s) => s.tick));
   }
 
   // ── Debug trace & driver API (?debug=1, used by scripts/drive.ts) ────
@@ -1566,6 +1386,21 @@ export class Game {
     this._camera.setFocusY(this._smoothHeightAt(focus.x, focus.z));
   }
 
+  /** Tail shared by offline and network update paths (fog, views, misc). */
+  private _updateCommon(dt: number, events: SimEvent[], snapTicks: number[]): void {
+    this._updateHealSparkle(dt);
+    this._syncAllViews(dt);
+    this._fog.update(dt);
+    this._fogLayer.update(dt);
+    this._applyFogVisibility();
+    this._floatingText.update(dt, this._camera.camera);
+    this._water.update(dt);
+    this._moveIndicators.update(dt);
+    this._recordTraceFrame(snapTicks, events);
+  }
+
+  // ── View sync ──────────────────────────────────────────────────────
+
   private _syncAllViews(dt: number): void {
     // Sync hero views
     for (const hero of this._state.heroes) {
@@ -1591,27 +1426,20 @@ export class Game {
   // ── Blast zone view sync ───────────────────────────────────────────────────
 
   private _syncBlastViews(): void {
-    const activeIds = new Set(this._state.blasts.map((b) => b.id));
-
-    // Create views for new blast zones
-    for (const b of this._state.blasts) {
-      if (!this._blastViews.has(b.id)) {
-        const bv = new BlastView(b.id);
+    syncKeyedViews(
+      this._blastViews,
+      new Set(this._state.blasts.map((b) => b.id)),
+      (id) => {
+        const bv = new BlastView(id);
         this._scene.add(bv.mesh);
-        this._blastViews.set(b.id, bv);
-      }
-    }
-
-    // Sync or remove each blast view
-    for (const [id, bv] of this._blastViews) {
-      if (activeIds.has(id)) {
+        return bv;
+      },
+      (id, bv) => {
         const b = this._state.blasts.find((sb) => sb.id === id)!;
         bv.sync(b, this._heightAt.bind(this));
-      } else {
-        bv.dispose();
-        this._blastViews.delete(id);
-      }
-    }
+      },
+      (_id, bv) => bv.dispose(),
+    );
   }
 
   // ── Event handling ──────────────────────────────────────────────────
@@ -1728,46 +1556,44 @@ export class Game {
   private _syncProjectileViews(): void {
     const activeIds = new Set(this._state.projectiles.map((p) => p.id));
 
-    // Create views for new projectiles
-    for (const p of this._state.projectiles) {
-      if (!this._projectileViews.has(p.id)) {
-        const pv = this._projectilePool.pop();
-        if (pv) {
-          this._projectileViews.set(p.id, pv);
-        } else {
-          // Pool exhausted — create a new one on the fly
-          const fresh = new ProjectileView(p.id);
-          this._scene.add(fresh.mesh);
-          this._projectileViews.set(p.id, fresh);
-        }
+    const getOrCreateView = (id: string): ProjectileView => {
+      const pooled = this._projectilePool.pop();
+      if (pooled) return pooled;
+      const fresh = new ProjectileView(id);
+      this._scene.add(fresh.mesh);
+      return fresh;
+    };
+
+    syncKeyedViews(
+      this._projectileViews,
+      activeIds,
+      (id) => {
+        const p = this._state.projectiles.find((sp) => sp.id === id)!;
+        const pv = getOrCreateView(id);
         // Scout (E) projectiles grant fog vision to their team while flying.
         if (p.kind === 'scout') {
-          const view = this._projectileViews.get(p.id)!;
           const team = p.team;
           const vSrc: VisionSource = {
-            get position() { return view.mesh.position; },
+            get position() { return pv.mesh.position; },
             get sightRadius() { return SCOUT.sightRadius; },
             get active() { return true; },
             get team() { return team; },
           };
-          this._scoutVisionAdapters.set(p.id, vSrc);
+          this._scoutVisionAdapters.set(id, vSrc);
           this._fog.addSource(vSrc);
         }
-      }
-    }
-
-    // Sync or hide each projectile view
-    for (const [id, pv] of this._projectileViews) {
-      if (activeIds.has(id)) {
+        return pv;
+      },
+      (id, pv) => {
         const p = this._state.projectiles.find((sp) => sp.id === id)!;
         pv.sync(p, this._heightAt.bind(this));
         if (p.kind === 'scout') this._dropScoutBreadcrumbs(p);
-      } else {
+      },
+      (id, pv) => {
         const vSrc = this._scoutVisionAdapters.get(id);
         if (vSrc) {
           this._fog.removeSource(vSrc);
           this._scoutVisionAdapters.delete(id);
-          // Seal the corridor: leave a final lingering bubble where it died.
           const track = this._scoutTrailDrop.get(id);
           if (track) {
             this._spawnScoutBubble(track.lastX, track.lastZ, track.team);
@@ -1775,10 +1601,9 @@ export class Game {
           }
         }
         pv.hide();
-        this._projectileViews.delete(id);
         this._projectilePool.push(pv);
-      }
-    }
+      },
+    );
   }
 
   /**
@@ -1832,69 +1657,63 @@ export class Game {
   // ── Ward view sync ──────────────────────────────────────────────────
 
   private _syncWardViews(): void {
-    const activeIds = new Set(this._state.wards.map((w) => w.id));
-
-    // Create views for new wards
-    for (const w of this._state.wards) {
-      if (!this._wardViews.has(w.id)) {
-        const wv = new WardView(w.id);
+    syncKeyedViews(
+      this._wardViews,
+      new Set(this._state.wards.map((w) => w.id)),
+      (id) => {
+        const w = this._state.wards.find((sw) => sw.id === id)!;
+        const wv = new WardView(id);
         this._scene.add(wv.mesh);
-        this._wardViews.set(w.id, wv);
-        // Add vision source
         const vSrc = this._createWardVisionSource(w, wv);
-        this._wardVisionAdapters.set(w.id, vSrc);
+        this._wardVisionAdapters.set(id, vSrc);
         this._fog.addSource(vSrc);
-      }
-    }
-
-    // Sync or remove each ward view
-    for (const [id, wv] of this._wardViews) {
-      if (activeIds.has(id)) {
+        return wv;
+      },
+      (id, wv) => {
         const w = this._state.wards.find((sw) => sw.id === id)!;
         wv.sync(w, this._heightAt.bind(this));
-      } else {
-        // Remove vision source
+      },
+      (id, wv) => {
         const vSrc = this._wardVisionAdapters.get(id);
         if (vSrc) {
           this._fog.removeSource(vSrc);
           this._wardVisionAdapters.delete(id);
         }
         wv.dispose();
-        this._wardViews.delete(id);
-      }
-    }
+      },
+    );
   }
 
   // ── Creep view sync ─────────────────────────────────────────────────
 
   private _syncCreepViews(dt: number): void {
-    // Creep ids are stable for the whole match, so views are created once
-    // and never churned; death/respawn is just a visibility toggle in sync.
-    for (const c of this._state.creeps) {
-      let cv = this._creepViews.get(c.id);
-      if (!cv) {
-        cv = new CreepView(c.id, c.type, this._heightAt.bind(this));
+    syncStableViews(
+      this._creepViews,
+      this._state.creeps,
+      (c) => c.id,
+      (c) => {
+        const cv = new CreepView(c.id, c.type, this._heightAt.bind(this));
         this._scene.add(cv.mesh);
-        this._creepViews.set(c.id, cv);
-      }
-      cv.sync(c, dt);
-    }
+        return cv;
+      },
+      (c, cv) => cv.sync(c, dt),
+    );
   }
 
   // ── Rune view sync ───────────────────────────────────────────────────
 
   private _syncRuneViews(dt: number): void {
-    // Rune ids are stable for the whole match, so views are created once;
-    // pickup/respawn is just a visibility toggle in sync.
-    for (const r of this._state.runes) {
-      let rv = this._runeViews.get(r.id);
-      if (!rv) {
-        rv = new RuneView(r.id);
+    syncStableViews(
+      this._runeViews,
+      this._state.runes,
+      (r) => r.id,
+      (r) => {
+        const rv = new RuneView(r.id);
         this._scene.add(rv.mesh);
-        this._runeViews.set(r.id, rv);
-      }
-      rv.sync(r, dt, this._heightAt.bind(this));
-    }
+        return rv;
+      },
+      (r, rv) => rv.sync(r, dt, this._heightAt.bind(this)),
+    );
   }
 
   // ── Fountain view sync ──────────────────────────────────────────────
@@ -1902,11 +1721,11 @@ export class Game {
   private _syncFountainViews(dt: number): void {
     for (let i = 0; i < this._world.fountains.length; i++) {
       const fountain = this._world.fountains[i];
-      let fv = this._fountainViews[i];
+      let fv = this._fountainViews.get(i);
       if (!fv) {
         fv = new FountainView();
         this._scene.add(fv.mesh);
-        this._fountainViews[i] = fv;
+        this._fountainViews.set(i, fv);
         this._fogLayer.applyTo(fv.mesh);
       }
       fv.sync(fountain.pos, dt, this._heightAt.bind(this));
@@ -1918,144 +1737,23 @@ export class Game {
   private _render(_interpolation: number): void {
     this._renderer.render(this._scene, this._camera.camera);
 
-    const p = this._playerState;
-    const playerTeam = p.team;
-
-    // Minimap markers
-    const markers: { x: number; z: number; color: string; radius: number }[] = [];
-    for (const h of this._state.heroes) {
-      if (!h.alive) continue;
-      // Rune invisibility beats fog vision AND the E reveal.
-      if (h.team !== playerTeam && h.invisTimer > 0) continue;
-      const visible = h.team === playerTeam || this._fog.isVisible(playerTeam, h.pos.x, h.pos.z);
-      if (!visible) continue;
-      markers.push({
-        x: h.pos.x,
-        z: h.pos.z,
-        color: h.team === playerTeam ? '#44aaff' : '#ff4444',
-        radius: h.id === this._playerId ? 4 : 3,
-      });
-    }
-
-    // Own wards
-    for (const w of this._state.wards) {
-      if (w.team === playerTeam) {
-        markers.push({ x: w.pos.x, z: w.pos.z, color: '#66ff88', radius: 2 });
-      }
-    }
-
-    // Creep camps: one static marker each, dimmed while the camp is cleared;
-    // individual creeps only when alive and inside our vision.
-    const camps = new Map<string, { x: number; z: number; alive: boolean }>();
-    for (const c of this._state.creeps) {
-      let camp = camps.get(c.campId);
-      if (!camp) {
-        camp = { x: c.spawnPos.x, z: c.spawnPos.z, alive: false };
-        camps.set(c.campId, camp);
-      }
-      if (c.alive) {
-        camp.alive = true;
-        if (this._fog.isVisible(playerTeam, c.pos.x, c.pos.z)) {
-          markers.push({ x: c.pos.x, z: c.pos.z, color: '#c8b830', radius: 2 });
-        }
-      }
-    }
-    for (const camp of camps.values()) {
-      markers.push({ x: camp.x, z: camp.z, color: camp.alive ? '#999966' : '#444444', radius: 3 });
-    }
-
-    // Rune spots: type-colored while a rune is up and in vision, dim otherwise.
-    for (const r of this._state.runes) {
-      const up = r.active && this._fog.isVisible(playerTeam, r.pos.x, r.pos.z);
-      markers.push({
-        x: r.pos.x,
-        z: r.pos.z,
-        color: up ? `#${RUNE_TYPES[r.type].color.toString(16).padStart(6, '0')}` : '#555555',
-        radius: up ? 3 : 2,
-      });
-    }
-
-    // Shop marker
-    const sp = this._world.shop.pos;
-    markers.push({ x: sp.x, z: sp.z, color: '#ffcc44', radius: 4 });
-
-    // Fountain markers
-    for (const fountain of this._world.fountains) {
-      const visible = this._fog.isVisible(playerTeam, fountain.pos.x, fountain.pos.z);
-      markers.push({
-        x: fountain.pos.x,
-        z: fountain.pos.z,
-        color: visible ? '#4488ff' : '#334466',
-        radius: 3,
-      });
-    }
-
-    this._minimap.draw(markers, {
-      cx: this._camera.target.x,
-      cz: this._camera.target.z,
-      halfW: this._camera.viewHalfWidth(),
-    });
-
-    // Spell bar cooldowns, levels, and skill-point gates — one loop over the
-    // ability registry (adding a spell never touches this code).
-    const basicCap = basicRankCap(p.level);
-    const ultCap = ultimateRankCap(p.level);
-    const hasPoint = p.skillPoints > 0;
-    this._spellBar.update(ABILITY_ORDER.map((id) => {
-      const def = ABILITIES[id];
-      const { level, cooldown, charges } = p.abilities[id];
-      const total = def.cooldownByLevel[Math.max(level, 1)];
-      const cap = def.kind === 'ultimate' ? ultCap : basicCap;
-      const info: SpellSlotInfo = {
-        cooldownProgress: cooldown <= 0 ? 1 : 1 - cooldown / total,
-        cooldownRemaining: Math.max(cooldown, 0),
-        level,
-        canLevel: hasPoint && level < Math.min(def.maxLevel, cap),
-      };
-      if (def.charges) {
-        info.charges = charges ?? 0;
-        info.maxCharges = def.charges.max;
-      }
-      return info;
-    }));
-
-    // Hero portrait
-    this._portrait.update(
-      p.xp,
-      xpForLevel(p.level + 1),
-      xpForLevel(p.level),
-      p.level,
-      '#4488cc',
-    );
-
-    this._goldDisplay.update(p.gold);
-    // Build charge/cd maps generically from the item registry.
-    const charges: Record<string, number> = {};
-    const cdProgress: Record<string, number> = {};
-    const cdRemaining: Record<string, number> = {};
-    if (p.inventory.includes('sentry_wards')) charges['sentry_wards'] = p.wardCharges;
-    for (const itemId in p.itemCooldowns) {
-      const remaining = p.itemCooldowns[itemId];
-      cdRemaining[itemId] = Math.max(remaining, 0);
-      const def = SHOP_ITEMS_BY_ID[itemId];
-      const maxCd = def?.use?.cooldown;
-      cdProgress[itemId] = remaining <= 0 || !maxCd ? 1 : 1 - remaining / maxCd;
-    }
-    this._itemBar.update(p.inventory, charges, cdProgress, cdRemaining);
-    this._kdDisplay.update(p.kills, p.deaths);
-
-    // Shop overlay — show when in range
-    if (this._isPlayerNearShop()) {
-      this._shopOverlay.show(SHOP_ITEMS as ShopItem[]);
-    } else {
-      this._shopOverlay.hide();
-      // Auto-close shop window if hero walks away from shop
-      if (this._shopWindow.visible) this._shopWindow.close();
-    }
-    // Refresh shop window while it's open so gold/inventory changes are reflected
-    if (this._shopWindow.visible) {
-      this._shopWindow.refresh(this._playerState.gold, this._playerState.inventory);
-    }
+    const ctx: HudContext = {
+      state: this._state,
+      world: this._world,
+      playerState: this._playerState,
+      fog: this._fog,
+      minimap: this._minimap,
+      spellBar: this._spellBar,
+      portrait: this._portrait,
+      goldDisplay: this._goldDisplay,
+      itemBar: this._itemBar,
+      kdDisplay: this._kdDisplay,
+      shopWindow: this._shopWindow,
+      shopOverlay: this._shopOverlay,
+      camera: this._camera,
+      isPlayerNearShop: this._isPlayerNearShop(),
+    };
+    updateHud(ctx);
   }
 
   // ── Fog visibility ──────────────────────────────────────────────────
@@ -2110,7 +1808,7 @@ export class Game {
     // Fountains: visible when inside our vision.
     for (let i = 0; i < this._world.fountains.length; i++) {
       const fountain = this._world.fountains[i];
-      const fv = this._fountainViews[i];
+      const fv = this._fountainViews.get(i);
       if (fv) {
         fv.mesh.visible = this._fog.isVisible(team, fountain.pos.x, fountain.pos.z);
       }
@@ -2197,9 +1895,3 @@ function buildDefaultFountains(arena: ArenaRect, navGrid: NavGrid): FountainDef[
 }
 
 /** Lerp between two angles (radians) taking the shortest path. */
-function _lerpAngle(a: number, b: number, t: number): number {
-  let diff = b - a;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-  return a + diff * t;
-}

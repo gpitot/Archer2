@@ -13,8 +13,8 @@ golden traces.
 | 2 — Ability registry | ✅ done | `fdb833d` |
 | 3 — Generic ability/item runtime records + wire bump | ✅ done | `9014e2e` |
 | 4 — Item registry with behavior hooks | ✅ done | `c8de5d7` |
-| 5 — Unit substrate | ✅ done | uncommitted (working tree) |
-| 6 — Game.ts decomposition | ⬜ not started | — |
+| 5 — Unit substrate | ✅ done | `0cea4de` |
+| 6 — Game.ts decomposition | ✅ done | uncommitted (working tree) |
 
 **Phase 3 verification so far:** ✅ tsc clean · `pnpm sim` 17/17 (item-actives added)
 with traces byte-identical to the pre-refactor baseline for all 16 original

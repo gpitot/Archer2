@@ -1,0 +1,122 @@
+/**
+ * Keyboard input bindings extracted from Game.ts. Takes an `InputManager`
+ * and a set of callbacks, then wires QWER abilities, item hotkeys, camera,
+ * shop, and targeting keys.
+ */
+import { ABILITIES, ABILITY_ORDER, AbilityDef, canCast } from '../sim/abilities';
+import { SHOP_ITEMS_BY_ID } from '../sim/shopItems';
+import type { InputManager } from '../input/InputManager';
+import type { TargetingSystem } from '../input/TargetingSystem';
+import type { Command, HeroState } from '../sim/state';
+
+export interface InputCallbacks {
+  /** Current player hero state (read fresh on each keypress). */
+  getPlayerState: () => HeroState;
+  /** Enqueue a sim command (prediction + wire). */
+  enqueueCommand: (cmd: Command) => void;
+  /** Activate ground-targeting for a point-targeted ability (e.g. R blast). */
+  activateAbilityTargeting: (def: AbilityDef) => void;
+  /** Activate ground-targeting for an item with point-targeted on-use. */
+  activateItemTargeting: (def: import('../sim/shopItems').ShopItemDef, slot: number) => void;
+  /** Open the shop window. */
+  openShop: () => void;
+  /** Close the shop window. */
+  closeShop: () => void;
+  /** True when the player is within interact range of the shop. */
+  isPlayerNearShop: () => boolean;
+  /** True when the shop window is currently visible. */
+  isShopVisible: () => boolean;
+  /** Lock camera to hero. */
+  cameraLock: () => void;
+}
+
+/** Register all gameplay keyboard bindings on the given InputManager. */
+export function bindInput(input: InputManager, targeting: TargetingSystem, cb: InputCallbacks): void {
+  // ── Click interceptor ──
+  input.setClickInterceptor((pos) => targeting.handleClick(pos.x, pos.z));
+  input.onRightClick(() => targeting.cancel());
+
+  // QWER ability keys — one binding per registry entry.
+  const SLOT_CODES: Record<AbilityDef['slot'], string> = {
+    Q: 'KeyQ', W: 'KeyW', E: 'KeyE', R: 'KeyR',
+  };
+  for (const abilityId of ABILITY_ORDER) {
+    const def = ABILITIES[abilityId];
+    input.onKeyDown(SLOT_CODES[def.slot], () => {
+      if (input.isKeyDown('ShiftLeft') || input.isKeyDown('ShiftRight')) {
+        targeting.cancel();
+        cb.enqueueCommand({ type: 'levelAbility', ability: abilityId });
+        return;
+      }
+      if (def.targeting === 'point') {
+        if (targeting.isActive && targeting.sourceItemId === abilityId) {
+          targeting.cancel();
+          return;
+        }
+        targeting.cancel();
+        cb.activateAbilityTargeting(def);
+        return;
+      }
+      targeting.cancel();
+      const p = cb.getPlayerState();
+      if (!p || !canCast(def, p)) return;
+      if (def.targeting === 'self') {
+        cb.enqueueCommand({ type: 'cast', ability: abilityId });
+        return;
+      }
+      const aim = input.aimPosition;
+      cb.enqueueCommand({
+        type: 'cast',
+        ability: abilityId,
+        x: aim ? aim.x : p.pos.x + Math.sin(p.facing) * 100,
+        z: aim ? aim.z : p.pos.z + Math.cos(p.facing) * 100,
+      });
+    });
+  }
+
+  // B — Open shop when near
+  input.onKeyDown('KeyB', () => {
+    if (cb.isShopVisible?.() ?? false) {
+      cb.closeShop();
+    } else if (cb.isPlayerNearShop()) {
+      cb.openShop();
+    }
+  });
+
+  // Escape — cancel targeting or close shop
+  input.onKeyDown('Escape', () => {
+    if (targeting.isActive) { targeting.cancel(); return; }
+    cb.closeShop();
+  });
+
+  // Space — re-center camera
+  input.onKeyDown('Space', () => { cb.cameraLock(); });
+
+  // Number keys 1–6: buy from shop when open, or use item
+  for (let i = 1; i <= 6; i++) {
+    input.onKeyDown(`Digit${i}`, () => {
+      if (cb.isShopVisible()) {
+        cb.enqueueCommand({ type: 'buy', itemIndex: i - 1 });
+        cb.closeShop();
+        return;
+      }
+      const slot = i - 1;
+      const p = cb.getPlayerState();
+      const itemId = p.inventory[slot];
+      const def = itemId ? SHOP_ITEMS_BY_ID[itemId] : undefined;
+
+      // Toggle: if same item's targeting is already active, cancel.
+      if (targeting.isActive && itemId && targeting.sourceItemId === itemId) {
+        targeting.cancel();
+        return;
+      }
+      targeting.cancel();
+
+      if (def?.use?.targeting === 'point') {
+        cb.activateItemTargeting(def, slot);
+        return;
+      }
+      cb.enqueueCommand({ type: 'useItem', slot });
+    });
+  }
+}
