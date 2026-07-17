@@ -2,10 +2,14 @@
  * Six empty item slots — WC3-style 2×3 grid next to the hero portrait.
  */
 import { formatCooldown } from './SpellBar';
+import { Tooltip } from './Tooltip';
+import { SHOP_ITEMS_BY_ID, itemTooltip } from '../sim/shopItems';
 
 export class ItemBar {
   readonly container: HTMLDivElement;
   private _slots: HTMLDivElement[] = [];
+  /** Item id currently shown in each slot (null when empty) — drives tooltips. */
+  private _itemIds: (string | null)[] = [];
   private _icons: HTMLSpanElement[] = [];
   private _badges: HTMLSpanElement[] = [];
   private _cooldowns: HTMLDivElement[] = [];
@@ -127,6 +131,16 @@ export class ItemBar {
       this._cdTexts.push(cdText);
       this._flashes.push(flash);
       this._wasOnCd.push(false);
+      this._itemIds.push(null);
+
+      // Hover tooltip — only shown when the slot holds an item.
+      const slotIndex = i;
+      Tooltip.shared().attach(slot, () => {
+        const id = this._itemIds[slotIndex];
+        const def = id ? SHOP_ITEMS_BY_ID[id] : undefined;
+        return def ? itemTooltip(def) : null;
+      });
+
       this.container.appendChild(slot);
     }
 
@@ -151,6 +165,7 @@ export class ItemBar {
       const badge = this._badges[i];
       const cooldown = this._cooldowns[i];
       const cdText = this._cdTexts[i];
+      this._itemIds[i] = itemId ?? null;
       if (itemId) {
         this._icons[i].textContent = ItemBar._icons[itemId] ?? '●';
         const progress = cooldowns[itemId] ?? 1;

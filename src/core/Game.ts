@@ -43,7 +43,7 @@ import { SimWorld, sphereHitsObstacle, FountainDef, findWalkableNearOnGrid, find
 import { advanceProjectile } from '../sim/projectiles';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
 import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN } from '../sim/rules';
-import { ABILITIES, ABILITY_ORDER, AbilityDef, canCast } from '../sim/abilities';
+import { ABILITIES, ABILITY_ORDER, AbilityDef, abilityTooltip, canCast } from '../sim/abilities';
 import { SHOP_ITEMS } from '../sim/shopItems';
 import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta, CreepMeta, RuneMeta } from '../sim/protocol';
 import { creepMaxHp } from '../sim/creepRules';
@@ -502,6 +502,7 @@ export class Game {
     this._spellBar = new SpellBar(ABILITY_ORDER.map((id) => ({
       key: ABILITIES[id].slot,
       maxLevel: ABILITIES[id].maxLevel,
+      tooltip: (level: number) => abilityTooltip(ABILITIES[id], level),
     })));
     this._portrait = new HeroPortrait();
     this._goldDisplay = new GoldDisplay();

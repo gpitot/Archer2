@@ -6,6 +6,7 @@
  * Q also has a charge indicator above the slot when the ability has >1 max charge.
  * Basics (Q/W/E) show 5 rank dots; the ultimate (R) shows 3.
  */
+import { Tooltip, type TooltipContent } from './Tooltip';
 
 /** Per-slot display state passed to `SpellBar.update`. */
 export interface SpellSlotInfo {
@@ -27,6 +28,8 @@ export interface SpellSlotDef {
   key: string;
   /** Rank-dot count (5 for basics, 3 for the ultimate). */
   maxLevel: number;
+  /** Hover-tooltip content for the given current rank. */
+  tooltip: (level: number) => TooltipContent;
 }
 
 export class SpellBar {
@@ -48,8 +51,8 @@ export class SpellBar {
       pointer-events: none;
     `;
 
-    for (const { key, maxLevel } of defs) {
-      const slot = new SpellSlot(key, maxLevel);
+    for (const { key, maxLevel, tooltip } of defs) {
+      const slot = new SpellSlot(key, maxLevel, tooltip);
       this._slots.push(slot);
       this.container.appendChild(slot.el);
     }
@@ -97,8 +100,9 @@ class SpellSlot {
   private _locked = false;
   private _onCd = false;
   private _canLevel = false;
+  private _level = 0;
 
-  constructor(key: string, maxLevel: number) {
+  constructor(key: string, maxLevel: number, tooltip: (level: number) => TooltipContent) {
     const size = 56;
     this._maxLevel = maxLevel;
 
@@ -241,6 +245,9 @@ class SpellSlot {
     inner.appendChild(this._levelDots);
     inner.appendChild(this._cdText);
     inner.appendChild(this._flash);
+
+    // Hover tooltip (LoL/Dota-style), reflecting the current rank.
+    Tooltip.shared().attach(this.el, () => tooltip(this._level));
   }
 
   /** Dim the slot when the ability is unlearned (rank 0). */
@@ -313,6 +320,7 @@ class SpellSlot {
 
   /** Highlight dots up to `level` (0 = none). */
   setLevel(level: number): void {
+    this._level = level;
     const dots = this._levelDots.children;
     for (let i = 0; i < this._maxLevel; i++) {
       (dots[i] as HTMLElement).style.background = i < level ? '#cc9944' : '#444';

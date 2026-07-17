@@ -13,10 +13,19 @@ import * as V from './math';
 import { ARROW, BLAST, DODGE, SCOUT } from './rules';
 import type { AbilityRuntime, HeroState, MatchState, SimEvent } from './state';
 import type { SimWorld } from './world';
+import type { StatLine, TooltipContent } from '../ui/Tooltip';
 import { spawnProjectile } from './projectiles';
 import { breakInvisibility } from './stepRunes';
 
 export type AbilityId = 'arrow' | 'dodge' | 'reveal' | 'blast';
+
+/**
+ * Format a per-rank table (index 0 = unlearned) into a stat line's values,
+ * dropping the unlearned slot so index 0 of the result is rank 1.
+ */
+function perRank(table: readonly number[], suffix = ''): readonly string[] {
+  return table.slice(1).map((v) => `${v}${suffix}`);
+}
 
 /**
  * Canonical iteration order (QWER). Deterministic ordering matters: the sim
@@ -40,6 +49,12 @@ export interface AbilityDef {
   id: AbilityId;
   /** HUD slot / hotkey. */
   slot: 'Q' | 'W' | 'E' | 'R';
+  /** Display name shown in the hover tooltip. */
+  name: string;
+  /** One-sentence flavour/summary shown at the top of the tooltip. */
+  description: string;
+  /** Per-rank stat rows (Damage/Cooldown/…) shown in the tooltip. */
+  stats: readonly StatLine[];
   /** Basics rank-gate on ceil(level/2); ultimates on hero levels 6/11/16. */
   kind: 'basic' | 'ultimate';
   maxLevel: number;
@@ -64,6 +79,22 @@ export interface AbilityDef {
 /** Client-side pre-check for a cast: alive + the ability's own guards. */
 export function canCast(def: AbilityDef, hero: HeroState): boolean {
   return hero.alive && def.canCast(hero);
+}
+
+/**
+ * Build the hover-tooltip content for an ability, emphasising the value for
+ * the hero's current rank (`level`; 0 = unlearned → no emphasis).
+ */
+export function abilityTooltip(def: AbilityDef, level: number): TooltipContent {
+  const footer =
+    level > 0 ? `Rank ${level}/${def.maxLevel}` : `${def.maxLevel} ranks — not yet learned`;
+  return {
+    name: `${def.slot} · ${def.name}`,
+    description: def.description,
+    stats: def.stats,
+    highlightIndex: level > 0 ? level - 1 : undefined,
+    footer,
+  };
 }
 
 /**
@@ -264,6 +295,14 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
   arrow: {
     id: 'arrow',
     slot: 'Q',
+    name: 'Shoot Arrow',
+    description: 'Fire a fast arrow that damages the first enemy it strikes. Holds multiple charges.',
+    stats: [
+      { label: 'Damage', values: perRank(ARROW.damageByLevel) },
+      { label: 'Range', values: perRank(ARROW.rangeByLevel) },
+      { label: 'Cooldown', values: perRank(ARROW.cooldownByLevel, 's') },
+      { label: 'Charges', values: [String(ARROW.maxCharges)] },
+    ],
     kind: 'basic',
     maxLevel: ARROW.maxLevel,
     cooldownByLevel: ARROW.cooldownByLevel,
@@ -290,6 +329,12 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
   dodge: {
     id: 'dodge',
     slot: 'W',
+    name: 'Dodge',
+    description: 'Enter an evasive stance that avoids all incoming arrows for a short window.',
+    stats: [
+      { label: 'Duration', values: perRank(DODGE.durationByLevel, 's') },
+      { label: 'Cooldown', values: perRank(DODGE.cooldownByLevel, 's') },
+    ],
     kind: 'basic',
     maxLevel: DODGE.maxLevel,
     cooldownByLevel: DODGE.cooldownByLevel,
@@ -309,6 +354,13 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
   reveal: {
     id: 'reveal',
     slot: 'E',
+    name: 'Scout',
+    description: 'Launch a soaring vision projectile that reveals fog of war along its path.',
+    stats: [
+      { label: 'Range', values: perRank(SCOUT.rangeByLevel) },
+      { label: 'Sight Radius', values: [String(SCOUT.sightRadius)] },
+      { label: 'Cooldown', values: perRank(SCOUT.cooldownByLevel, 's') },
+    ],
     kind: 'basic',
     maxLevel: SCOUT.maxLevel,
     cooldownByLevel: SCOUT.cooldownByLevel,
@@ -320,6 +372,15 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
   blast: {
     id: 'blast',
     slot: 'R',
+    name: 'Blast',
+    description: 'Mark a target area that detonates after a short delay, damaging all enemies caught inside.',
+    stats: [
+      { label: 'Damage', values: perRank(BLAST.damageByLevel) },
+      { label: 'Cooldown', values: perRank(BLAST.cooldownByLevel, 's') },
+      { label: 'Radius', values: [String(BLAST.radius)] },
+      { label: 'Cast Range', values: [String(BLAST.castRange)] },
+      { label: 'Delay', values: [`${BLAST.delay}s`] },
+    ],
     kind: 'ultimate',
     maxLevel: BLAST.maxLevel,
     cooldownByLevel: BLAST.cooldownByLevel,
