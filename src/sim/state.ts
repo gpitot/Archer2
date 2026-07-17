@@ -4,6 +4,7 @@
  * No behaviour lives here — the logic is in `stepMatch`.
  */
 import { CreepTypeId } from './creepRules';
+import { RuneTypeId } from './runeRules';
 import { Vec2 } from './math';
 import { HERO, ARROW } from './rules';
 
@@ -58,6 +59,10 @@ export interface HeroState {
   blastCooldown: number;
   inventory: Inventory;
   wardCharges: number;
+  /** Rune buff timers (seconds remaining; 0 = inactive). */
+  ddTimer: number;
+  hasteTimer: number;
+  invisTimer: number;
   abilityLevel: number;
   abilityCooldown: number;
   abilityCharges: number;
@@ -103,6 +108,21 @@ export interface BlastState {
   damage: number;
 }
 
+/**
+ * A power-up rune spot. One `RuneState` per spot, alive for the whole match
+ * (ids are stable, like creeps): `active` toggles as the rune is taken and
+ * respawns, `type` re-rolls on every respawn.
+ */
+export interface RuneState {
+  id: string;
+  pos: Vec2;
+  type: RuneTypeId;
+  /** True while a rune is sitting on the spot, ready to be picked up. */
+  active: boolean;
+  /** Seconds until the next rune appears (only meaningful while inactive). */
+  respawnTimer: number;
+}
+
 /** A neutral jungle creep. Ids are stable for the whole match. */
 export interface CreepState {
   id: string;
@@ -130,6 +150,7 @@ export interface MatchState {
   wards: WardState[];
   blasts: BlastState[];
   creeps: CreepState[];
+  runes: RuneState[];
   /** First blood is a one-time global bonus. */
   firstBlood: boolean;
   /** Accumulates real time toward the next per-second passive-income tick. */
@@ -183,7 +204,9 @@ export type SimEvent =
       x: number;
       z: number;
     }
-  | { type: 'creepRespawn'; creepId: string; level: number };
+  | { type: 'creepRespawn'; creepId: string; level: number }
+  | { type: 'runeSpawn'; runeId: string; runeType: RuneTypeId }
+  | { type: 'runePickup'; runeId: string; heroId: string; runeType: RuneTypeId; x: number; z: number };
 
 // ── Factories ─────────────────────────────────────────────────────────
 export function createHeroState(id: string, team: number, pos: Vec2): HeroState {
@@ -213,6 +236,9 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     critChance: 0,
     inventory: [null, null, null, null, null, null],
     wardCharges: 0,
+    ddTimer: 0,
+    hasteTimer: 0,
+    invisTimer: 0,
     // The level-1 skill point is auto-spent on Q (it's the basic attack), so
     // heroes start with Q rank 1 and 0 banked points — next point at level 2.
     abilityLevel: 1,
@@ -239,6 +265,7 @@ export function createMatchState(): MatchState {
     wards: [],
     blasts: [],
     creeps: [],
+    runes: [],
     firstBlood: true,
     incomeAccumulator: 0,
     nextProjectileId: 1,

@@ -64,6 +64,12 @@ export interface SpawnSource {
   z: number;
 }
 
+/** A rune spot (power-up rune spawn location). */
+export interface RuneSource {
+  x: number;
+  z: number;
+}
+
 export interface MapSource {
   name: string;
   /** Size in tiles (tilepoint grids are +1 per axis). */
@@ -80,10 +86,12 @@ export interface MapSource {
   doodads: DoodadSource[];
   camps: CampSource[];
   spawns: SpawnSource[];
+  runes: RuneSource[];
 }
 
 export const MAP_FORMAT = 'archer-map';
-export const MAP_VERSION = 1;
+/** v2 added rune spots (v1 files load fine — no runes). */
+export const MAP_VERSION = 2;
 export const MIN_TILES = 8;
 export const MAX_TILES = 128;
 /** Ground layer new maps start on (WC3 convention: layer 2 = height 0). */
@@ -112,6 +120,7 @@ export function createEmptyMapSource(name: string, tilesX: number, tilesZ: numbe
     doodads: [],
     camps: [],
     spawns: [],
+    runes: [],
   };
 }
 
@@ -126,6 +135,7 @@ export function cloneMapSource(src: MapSource): MapSource {
     doodads: src.doodads.map((d) => ({ ...d })),
     camps: src.camps.map((c) => ({ ...c, units: c.units.slice() })),
     spawns: src.spawns.map((s) => ({ ...s })),
+    runes: src.runes.map((r) => ({ ...r })),
   };
 }
 
@@ -165,6 +175,8 @@ interface MapJson {
   doodads: [string, number, number, number, number][];
   camps: { x: number; z: number; units: string[] }[];
   spawns: { x: number; z: number }[];
+  /** Rune spots — absent in v1 files. */
+  runes?: { x: number; z: number }[];
 }
 
 const FLAG_CHARS: Record<number, string> = {
@@ -219,6 +231,7 @@ export function serializeMapJson(src: MapSource): string {
     ]),
     camps: src.camps.map((c) => ({ x: Math.round(c.x), z: Math.round(c.z), units: c.units.slice() })),
     spawns: src.spawns.map((s) => ({ x: Math.round(s.x), z: Math.round(s.z) })),
+    runes: src.runes.map((r) => ({ x: Math.round(r.x), z: Math.round(r.z) })),
   };
   // Hand-rolled layout: one grid row / doodad per line so diffs stay readable.
   const rows = (a: string[]) => a.map((r) => `    ${JSON.stringify(r)}`).join(',\n');
@@ -246,6 +259,9 @@ ${items(json.camps)}
   ],
   "spawns": [
 ${items(json.spawns)}
+  ],
+  "runes": [
+${items(json.runes ?? [])}
   ]
 }
 `;
@@ -254,7 +270,9 @@ ${items(json.spawns)}
 export function parseMapJson(text: string): MapSource {
   const json = JSON.parse(text) as MapJson;
   if (json.format !== MAP_FORMAT) throw new Error(`not an archer map (format=${json.format})`);
-  if (json.version !== MAP_VERSION) throw new Error(`unsupported map version ${json.version}`);
+  if (json.version !== MAP_VERSION && json.version !== 1) {
+    throw new Error(`unsupported map version ${json.version}`);
+  }
   validateMapName(json.name);
   validateDims(json.tilesX, json.tilesZ);
   const px = json.tilesX + 1;
@@ -303,5 +321,6 @@ export function parseMapJson(text: string): MapSource {
     doodads,
     camps,
     spawns: (json.spawns ?? []).map((s) => ({ x: s.x, z: s.z })),
+    runes: (json.runes ?? []).map((r) => ({ x: r.x, z: r.z })),
   };
 }

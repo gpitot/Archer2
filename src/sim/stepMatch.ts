@@ -43,6 +43,8 @@ import {
 } from './stepCreeps';
 import { findReachableNear, findRespawnPosition, SimWorld, sphereHitsObstacle } from './world';
 import { BLINK_COOLDOWN, CRIT_MULTIPLIER } from './shopItems';
+import { breakInvisibility, runeDamageMultiplier, stepRuneBuffs, stepRunes } from './stepRunes';
+import { RUNE } from './runeRules';
 
 /**
  * Advance the match by `dt` seconds, applying `inputs` queued since the last
@@ -76,6 +78,7 @@ export function stepMatch(
   stepCreeps(state, dt, world, events);
   stepProjectiles(state, dt, world, events, rng);
   stepBlasts(state, dt, events, rng);
+  stepRunes(state, dt, events, rng);
   stepWards(state, dt);
   stepIncome(state, dt);
 
@@ -168,6 +171,8 @@ function fireArrow(
 
   // Casting a spell interrupts movement.
   stopMovement(hero);
+  // Attacking breaks invisibility.
+  breakInvisibility(hero);
 
   let dir = V.sub({ x: aimX, z: aimZ }, hero.pos);
   if (V.length(dir) < 0.01) {
@@ -289,6 +294,8 @@ function placeWard(
 
   hero.wardCharges--;
   if (hero.wardCharges === 0) removeItem(hero, 'sentry_wards');
+  // Placing a ward breaks invisibility.
+  breakInvisibility(hero);
   state.wards.push({
     id: `w${state.nextWardId++}`,
     team: hero.team,
@@ -384,6 +391,8 @@ function castBlast(state: MatchState, hero: HeroState, x: number, z: number): vo
 
   // Casting interrupts movement and turns the hero toward the target.
   stopMovement(hero);
+  // Casting breaks invisibility.
+  breakInvisibility(hero);
   const dir = V.sub(target, hero.pos);
   if (V.length(dir) > 0.01) hero.targetFacing = V.heading(dir);
 
@@ -462,6 +471,8 @@ function stepHero(hero: HeroState, dt: number): void {
     if (hero.invulnerableTimer <= 0) hero.invulnerable = false;
   }
 
+  stepRuneBuffs(hero, dt);
+
   if (hero.moving && hero.path.length > 0) {
     moveAlongPath(hero, dt);
   } else if (hero.path.length === 0) {
@@ -510,6 +521,10 @@ function respawn(hero: HeroState, pos: V.Vec2): void {
   hero.respawnTimer = 0;
   hero.path = [];
   hero.moving = false;
+  // Rune buffs don't survive death.
+  hero.ddTimer = 0;
+  hero.hasteTimer = 0;
+  hero.invisTimer = 0;
 }
 
 // ── Projectiles ───────────────────────────────────────────────────────
@@ -558,7 +573,8 @@ function stepProjectiles(
       state.projectiles.splice(i, 1);
       if (source) {
         const crit = rollCrit(source, rng);
-        applyDamage(state, target, source, critDamage(p.damage, crit), p.id, events, crit);
+        const damage = critDamage(p.damage, crit) * runeDamageMultiplier(source);
+        applyDamage(state, target, source, damage, p.id, events, crit);
       }
       continue;
     }
@@ -571,7 +587,8 @@ function stepProjectiles(
       state.projectiles.splice(i, 1);
       if (source) {
         const crit = rollCrit(source, rng);
-        applyCreepDamage(state, creepTarget, source, critDamage(p.damage, crit), events, crit);
+        const damage = critDamage(p.damage, crit) * runeDamageMultiplier(source);
+        applyCreepDamage(state, creepTarget, source, damage, events, crit);
       }
     }
   }
@@ -720,7 +737,8 @@ function stepBlasts(state: MatchState, dt: number, events: SimEvent[], rng: () =
       if (!hero.alive || hero.invulnerable) continue;
       if (V.distanceSq(blast.pos, hero.pos) > r2) continue;
       const crit = rollCrit(source, rng);
-      applyDamage(state, hero, source, critDamage(blast.damage, crit), blast.id, events, crit);
+      const damage = critDamage(blast.damage, crit) * runeDamageMultiplier(source);
+      applyDamage(state, hero, source, damage, blast.id, events, crit);
     }
 
     // Creeps in the circle.
@@ -728,7 +746,8 @@ function stepBlasts(state: MatchState, dt: number, events: SimEvent[], rng: () =
       if (!creep.alive) continue;
       if (V.distanceSq(blast.pos, creep.pos) > r2) continue;
       const crit = rollCrit(source, rng);
-      applyCreepDamage(state, creep, source, critDamage(blast.damage, crit), events, crit);
+      const damage = critDamage(blast.damage, crit) * runeDamageMultiplier(source);
+      applyCreepDamage(state, creep, source, damage, events, crit);
     }
   }
 }
@@ -756,7 +775,7 @@ function stepIncome(state: MatchState, dt: number): void {
 // ── Derived helpers (shared with the view layer) ──────────────────────
 
 export function heroSpeed(hero: HeroState): number {
-  return HERO.baseSpeed + hero.speedBonus;
+  return HERO.baseSpeed + hero.speedBonus + (hero.hasteTimer > 0 ? RUNE.hasteSpeedBonus : 0);
 }
 
 export function passiveIncome(hero: HeroState): number {

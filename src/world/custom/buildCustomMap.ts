@@ -22,6 +22,7 @@ import { tileIsCliff } from '../wc3/terrainLevels';
 import type { SimWorld, ObstacleAABB } from '../../sim/world';
 import { buildSimWorld } from '../../sim/buildWorld';
 import type { CampPlacement } from '../../sim/creepRules';
+import type { RunePlacement } from '../../sim/runeRules';
 import {
   MapSource, SpawnSource, SRC_FLAG_RAMP, SRC_FLAG_WATER, TYPE_ID_BY_KIND, pointsX, pointsZ,
 } from './mapSource';
@@ -45,6 +46,8 @@ export interface CustomMap {
   arena: ArenaRect;
   spawns: SpawnSource[];
   camps: CampPlacement[];
+  /** Authored rune spots, world space. */
+  runes: RunePlacement[];
   /** Projectile-blocking AABBs (solid rocks), world space. */
   obstacles: ObstacleAABB[];
 }
@@ -89,6 +92,7 @@ export function buildCustomMap(src: MapSource): CustomMap {
       z: c.z,
       units: c.units.slice(),
     })),
+    runes: src.runes.map((r) => ({ x: r.x, z: r.z })),
     obstacles: buildObstacles(src),
   };
 }

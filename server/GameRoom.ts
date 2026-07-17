@@ -16,6 +16,7 @@ import { DurableObject, WebSocket } from 'cloudflare:workers';
 import { MatchState, HeroInput, HeroState, SimEvent, ProjectileState, WardState, BlastState, createMatchState, createHeroState } from '../src/sim/state';
 import { stepMatch } from '../src/sim/stepMatch';
 import { spawnCamps } from '../src/sim/stepCreeps';
+import { spawnRunes } from '../src/sim/stepRunes';
 import { CREEP } from '../src/sim/creepRules';
 import { SimWorld, ObstacleAABB, Rect, Shop, findRespawnPosition, findWalkableNear } from '../src/sim/world';
 import { SHOP_ITEMS } from '../src/sim/shopItems';
@@ -24,7 +25,7 @@ import { Pathfinder } from '../src/navigation/Pathfinder';
 import { HERO } from '../src/sim/rules';
 import {
   ClientMessage, ServerMessage, WelcomeMessage, SnapshotMessage,
-  HeroMetaMessage, SnapshotHero, HeroMeta, SnapshotCreep, CreepMeta, Snapshot,
+  HeroMetaMessage, SnapshotHero, HeroMeta, SnapshotCreep, CreepMeta, RuneMeta, Snapshot,
   PeerJoinedMessage, PeerLeftMessage,
 } from '../src/sim/protocol';
 
@@ -54,7 +55,7 @@ const META_EVERY = 15; // cold hero fields every Nth tick (4 Hz)
 const MAX_PLAYERS = 8;
 
 /** Events whose effects live in the cold fields — flush meta immediately. */
-const META_EVENTS = new Set(['kill', 'respawn', 'purchase', 'levelUp', 'creepKill']);
+const META_EVENTS = new Set(['kill', 'respawn', 'purchase', 'levelUp', 'creepKill', 'runePickup']);
 
 // Quantize floats before JSON serialization: raw doubles stringify to 15+
 // chars each; 2 decimals is far below any visible threshold at world scale.
@@ -88,10 +89,11 @@ export class GameRoom extends DurableObject<Env> {
     this._resetMatch();
   }
 
-  /** Fresh match state for the current world — including creep camps. */
+  /** Fresh match state for the current world — including creep camps and runes. */
   private _resetMatch(): void {
     this._state = createMatchState();
     spawnCamps(this._state, this._world, NAVDATA[this._mapName].camps);
+    spawnRunes(this._state, this._world, NAVDATA[this._mapName].runes);
   }
 
   // ── HTTP / WebSocket upgrade ──────────────────────────────────────
@@ -172,6 +174,7 @@ export class GameRoom extends DurableObject<Env> {
           snapshot: this._currentSnapshot(),
           meta: this._heroMetas(),
           creepMeta: this._creepMetas(),
+          runeMeta: this._runeMetas(),
         };
         ws.send(JSON.stringify(welcome));
 
@@ -358,6 +361,16 @@ export class GameRoom extends DurableObject<Env> {
     }));
   }
 
+  /** Rune registry for the welcome handshake. */
+  private _runeMetas(): RuneMeta[] {
+    return this._state.runes.map((r) => ({
+      id: r.id,
+      pos: { x: q(r.pos.x), z: q(r.pos.z) },
+      type: r.type,
+      active: r.active,
+    }));
+  }
+
   private _wireHero(h: HeroState): SnapshotHero {
     const wire: SnapshotHero = {
       id: h.id,
@@ -394,6 +407,9 @@ export class GameRoom extends DurableObject<Env> {
       critChance: h.critChance,
       inventory: [...h.inventory],
       wardCharges: h.wardCharges,
+      ddTimer: q(h.ddTimer),
+      hasteTimer: q(h.hasteTimer),
+      invisTimer: q(h.invisTimer),
       abilityLevel: h.abilityLevel,
       abilityCooldown: q(h.abilityCooldown),
       abilityCharges: h.abilityCharges,

@@ -10,8 +10,9 @@
  *     flags packed 4 points/byte (2 bits each)
  *   u16 doodad count, then per doodad:
  *     u8 kind, u16 qx, u16 qz, u8 angle (×256/2π), u8 scale (×100)
- *   u8 camp count, then per camp: u16 qx, u16 qz, u8 n, n × u8 creep type
+ *   u8  camp count, then per camp: u16 qx, u16 qz, u8 n, n × u8 creep type
  *   u8 spawn count, then per spawn: u16 qx, u16 qz
+ *   u8 rune count, then per rune: u16 qx, u16 qz   (v2+; absent in v1)
  *
  * Positions are quantized to u16 across the map extent (≤0.25 world units
  * of error at the 128-tile maximum). Compression uses the platform-native
@@ -71,6 +72,12 @@ export async function encodeAmap(src: MapSource): Promise<Uint8Array> {
     w.u16(q.qz(s.z));
   }
 
+  w.u8(src.runes.length);
+  for (const r of src.runes) {
+    w.u16(q.qx(r.x));
+    w.u16(q.qz(r.z));
+  }
+
   const compressed = await deflate(w.finish());
   const out = new Uint8Array(5 + compressed.length);
   out[0] = MAGIC.charCodeAt(0);
@@ -86,7 +93,10 @@ export async function decodeAmap(buf: ArrayBuffer | Uint8Array): Promise<MapSour
   const raw = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   const magic = String.fromCharCode(raw[0], raw[1], raw[2], raw[3]);
   if (magic !== MAGIC) throw new Error(`amap: bad magic "${magic}"`);
-  if (raw[4] !== MAP_VERSION) throw new Error(`amap: unsupported version ${raw[4]}`);
+  const version = raw[4];
+  if (version !== MAP_VERSION && version !== 1) {
+    throw new Error(`amap: unsupported version ${version}`);
+  }
 
   const r = new ByteReader(await inflate(raw.subarray(5)));
 
@@ -146,7 +156,14 @@ export async function decodeAmap(buf: ArrayBuffer | Uint8Array): Promise<MapSour
   const spawns = [];
   for (let i = 0; i < nSpawns; i++) spawns.push({ x: q.x(r.u16()), z: q.z(r.u16()) });
 
-  return { name, tilesX, tilesZ, layer, texture, flags, doodads, camps, spawns };
+  // Rune spots — v2+; v1 files simply have none.
+  const runes = [];
+  if (version >= 2) {
+    const nRunes = r.u8();
+    for (let i = 0; i < nRunes; i++) runes.push({ x: q.x(r.u16()), z: q.z(r.u16()) });
+  }
+
+  return { name, tilesX, tilesZ, layer, texture, flags, doodads, camps, spawns, runes };
 }
 
 // ── Quantization ──────────────────────────────────────────────────────

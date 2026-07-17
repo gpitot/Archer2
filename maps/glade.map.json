@@ -1,6 +1,6 @@
 {
   "format": "archer-map",
-  "version": 1,
+  "version": 2,
   "name": "glade",
   "tilesX": 24,
   "tilesZ": 24,
@@ -112,5 +112,6 @@
   "spawns": [
     {"x":-600,"z":1200},
     {"x":600,"z":1200}
-  ]
+  ],
+  "runes": []
 }
