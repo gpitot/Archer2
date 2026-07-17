@@ -6,6 +6,14 @@ import { tileIsCliff, cliffTileGeometry, steppedHeightAt, layerAt, visionLayerAt
 
 const CHUNK_TILES = 32;
 
+/** Bounds for terrain construction. */
+export interface TerrainBounds {
+  minX: number;
+  minZ: number;
+  maxX: number;
+  maxZ: number;
+}
+
 /**
  * Renders the original map's terrain: one textured, vertex-colored mesh per
  * 32×32-tile chunk (frustum-culled individually). Every tile gets 4 unique
@@ -29,12 +37,21 @@ export class Wc3Terrain {
   private readonly _map: MapData;
   private readonly _atlas: GroundAtlas;
 
-  constructor(map: MapData) {
+  /**
+   * @param map        Full WC3 map data.
+   * @param bounds     If provided, only build chunks that intersect this
+   *                   world-space rectangle (plus `margin`). The rest of the
+   *                   map is skipped entirely, which dramatically reduces
+   *                   triangle count on large maps.
+   * @param margin     World-space padding added to each side of `bounds`.
+   *                   Defaults to 4500 (roughly the fog start distance).
+   */
+  constructor(map: MapData, bounds?: TerrainBounds, margin = 4500) {
     this._map = map;
     this._atlas = createGroundAtlas();
     this.group = new THREE.Group();
     this.group.name = 'terrain';
-    this._buildChunks();
+    this._buildChunks(bounds, margin);
   }
 
   // ── Sampling ───────────────────────────────────────────────────
@@ -80,12 +97,13 @@ export class Wc3Terrain {
 
   // ── Mesh construction ──────────────────────────────────────────
 
-  private _buildChunks(): void {
+  private _buildChunks(bounds?: TerrainBounds, margin = 0): void {
     const t = this._map.terrain;
     const tilesW = t.width - 1;
     const tilesH = t.height - 1;
     const chunksX = Math.ceil(tilesW / CHUNK_TILES);
     const chunksZ = Math.ceil(tilesH / CHUNK_TILES);
+    let skipped = 0;
 
     const material = new THREE.MeshStandardMaterial({
       map: this._atlas.texture,
@@ -96,16 +114,43 @@ export class Wc3Terrain {
 
     for (let cj = 0; cj < chunksZ; cj++) {
       for (let ci = 0; ci < chunksX; ci++) {
-        const mesh = this._buildChunk(
-          ci * CHUNK_TILES,
-          cj * CHUNK_TILES,
-          Math.min(CHUNK_TILES, tilesW - ci * CHUNK_TILES),
-          Math.min(CHUNK_TILES, tilesH - cj * CHUNK_TILES),
-          material,
-        );
+        const ti0 = ci * CHUNK_TILES;
+        const tj0 = cj * CHUNK_TILES;
+        const tw = Math.min(CHUNK_TILES, tilesW - ti0);
+        const th = Math.min(CHUNK_TILES, tilesH - tj0);
+
+        // Skip chunks outside the arena + margin
+        if (bounds && !this._chunkIntersects(bounds, margin, ti0, tj0, tw, th)) {
+          skipped++;
+          continue;
+        }
+
+        const mesh = this._buildChunk(ti0, tj0, tw, th, material);
         this.group.add(mesh);
       }
     }
+
+    const total = chunksX * chunksZ;
+    console.log(
+      `[terrain] built ${total - skipped}/${total} chunks (skipped ${skipped})` +
+      (bounds ? ` within arena bounds + ${margin}u margin` : ' (full map)'),
+    );
+  }
+
+  /** True if the tile-aligned rectangle [ti0, ti0+tw) × [tj0, tj0+th) intersects bounds + margin. */
+  private _chunkIntersects(bounds: TerrainBounds, margin: number, ti0: number, tj0: number, tw: number, th: number): boolean {
+    const t = this._map.terrain;
+    const x0 = t.offsetX + ti0 * TILE_SIZE;
+    const zMax = -(t.offsetY + tj0 * TILE_SIZE);
+    const x1 = x0 + tw * TILE_SIZE;
+    const zMin = zMax - th * TILE_SIZE;
+
+    return (
+      x1 >= bounds.minX - margin &&
+      x0 <= bounds.maxX + margin &&
+      zMax >= bounds.minZ - margin &&
+      zMin <= bounds.maxZ + margin
+    );
   }
 
   /** Build one chunk starting at tile (ti0, tj0), size tw×th tiles. */

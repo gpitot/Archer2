@@ -292,8 +292,13 @@ export class Game {
     this._scene = createScene();
     createLighting(this._scene);
 
-    // ── Terrain ──
-    this._terrain = new Wc3Terrain(this._map);
+    // ── Terrain (only build chunks overlapping the playable arena) ──
+    this._terrain = new Wc3Terrain(this._map, {
+      minX: this._arena.minX,
+      minZ: this._arena.minZ,
+      maxX: this._arena.maxX,
+      maxZ: this._arena.maxZ,
+    });
     this._scene.add(this._terrain.mesh);
     const heightAt = (x: number, z: number) => this._terrain.heightAt(x, z);
 
