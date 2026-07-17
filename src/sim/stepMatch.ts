@@ -669,12 +669,22 @@ function applyDamage(
 
   source.kills++;
   source.killStreak++;
+  const wasFirstBlood = state.firstBlood; // consumed by awardKillGold below
   const gold = awardKillGold(state, source, target);
   addXp(source, killXpReward(target, source), events);
   source.multiKillTimer = MULTI_KILL_WINDOW;
   source.multiKillCount++;
 
-  events.push({ type: 'kill', sourceId: source.id, victimId: target.id, gold });
+  events.push({
+    type: 'kill',
+    sourceId: source.id,
+    victimId: target.id,
+    gold,
+    firstBlood: wasFirstBlood || undefined,
+    // Mirror the original's caps: streak sounds repeat at 9+, multi-kill at 3+.
+    streak: Math.min(source.killStreak, 9),
+    multiKill: Math.min(source.multiKillCount, 3),
+  });
 }
 
 /**

@@ -62,7 +62,7 @@ export const BOUNTY_TABLE = [0, 0, 0, 0, 1, 3, 6, 10, 15, 21, 28];
 
 export const KILL_GOLD = { base: 5, firstBlood: 5, doubleKill: 15, tripleKill: 30 } as const;
 /** Seconds within which consecutive kills chain into a multi-kill. */
-export const MULTI_KILL_WINDOW = 0.5;
+export const MULTI_KILL_WINDOW = 7;
 
 // ── Shoot Arrow ability (Q) ───────────────────────────────────────────
 export const ARROW = {
