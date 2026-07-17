@@ -1,4 +1,5 @@
 import { ShopItem } from '../world/Shop';
+import { renderStatRows } from './Tooltip';
 
 interface ShopCallback {
   onBuy: (index: number) => void;
@@ -109,12 +110,16 @@ export class ShopWindow {
       `;
       row.appendChild(key);
 
-      // Name + desc
+      // Name + desc + stats
       const info = document.createElement('div');
       info.style.cssText = 'flex: 1;';
+      const stats = item.stats && item.stats.length > 0
+        ? `<div style="margin-top:4px;max-width:220px;">${renderStatRows(item.stats)}</div>`
+        : '';
       info.innerHTML = `
         <div style="color:#fff;font-size:13px;font-weight:bold;">${item.name}</div>
-        <div style="color:#999;font-size:10px;">${item.description || ''}</div>
+        <div style="color:#999;font-size:10px;line-height:1.3;">${item.description || ''}</div>
+        ${stats}
       `;
       row.appendChild(info);
 

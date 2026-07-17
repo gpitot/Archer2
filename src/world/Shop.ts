@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { StatLine } from '../ui/Tooltip';
 
 /** One purchasable item in a shop (display fields only; buy logic lives in the sim). */
 export interface ShopItem {
@@ -6,6 +7,8 @@ export interface ShopItem {
   name: string;
   cost: number;
   description: string;
+  /** Stat rows (bonuses, cooldowns, …) shown on the shop card. */
+  stats?: readonly StatLine[];
   /** Stackable items (e.g. ward charges) can be re-bought while owned. */
   stackable?: boolean;
 }

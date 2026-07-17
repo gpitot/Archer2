@@ -1,4 +1,5 @@
 import { ShopItem } from '../world/Shop';
+import { renderStatRows } from './Tooltip';
 
 /**
  * Shop HUD — appears bottom-center when hero is near a shop.
@@ -59,11 +60,17 @@ export class ShopOverlay {
         border-radius: 4px;
         padding: 6px 10px;
         min-width: 100px;
+        max-width: 150px;
+        text-align: left;
       `;
+      const stats = item.stats && item.stats.length > 0
+        ? `<div style="margin-top:4px;border-top:1px solid rgba(180,160,100,0.25);padding-top:3px;">${renderStatRows(item.stats)}</div>`
+        : '';
       card.innerHTML = `
         <div style="color:#fff;font-size:12px;font-weight:bold;">${item.name}</div>
-        <div style="color:#aaa;font-size:10px;">${item.description || ''}</div>
-        <div style="color:#ffcc44;font-size:11px;margin-top:2px;">${item.cost}g</div>
+        <div style="color:#aaa;font-size:10px;line-height:1.3;">${item.description || ''}</div>
+        ${stats}
+        <div style="color:#ffcc44;font-size:11px;margin-top:3px;">${item.cost}g</div>
       `;
       this._itemsEl.appendChild(card);
     }

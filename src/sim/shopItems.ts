@@ -10,6 +10,7 @@
  */
 import type { HeroState, CreepState, MatchState, SimEvent } from './state';
 import type { SimWorld } from './world';
+import type { StatLine, TooltipContent } from '../ui/Tooltip';
 import { findReachableNear, sphereHitsObstacle } from './world';
 import { Vec2 } from './math';
 import * as V from './math';
@@ -53,7 +54,10 @@ export interface ShopItemDef {
   id: string;
   name: string;
   cost: number;
+  /** One-sentence summary of what the item does. */
   description: string;
+  /** Stat rows (bonuses, cooldowns, …) shown in the tooltip and shop cards. */
+  stats?: readonly StatLine[];
   /** Stackable items (e.g. ward charges) can be re-bought while owned. */
   stackable?: boolean;
   /** Passive stat application on purchase. */
@@ -101,7 +105,8 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     id: 'boots',
     name: 'Boots of Speed',
     cost: 5,
-    description: '+60 movement speed',
+    description: 'Sturdy boots that quicken your stride across the battlefield.',
+    stats: [{ label: 'Movement Speed', values: ['+60'] }],
     apply: (hero) => {
       hero.speedBonus += 60;
     },
@@ -110,7 +115,12 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     id: 'sentry_wards',
     name: 'Sentry Wards',
     cost: 10,
-    description: '5 charges — press W to place a ward granting vision for 300s',
+    description: 'Deployable wards that grant vision of an area. Press W to place one.',
+    stats: [
+      { label: 'Charges', values: ['5'] },
+      { label: 'Sight Radius', values: [String(WARD.sightRadius)] },
+      { label: 'Duration', values: [`${WARD.duration}s`] },
+    ],
     stackable: true,
     apply: (hero) => {
       hero.wardCharges += 5;
@@ -155,7 +165,11 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     id: 'blink_dagger',
     name: 'Blink Dagger',
     cost: 15,
-    description: 'Click to instantly teleport to target location (450 range, 10s cooldown)',
+    description: 'Instantly teleport a short distance to a targeted location.',
+    stats: [
+      { label: 'Cast Range', values: [String(BLINK_RANGE)] },
+      { label: 'Cooldown', values: [`${BLINK_COOLDOWN}s`] },
+    ],
     apply: (_hero) => {
       // Effect is handled via the use.execute callback.
     },
@@ -182,7 +196,11 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     id: 'crit_gem',
     name: 'Gem of Critical Strike',
     cost: 20,
-    description: '20% chance to deal double damage with any ability',
+    description: 'A gleaming gem that empowers your abilities to occasionally strike for double damage.',
+    stats: [
+      { label: 'Crit Chance', values: [`${Math.round(CRIT_CHANCE * 100)}%`] },
+      { label: 'Crit Damage', values: [`${CRIT_MULTIPLIER}x`] },
+    ],
     apply: (hero) => {
       hero.critChance = Math.min(1, hero.critChance + CRIT_CHANCE);
     },
@@ -191,7 +209,11 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     id: 'ice_bow',
     name: 'Ice Bow',
     cost: 12,
-    description: 'Arrows that hit enemies slow them by 20% for 2s',
+    description: 'Frost-enchanted arrows that chill enemies on hit, slowing their movement.',
+    stats: [
+      { label: 'Slow', values: [`${Math.round((1 - ICE_BOW_SLOW_FACTOR) * 100)}%`] },
+      { label: 'Duration', values: [`${ICE_BOW_SLOW_DURATION}s`] },
+    ],
     apply: (_hero) => {
       // Slow is applied via the onProjectileHitHero hook.
     },
@@ -205,4 +227,17 @@ export const SHOP_ITEMS: ShopItemDef[] = [
 export const SHOP_ITEMS_BY_ID: Record<string, ShopItemDef> = {};
 for (const item of SHOP_ITEMS) {
   SHOP_ITEMS_BY_ID[item.id] = item;
+}
+
+/**
+ * Build the hover-tooltip content for an owned item. `includeCost` adds a
+ * cost footer (used by the shop, omitted for inventory).
+ */
+export function itemTooltip(def: ShopItemDef, includeCost = false): TooltipContent {
+  return {
+    name: def.name,
+    description: def.description,
+    stats: def.stats,
+    footer: includeCost ? `Cost: ${def.cost}g` : undefined,
+  };
 }
