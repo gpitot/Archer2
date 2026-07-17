@@ -46,6 +46,11 @@ import { BLINK_COOLDOWN, CRIT_MULTIPLIER } from './shopItems';
 import { breakInvisibility, runeDamageMultiplier, stepRuneBuffs, stepRunes } from './stepRunes';
 import { RUNE } from './runeRules';
 
+/** Slow duration (seconds) applied by Ice Bow on arrow hit. */
+const ICE_BOW_SLOW_DURATION = 2;
+/** Speed multiplier while slowed. */
+const ICE_BOW_SLOW_FACTOR = 0.8;
+
 /**
  * Advance the match by `dt` seconds, applying `inputs` queued since the last
  * step. Mutates `state` in place and returns the discrete events that fired
@@ -80,6 +85,7 @@ export function stepMatch(
   stepBlasts(state, dt, events, rng);
   stepRunes(state, dt, events, rng);
   stepWards(state, dt);
+  stepFountains(state, dt, world);
   stepIncome(state, dt);
 
   state.tick++;
@@ -473,6 +479,10 @@ function stepHero(hero: HeroState, dt: number): void {
 
   stepRuneBuffs(hero, dt);
 
+  if (hero.slowTimer > 0) {
+    hero.slowTimer = Math.max(0, hero.slowTimer - dt);
+  }
+
   if (hero.moving && hero.path.length > 0) {
     moveAlongPath(hero, dt);
   } else if (hero.path.length === 0) {
@@ -521,10 +531,11 @@ function respawn(hero: HeroState, pos: V.Vec2): void {
   hero.respawnTimer = 0;
   hero.path = [];
   hero.moving = false;
-  // Rune buffs don't survive death.
+  // Rune buffs and debuffs don't survive death.
   hero.ddTimer = 0;
   hero.hasteTimer = 0;
   hero.invisTimer = 0;
+  hero.slowTimer = 0;
 }
 
 // ── Projectiles ───────────────────────────────────────────────────────
@@ -572,6 +583,9 @@ function stepProjectiles(
       const source = state.heroes.find((h) => h.id === p.ownerId);
       state.projectiles.splice(i, 1);
       if (source) {
+        if (source.inventory.includes('ice_bow')) {
+          target.slowTimer = ICE_BOW_SLOW_DURATION;
+        }
         const crit = rollCrit(source, rng);
         const damage = critDamage(p.damage, crit) * runeDamageMultiplier(source);
         applyDamage(state, target, source, damage, p.id, events, crit);
@@ -586,6 +600,9 @@ function stepProjectiles(
       const source = state.heroes.find((h) => h.id === p.ownerId);
       state.projectiles.splice(i, 1);
       if (source) {
+        if (source.inventory.includes('ice_bow')) {
+          creepTarget.slowTimer = ICE_BOW_SLOW_DURATION;
+        }
         const crit = rollCrit(source, rng);
         const damage = critDamage(p.damage, crit) * runeDamageMultiplier(source);
         applyCreepDamage(state, creepTarget, source, damage, events, crit);
@@ -752,6 +769,22 @@ function stepBlasts(state: MatchState, dt: number, events: SimEvent[], rng: () =
   }
 }
 
+// ── Fountains ───────────────────────────────────────────────────────
+
+/** Heal heroes standing within any fountain's radius. */
+function stepFountains(state: MatchState, dt: number, world: SimWorld): void {
+  if (world.fountains.length === 0) return;
+  for (const hero of state.heroes) {
+    if (!hero.alive || hero.hp >= HERO.maxHp) continue;
+    for (const fountain of world.fountains) {
+      if (V.distanceSq(hero.pos, fountain.pos) <= fountain.healRadius * fountain.healRadius) {
+        hero.hp = Math.min(HERO.maxHp, hero.hp + fountain.healPerSecond * dt);
+        break; // one fountain at a time is sufficient
+      }
+    }
+  }
+}
+
 // ── Wards & income ────────────────────────────────────────────────────
 
 function stepWards(state: MatchState, dt: number): void {
@@ -775,7 +808,8 @@ function stepIncome(state: MatchState, dt: number): void {
 // ── Derived helpers (shared with the view layer) ──────────────────────
 
 export function heroSpeed(hero: HeroState): number {
-  return HERO.baseSpeed + hero.speedBonus + (hero.hasteTimer > 0 ? RUNE.hasteSpeedBonus : 0);
+  const speed = HERO.baseSpeed + hero.speedBonus + (hero.hasteTimer > 0 ? RUNE.hasteSpeedBonus : 0);
+  return hero.slowTimer > 0 ? speed * ICE_BOW_SLOW_FACTOR : speed;
 }
 
 export function passiveIncome(hero: HeroState): number {

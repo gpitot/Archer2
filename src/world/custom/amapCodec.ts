@@ -78,6 +78,13 @@ export async function encodeAmap(src: MapSource): Promise<Uint8Array> {
     w.u16(q.qz(r.z));
   }
 
+  // Fountains (v3+)
+  w.u8(src.fountains.length);
+  for (const f of src.fountains) {
+    w.u16(q.qx(f.x));
+    w.u16(q.qz(f.z));
+  }
+
   const compressed = await deflate(w.finish());
   const out = new Uint8Array(5 + compressed.length);
   out[0] = MAGIC.charCodeAt(0);
@@ -94,7 +101,7 @@ export async function decodeAmap(buf: ArrayBuffer | Uint8Array): Promise<MapSour
   const magic = String.fromCharCode(raw[0], raw[1], raw[2], raw[3]);
   if (magic !== MAGIC) throw new Error(`amap: bad magic "${magic}"`);
   const version = raw[4];
-  if (version !== MAP_VERSION && version !== 1) {
+  if (version !== MAP_VERSION && version !== 1 && version !== 2) {
     throw new Error(`amap: unsupported version ${version}`);
   }
 
@@ -163,7 +170,14 @@ export async function decodeAmap(buf: ArrayBuffer | Uint8Array): Promise<MapSour
     for (let i = 0; i < nRunes; i++) runes.push({ x: q.x(r.u16()), z: q.z(r.u16()) });
   }
 
-  return { name, tilesX, tilesZ, layer, texture, flags, doodads, camps, spawns, runes };
+  // Fountains — v3+; earlier files simply have none.
+  const fountains = [];
+  if (version >= 3) {
+    const nFountains = r.u8();
+    for (let i = 0; i < nFountains; i++) fountains.push({ x: q.x(r.u16()), z: q.z(r.u16()) });
+  }
+
+  return { name, tilesX, tilesZ, layer, texture, flags, doodads, camps, spawns, runes, fountains };
 }
 
 // ── Quantization ──────────────────────────────────────────────────────

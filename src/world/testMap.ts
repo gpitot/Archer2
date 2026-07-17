@@ -260,5 +260,11 @@ export function buildTestSimWorld(): SimWorld {
     map.doodads,
   );
   world.obstacles = testMapObstacles();
+  // Place one healing fountain on open ground near the west side.
+  world.fountains = [{
+    pos: { x: -600, z: 200 },
+    healRadius: 200,
+    healPerSecond: 100,
+  }];
   return world;
 }

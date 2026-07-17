@@ -135,6 +135,15 @@ export const BLAST = {
   maxLevel: 3,
 } as const;
 
+// ── Fountains ──────────────────────────────────────────────────────────
+/** Healing fountain: WC3 fountain-of-health behaviour. */
+export const FOUNTAIN = {
+  /** How close a hero must stand to receive healing (world units). */
+  healRadius: 200,
+  /** HP restored per second while standing in the aura. */
+  healPerSecond: 15,
+} as const;
+
 // ── Wards ─────────────────────────────────────────────────────────────
 export const WARD = {
   /** WC3 Observer Ward sight range. */

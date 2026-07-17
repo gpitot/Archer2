@@ -84,6 +84,8 @@ export interface HeroMeta {
   ddTimer: number;
   hasteTimer: number;
   invisTimer: number;
+  /** Slow debuff timer from Ice Bow (seconds remaining; 0 = inactive). */
+  slowTimer: number;
   abilityLevel: number;
   abilityCooldown: number;
   abilityCharges: number;

@@ -18,7 +18,7 @@ import { stepMatch } from '../src/sim/stepMatch';
 import { spawnCamps } from '../src/sim/stepCreeps';
 import { spawnRunes } from '../src/sim/stepRunes';
 import { CREEP } from '../src/sim/creepRules';
-import { SimWorld, ObstacleAABB, Rect, Shop, findRespawnPosition, findWalkableNear } from '../src/sim/world';
+import { SimWorld, ObstacleAABB, Rect, Shop, FountainDef, findRespawnPosition, findWalkableNear } from '../src/sim/world';
 import { SHOP_ITEMS } from '../src/sim/shopItems';
 import { NavGrid } from '../src/navigation/NavGrid';
 import { Pathfinder } from '../src/navigation/Pathfinder';
@@ -410,6 +410,7 @@ export class GameRoom extends DurableObject<Env> {
       ddTimer: q(h.ddTimer),
       hasteTimer: q(h.hasteTimer),
       invisTimer: q(h.invisTimer),
+      slowTimer: q(h.slowTimer),
       abilityLevel: h.abilityLevel,
       abilityCooldown: q(h.abilityCooldown),
       abilityCharges: h.abilityCharges,
@@ -470,7 +471,14 @@ export class GameRoom extends DurableObject<Env> {
       items: SHOP_ITEMS,
     };
 
+    // Fountains: use authored positions or built-in defaults (empty).
+    const fountains: FountainDef[] = (data.fountains ?? []).map((f) => ({
+      pos: { x: f.x, z: f.z },
+      healRadius: 200,
+      healPerSecond: 100,
+    }));
+
     this._mapName = mapName;
-    this._world = { navGrid, pathfinder, obstacles, arena, shop };
+    this._world = { navGrid, pathfinder, obstacles, arena, shop, fountains };
   }
 }

@@ -36,9 +36,9 @@ import { spawnCamps } from '../sim/stepCreeps';
 import { spawnRunes } from '../sim/stepRunes';
 import type { CampPlacement } from '../sim/creepRules';
 import { RUNE_TYPES, RunePlacement } from '../sim/runeRules';
-import { SimWorld, sphereHitsObstacle } from '../sim/world';
+import { SimWorld, sphereHitsObstacle, FountainDef } from '../sim/world';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
-import { HERO, ARROW, DODGE, WARD, SCOUT, BLAST, basicRankCap, ultimateRankCap } from '../sim/rules';
+import { HERO, ARROW, DODGE, WARD, SCOUT, BLAST, FOUNTAIN, basicRankCap, ultimateRankCap } from '../sim/rules';
 import { BLINK_COOLDOWN, SHOP_ITEMS } from '../sim/shopItems';
 import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta, CreepMeta, RuneMeta } from '../sim/protocol';
 import { creepMaxHp } from '../sim/creepRules';
@@ -53,6 +53,7 @@ import { ProjectileView } from '../combat/ProjectileView';
 import { WardView } from '../entities/WardView';
 import { BlastView } from '../entities/BlastView';
 import { RuneView } from '../entities/RuneView';
+import { FountainView } from '../entities/FountainView';
 import { ExplosionEffects } from '../rendering/ExplosionEffect';
 import { CreepView } from '../entities/CreepView';
 
@@ -87,6 +88,7 @@ export class Game {
   private _mapSpawns: { x: number; z: number }[] | null = null;
   private _mapCamps: CampPlacement[] | null = null;
   private _mapRunes: RunePlacement[] | null = null;
+  private _mapFountains: FountainDef[] | null = null;
   private _terrain!: GroundProvider;
   private _water!: Water;
 
@@ -190,6 +192,7 @@ export class Game {
   private _explosions!: ExplosionEffects;
   private _creepViews = new Map<string, CreepView>();
   private _runeViews = new Map<string, RuneView>();
+  private _fountainViews: FountainView[] = [];
   private _projectilePool: ProjectileView[] = [];
 
   // ── Player helpers ──
@@ -259,6 +262,7 @@ export class Game {
     this._mapSpawns = loaded.spawns;
     this._mapCamps = loaded.camps;
     this._mapRunes = loaded.runes;
+    this._mapFountains = loaded.fountains;
     const bounds = this._map.bounds;
 
     // ── Renderer ──
@@ -315,6 +319,14 @@ export class Game {
       this._map.doodads,
     );
     this._world.obstacles = buildObstaclesFromSolids(doodads.projectileSolids);
+
+    // ── Fountains: use authored placements or built-in default positions ──
+    if (this._mapFountains) {
+      this._world.fountains = this._mapFountains;
+    } else {
+      // Built-in maps: place two fountains at the arena's quarter-points.
+      this._world.fountains = buildDefaultFountains(this._arena, this._navGrid);
+    }
 
     // Override the shop position with the actual placed shop location
     // (buildSimWorld picks a walkable spot, but we already found one below).
@@ -384,6 +396,14 @@ export class Game {
     this._fogLayer.applyTo(this._water.group);
     this._fogLayer.applyTo(doodads.group);
     this._fogLayer.applyTo(this._shop.mesh);
+
+    // ── Fountain views (static map objects) ──
+    for (const fountain of this._world.fountains) {
+      const fv = new FountainView();
+      this._scene.add(fv.mesh);
+      this._fountainViews.push(fv);
+      this._fogLayer.applyTo(fv.mesh);
+    }
 
     // ── Projectile view pool (20 pre-allocated) ──
     for (let i = 0; i < 20; i++) {
@@ -720,6 +740,7 @@ export class Game {
       aggroTargetId: null,
       attackCooldown: 0,
       lastActiveTick: 0,
+      slowTimer: 0,
     };
   }
 
@@ -860,6 +881,7 @@ export class Game {
     dst.ddTimer = src.ddTimer;
     dst.hasteTimer = src.hasteTimer;
     dst.invisTimer = src.invisTimer;
+    dst.slowTimer = src.slowTimer;
     dst.abilityLevel = src.abilityLevel;
     // Don't reconcile the local player's charge / cooldown / recoil timers —
     // prediction ticks them correctly and the server's value could be stale
@@ -1283,6 +1305,9 @@ export class Game {
     // ── Process events ──
     for (const ev of events) this._handleEvent(ev, dt);
 
+    // ── Fountain healing sparkle for the local player ──
+    this._updateHealSparkle(dt);
+
     // ── Sync views ──
     this._syncAllViews(dt);
 
@@ -1382,6 +1407,9 @@ export class Game {
     this._tickCosmeticProjectiles(dt);
     if (renderTime !== null) this._renderProjectiles(renderTime);
 
+    // ── Fountain healing sparkle for the local player ──
+    this._updateHealSparkle(dt);
+
     // ── Sync views ──
     this._syncAllViews(dt);
 
@@ -1472,6 +1500,22 @@ export class Game {
       p.pos.x, p.pos.z,
       this._heightAt(p.pos.x, p.pos.z),
     );
+  }
+
+  /** If the local hero is within a fountain's heal radius, trigger a sparkle effect. */
+  private _updateHealSparkle(_dt: number): void {
+    const hero = this._playerState;
+    if (!hero || !hero.alive || hero.hp >= HERO.maxHp) return;
+    const view = this._playerView;
+    if (!view) return;
+    for (const fountain of this._world.fountains) {
+      const dx = hero.pos.x - fountain.pos.x;
+      const dz = hero.pos.z - fountain.pos.z;
+      if (dx * dx + dz * dz <= fountain.healRadius * fountain.healRadius) {
+        view.flashHeal();
+        return;
+      }
+    }
   }
 
   /** Activate ground-targeting for sentry wards. */
@@ -1596,6 +1640,8 @@ export class Game {
     this._syncCreepViews(dt);
     // Sync rune views
     this._syncRuneViews(dt);
+    // Sync fountain views
+    this._syncFountainViews(dt);
   }
 
   // ── Blast zone view sync ───────────────────────────────────────────────────
@@ -1907,6 +1953,22 @@ export class Game {
     }
   }
 
+  // ── Fountain view sync ──────────────────────────────────────────────
+
+  private _syncFountainViews(dt: number): void {
+    for (let i = 0; i < this._world.fountains.length; i++) {
+      const fountain = this._world.fountains[i];
+      let fv = this._fountainViews[i];
+      if (!fv) {
+        fv = new FountainView();
+        this._scene.add(fv.mesh);
+        this._fountainViews[i] = fv;
+        this._fogLayer.applyTo(fv.mesh);
+      }
+      fv.sync(fountain.pos, dt, this._heightAt.bind(this));
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────
 
   private _render(_interpolation: number): void {
@@ -1972,6 +2034,17 @@ export class Game {
     // Shop marker
     const sp = this._world.shop.pos;
     markers.push({ x: sp.x, z: sp.z, color: '#ffcc44', radius: 4 });
+
+    // Fountain markers
+    for (const fountain of this._world.fountains) {
+      const visible = this._fog.isVisible(playerTeam, fountain.pos.x, fountain.pos.z);
+      markers.push({
+        x: fountain.pos.x,
+        z: fountain.pos.z,
+        color: visible ? '#4488ff' : '#334466',
+        radius: 3,
+      });
+    }
 
     this._minimap.draw(markers, {
       cx: this._camera.target.x,
@@ -2102,6 +2175,15 @@ export class Game {
         rv.mesh.visible = this._fog.isVisible(team, r.pos.x, r.pos.z);
       }
     }
+
+    // Fountains: visible when inside our vision.
+    for (let i = 0; i < this._world.fountains.length; i++) {
+      const fountain = this._world.fountains[i];
+      const fv = this._fountainViews[i];
+      if (fv) {
+        fv.mesh.visible = this._fog.isVisible(team, fountain.pos.x, fountain.pos.z);
+      }
+    }
   }
 
   // ── Spawn helpers ───────────────────────────────────────────────────
@@ -2172,6 +2254,42 @@ export class Game {
     url.searchParams.set('map', this._mapName === 'test' ? 'arena' : 'test');
     window.location.href = url.toString();
   }
+}
+
+/**
+ * Place two healing fountains at the arena's horizontal quarter-points,
+ * snapped to walkable cells near the vertical center. Used by built-in
+ * maps that don't author explicit fountain placements.
+ */
+function buildDefaultFountains(arena: ArenaRect, navGrid: NavGrid): FountainDef[] {
+  const fountains: FountainDef[] = [];
+  // Place at 25% and 75% of the arena width, on the horizontal midline.
+  for (const fx of [0.25, 0.75]) {
+    const wx = arena.minX + fx * arena.width;
+    const wz = arena.centerZ;
+    const start = navGrid.worldToGrid(wx, wz);
+    for (let radius = 0; radius < 64; radius++) {
+      let found = false;
+      for (let dz = -radius; dz <= radius && !found; dz++) {
+        for (let dx = -radius; dx <= radius && !found; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== radius) continue;
+          const gx = start.gx + dx;
+          const gz = start.gz + dz;
+          if (navGrid.isWalkable(gx, gz)) {
+            const { wx: cx, wz: cz } = navGrid.gridToWorld(gx, gz);
+            fountains.push({
+              pos: { x: cx, z: cz },
+              healRadius: FOUNTAIN.healRadius,
+              healPerSecond: FOUNTAIN.healPerSecond,
+            });
+            found = true;
+          }
+        }
+      }
+      if (found) break;
+    }
+  }
+  return fountains;
 }
 
 /** Lerp between two angles (radians) taking the shortest path. */

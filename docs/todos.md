@@ -4,7 +4,7 @@ runes (double damage, speed, invis) - done
 
 healing fountain
 
-items (lifesteal , slow)
+items (lifesteal , slow, health, damage, hook? , ministun, fire bow, biscuit, multi shot bow, )
 
 music
 

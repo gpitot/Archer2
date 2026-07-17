@@ -39,6 +39,7 @@ export function createCreep(id: string, campId: string, type: CreepTypeId, pos: 
     aggroTargetId: null,
     attackCooldown: 0,
     lastActiveTick: 0,
+    slowTimer: 0,
   };
 }
 
@@ -94,6 +95,10 @@ export function stepCreeps(
 
     if (creep.attackCooldown > 0) {
       creep.attackCooldown = Math.max(0, creep.attackCooldown - dt);
+    }
+
+    if (creep.slowTimer > 0) {
+      creep.slowTimer = Math.max(0, creep.slowTimer - dt);
     }
 
     // Acquire aggro. Idle scans are throttled and staggered by creep index so
@@ -192,7 +197,8 @@ function moveCreep(
   const dist = V.length(dir);
   if (dist < 1e-3) return;
   const unit = V.scale(dir, 1 / dist);
-  const next = V.add(creep.pos, V.scale(unit, Math.min(def.speed * dt, dist)));
+  const speed = creep.slowTimer > 0 ? def.speed * 0.8 : def.speed;
+  const next = V.add(creep.pos, V.scale(unit, Math.min(speed * dt, dist)));
   if (sphereHitsObstacle(world, next, def.bodyRadius)) return;
   const { gx, gz } = world.navGrid.worldToGrid(next.x, next.z);
   if (!world.navGrid.isWalkable(gx, gz)) return;
@@ -241,6 +247,7 @@ function respawnCreep(state: MatchState, creep: CreepState, events: SimEvent[]):
   creep.pos = V.clone(creep.spawnPos);
   creep.aggroTargetId = null;
   creep.attackCooldown = 0;
+  creep.slowTimer = 0;
   creep.lastActiveTick = state.tick;
   events.push({ type: 'creepRespawn', creepId: creep.id, level: creep.level });
 }

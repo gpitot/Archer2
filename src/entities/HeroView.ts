@@ -21,10 +21,13 @@ export class HeroView {
   private _healthBar: HealthBar;
   private _flashGlow: THREE.PointLight;
   private _hitFlashTimer = 0;
+  private _healFlashTimer = 0;
   private _wasAlive = true;
   /** Rune-buff indicator sprites floating above the head (DotA-style). */
   private _buffSprites = new Map<RuneTypeId, THREE.Sprite>();
   private _buffTime = 0;
+  /** Healing sparkle particle pool. */
+  private _healSparkles: { sprite: THREE.Sprite; vy: number; life: number }[] = [];
 
   constructor(
     heroId: string,
@@ -71,6 +74,15 @@ export class HeroView {
     this._rig.setEmissive(0xff0000, 0.6);
   }
 
+  /** Sparkle + green glow when healed by a fountain (call once per tick while healing). */
+  flashHeal(): void {
+    this._healFlashTimer = 0.12;
+    this._rig.setEmissive(0x22cc88, 0.35);
+    // Spawn 1–2 tiny sparkle particles
+    const count = Math.random() < 0.5 ? 1 : 2;
+    for (let i = 0; i < count; i++) this._spawnHealSparkle();
+  }
+
   /** Pulse the muzzle flash (driven by a sim `fire` event). */
   flashFire(): void {
     this._flashGlow.intensity = 3;
@@ -101,8 +113,8 @@ export class HeroView {
     const y = this._heightAt(state.pos.x, state.pos.z) + HERO.groundOffset;
     this.mesh.position.set(state.pos.x, y, state.pos.z);
     this.mesh.rotation.y = state.facing;
-    this._rig.update(dt, state.moving,
-      HERO.baseSpeed + state.speedBonus + (state.hasteTimer > 0 ? RUNE.hasteSpeedBonus : 0));
+    const speed = HERO.baseSpeed + state.speedBonus + (state.hasteTimer > 0 ? RUNE.hasteSpeedBonus : 0);
+    this._rig.update(dt, state.moving, state.slowTimer > 0 ? speed * 0.8 : speed);
 
     // Invulnerability flicker (mirrors the sim's invulnerable timer).
     if (state.invulnerable) {
@@ -123,7 +135,7 @@ export class HeroView {
     // Dodge visual — purple tint while dodging
     if (state.dodgeActive) {
       this._rig.setEmissive(0x8833cc, 0.7);
-    } else if (!state.invulnerable && this._hitFlashTimer <= 0) {
+    } else if (!state.invulnerable && this._hitFlashTimer <= 0 && this._healFlashTimer <= 0) {
       this._rig.setEmissive(0x000000, 0);
     }
 
@@ -134,9 +146,19 @@ export class HeroView {
       if (t > 0) this._rig.setEmissive(0xff0000, t * 0.6);
       else this._rig.setEmissive(0x000000, 0);
     }
+    // Heal flash — green glow that fades quickly.
+    if (this._healFlashTimer > 0) {
+      this._healFlashTimer -= dt;
+      const t = Math.max(0, this._healFlashTimer / 0.12);
+      if (t > 0) this._rig.setEmissive(0x22cc88, t * 0.35);
+      else this._rig.setEmissive(0x000000, 0);
+    }
     if (this._flashGlow.intensity > 0) {
       this._flashGlow.intensity = Math.max(0, this._flashGlow.intensity - dt * 8);
     }
+
+    // Tick healing sparkle particles.
+    this._tickSparkles(dt);
   }
 
   dispose(): void {
@@ -176,7 +198,50 @@ export class HeroView {
 
   private _onRespawn(): void {
     this._hitFlashTimer = 0;
+    this._healFlashTimer = 0;
     this._rig.onRespawn();
+  }
+
+  // ── Healing sparkle particles ───────────────────────────────────
+
+  /** Create one tiny green sparkle that floats up and fades out. */
+  private _spawnHealSparkle(): void {
+    const mat = new THREE.SpriteMaterial({
+      color: 0x44ffaa,
+      transparent: true,
+      opacity: 0.9,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(0.15, 0.15, 1);
+    sprite.renderOrder = 25;
+    // Random offset around the hero's waist
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 0.3 + Math.random() * 0.5;
+    sprite.position.set(
+      Math.cos(angle) * radius,
+      1.0 + Math.random() * 0.8,
+      Math.sin(angle) * radius,
+    );
+    this.mesh.add(sprite);
+    this._healSparkles.push({ sprite, vy: 0.8 + Math.random() * 1.2, life: 0.6 + Math.random() * 0.4 });
+  }
+
+  /** Advance all sparkles — float upward, shrink, fade, dispose when spent. */
+  private _tickSparkles(dt: number): void {
+    for (let i = this._healSparkles.length - 1; i >= 0; i--) {
+      const p = this._healSparkles[i];
+      p.life -= dt;
+      if (p.life <= 0) {
+        p.sprite.material.dispose();
+        p.sprite.removeFromParent();
+        this._healSparkles.splice(i, 1);
+        continue;
+      }
+      p.sprite.position.y += p.vy * dt;
+      p.sprite.material.opacity = Math.max(0, p.life);
+    }
   }
 }
 

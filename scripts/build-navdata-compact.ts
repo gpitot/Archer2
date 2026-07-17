@@ -86,13 +86,13 @@ function main() {
     }
 
     const arena = arenaFromWc3(-2784, -6720, 4416, 512);
-    entries.push(buildEntry('arena', terrain, pathing, doodads, arena, obstacles));
+    entries.push(buildEntry('arena', terrain, pathing, doodads, arena, obstacles, null, null, null, null));
   }
 
   // ── 'test': the tiny generated debug map ──
   {
     const map = buildTestMapData();
-    entries.push(buildEntry('test', map.terrain, map.pathing, map.doodads, { ...TEST_MAP_ARENA }, testMapObstacles()));
+    entries.push(buildEntry('test', map.terrain, map.pathing, map.doodads, { ...TEST_MAP_ARENA }, testMapObstacles(), null, null, null, null));
   }
 
   // ── Custom editor-made maps: every maps/*.map.json ──
@@ -110,6 +110,7 @@ function main() {
       entries.push(buildEntry(
         name, custom.data.terrain, custom.data.pathing, custom.data.doodads,
         custom.arena, custom.obstacles, custom.camps, custom.spawns, custom.runes,
+        custom.fountains.map((f) => ({ x: f.pos.x, z: f.pos.z })),
       ));
     }
   }
@@ -146,6 +147,7 @@ function buildEntry(
   camps: CampPlacement[] | null = null,
   spawns: { x: number; z: number }[] | null = null,
   runes: RunePlacement[] | null = null,
+  fountains: { x: number; z: number }[] | null = null,
 ): string {
   const tilesH = terrain.height - 1;
   const bounds = { minX: terrain.offsetX, minZ: -(terrain.offsetY + tilesH * 128) };
@@ -214,6 +216,9 @@ ${obsLines.join(',\n')}
 
     /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
     runes: ${runes && runes.length > 0 ? JSON.stringify(runes.map((r) => ({ x: round1(r.x), z: round1(r.z) }))) : 'null'},
+
+    /** Authored fountain placements (custom maps); null → built-in defaults. */
+    fountains: ${fountains && fountains.length > 0 ? JSON.stringify(fountains.map((f) => ({ x: round1(f.x), z: round1(f.z) }))) : 'null'},
   }`;
 }
 

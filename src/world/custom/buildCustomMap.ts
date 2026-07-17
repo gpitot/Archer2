@@ -23,6 +23,8 @@ import type { SimWorld, ObstacleAABB } from '../../sim/world';
 import { buildSimWorld } from '../../sim/buildWorld';
 import type { CampPlacement } from '../../sim/creepRules';
 import type { RunePlacement } from '../../sim/runeRules';
+import type { FountainDef } from '../../sim/world';
+import { FOUNTAIN } from '../../sim/rules';
 import {
   MapSource, SpawnSource, SRC_FLAG_RAMP, SRC_FLAG_WATER, TYPE_ID_BY_KIND, pointsX, pointsZ,
 } from './mapSource';
@@ -48,6 +50,8 @@ export interface CustomMap {
   camps: CampPlacement[];
   /** Authored rune spots, world space. */
   runes: RunePlacement[];
+  /** Authored fountain placements, world space. */
+  fountains: FountainDef[];
   /** Projectile-blocking AABBs (solid rocks), world space. */
   obstacles: ObstacleAABB[];
 }
@@ -93,6 +97,11 @@ export function buildCustomMap(src: MapSource): CustomMap {
       units: c.units.slice(),
     })),
     runes: src.runes.map((r) => ({ x: r.x, z: r.z })),
+    fountains: src.fountains.map((f) => ({
+      pos: { x: f.x, z: f.z },
+      healRadius: FOUNTAIN.healRadius,
+      healPerSecond: FOUNTAIN.healPerSecond,
+    })),
     obstacles: buildObstacles(src),
   };
 }
@@ -107,6 +116,7 @@ export function buildCustomSimWorld(src: MapSource): SimWorld {
     map.data.doodads,
   );
   world.obstacles = map.obstacles;
+  world.fountains = map.fountains;
   return world;
 }
 

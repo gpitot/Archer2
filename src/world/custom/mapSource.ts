@@ -70,6 +70,12 @@ export interface RuneSource {
   z: number;
 }
 
+/** A healing fountain placement. */
+export interface FountainSource {
+  x: number;
+  z: number;
+}
+
 export interface MapSource {
   name: string;
   /** Size in tiles (tilepoint grids are +1 per axis). */
@@ -87,11 +93,12 @@ export interface MapSource {
   camps: CampSource[];
   spawns: SpawnSource[];
   runes: RuneSource[];
+  fountains: FountainSource[];
 }
 
 export const MAP_FORMAT = 'archer-map';
-/** v2 added rune spots (v1 files load fine — no runes). */
-export const MAP_VERSION = 2;
+/** v3 added fountain placements (v1–v2 files load fine — no fountains). */
+export const MAP_VERSION = 3;
 export const MIN_TILES = 8;
 export const MAX_TILES = 128;
 /** Ground layer new maps start on (WC3 convention: layer 2 = height 0). */
@@ -121,6 +128,7 @@ export function createEmptyMapSource(name: string, tilesX: number, tilesZ: numbe
     camps: [],
     spawns: [],
     runes: [],
+    fountains: [],
   };
 }
 
@@ -136,6 +144,7 @@ export function cloneMapSource(src: MapSource): MapSource {
     camps: src.camps.map((c) => ({ ...c, units: c.units.slice() })),
     spawns: src.spawns.map((s) => ({ ...s })),
     runes: src.runes.map((r) => ({ ...r })),
+    fountains: src.fountains.map((f) => ({ ...f })),
   };
 }
 
@@ -177,6 +186,8 @@ interface MapJson {
   spawns: { x: number; z: number }[];
   /** Rune spots — absent in v1 files. */
   runes?: { x: number; z: number }[];
+  /** Fountain placements — absent in v1–v2 files. */
+  fountains?: { x: number; z: number }[];
 }
 
 const FLAG_CHARS: Record<number, string> = {
@@ -232,6 +243,7 @@ export function serializeMapJson(src: MapSource): string {
     camps: src.camps.map((c) => ({ x: Math.round(c.x), z: Math.round(c.z), units: c.units.slice() })),
     spawns: src.spawns.map((s) => ({ x: Math.round(s.x), z: Math.round(s.z) })),
     runes: src.runes.map((r) => ({ x: Math.round(r.x), z: Math.round(r.z) })),
+    fountains: src.fountains.map((f) => ({ x: Math.round(f.x), z: Math.round(f.z) })),
   };
   // Hand-rolled layout: one grid row / doodad per line so diffs stay readable.
   const rows = (a: string[]) => a.map((r) => `    ${JSON.stringify(r)}`).join(',\n');
@@ -262,6 +274,9 @@ ${items(json.spawns)}
   ],
   "runes": [
 ${items(json.runes ?? [])}
+  ],
+  "fountains": [
+${items(json.fountains ?? [])}
   ]
 }
 `;
@@ -270,7 +285,7 @@ ${items(json.runes ?? [])}
 export function parseMapJson(text: string): MapSource {
   const json = JSON.parse(text) as MapJson;
   if (json.format !== MAP_FORMAT) throw new Error(`not an archer map (format=${json.format})`);
-  if (json.version !== MAP_VERSION && json.version !== 1) {
+  if (json.version !== MAP_VERSION && json.version !== 2 && json.version !== 1) {
     throw new Error(`unsupported map version ${json.version}`);
   }
   validateMapName(json.name);
@@ -322,5 +337,6 @@ export function parseMapJson(text: string): MapSource {
     camps,
     spawns: (json.spawns ?? []).map((s) => ({ x: s.x, z: s.z })),
     runes: (json.runes ?? []).map((r) => ({ x: r.x, z: r.z })),
+    fountains: (json.fountains ?? []).map((f) => ({ x: f.x, z: f.z })),
   };
 }

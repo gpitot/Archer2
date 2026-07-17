@@ -63,6 +63,7 @@ export interface HeroState {
   ddTimer: number;
   hasteTimer: number;
   invisTimer: number;
+  slowTimer: number;
   abilityLevel: number;
   abilityCooldown: number;
   abilityCharges: number;
@@ -141,6 +142,8 @@ export interface CreepState {
   attackCooldown: number;
   /** Last tick this creep moved/fought/changed — drives snapshot idle-omission. */
   lastActiveTick: number;
+  /** Slow debuff timer from Ice Bow (seconds remaining; 0 = inactive). */
+  slowTimer: number;
 }
 
 export interface MatchState {
@@ -239,6 +242,7 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     ddTimer: 0,
     hasteTimer: 0,
     invisTimer: 0,
+    slowTimer: 0,
     // The level-1 skill point is auto-spent on Q (it's the basic attack), so
     // heroes start with Q rank 1 and 0 banked points — next point at level 2.
     abilityLevel: 1,

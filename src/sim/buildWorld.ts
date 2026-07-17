@@ -65,7 +65,7 @@ export function buildSimWorld(
     items: SHOP_ITEMS,
   };
 
-  return { navGrid, pathfinder, obstacles, arena, shop };
+  return { navGrid, pathfinder, obstacles, arena, shop, fountains: [] };
 }
 
 /** Build a SimWorld from precomputed navdata.json (server path). */
@@ -74,6 +74,7 @@ export function buildSimWorldFromNavdata(navdata: {
   obstacles: { minX: number; minZ: number; maxX: number; maxZ: number }[];
   arenas: { terrain1: Rect };
   shopPos: { x: number; z: number };
+  fountains?: { x: number; z: number }[];
 }): SimWorld {
   const ng = navdata.navGrid;
   const navGrid = new NavGrid(ng.width, ng.height, ng.cellSize, ng.originX, ng.originZ);
@@ -95,12 +96,20 @@ export function buildSimWorldFromNavdata(navdata: {
     items: SHOP_ITEMS,
   };
 
+  // Fountains: use authored positions or default to empty.
+  const fountains: import('./world').FountainDef[] = (navdata.fountains ?? []).map((f) => ({
+    pos: { x: f.x, z: f.z },
+    healRadius: 200,
+    healPerSecond: 100,
+  }));
+
   return {
     navGrid,
     pathfinder,
     obstacles,
     arena: { ...navdata.arenas.terrain1 },
     shop,
+    fountains,
   };
 }
 

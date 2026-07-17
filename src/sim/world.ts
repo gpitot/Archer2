@@ -47,12 +47,21 @@ export interface Shop {
   items: ShopItemDef[];
 }
 
+/** A healing fountain: heroes standing within `healRadius` recharge HP at `healPerSecond`. */
+export interface FountainDef {
+  pos: Vec2;
+  healRadius: number;
+  healPerSecond: number;
+}
+
 export interface SimWorld {
   navGrid: NavGrid;
   pathfinder: Pathfinder;
   obstacles: ObstacleAABB[];
   arena: Rect;
   shop: Shop;
+  /** Static healing fountains placed on the map. */
+  fountains: FountainDef[];
 }
 
 /** True if a sphere at `pos` with `radius` overlaps any obstacle (2D). */

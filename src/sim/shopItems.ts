@@ -50,4 +50,13 @@ export const SHOP_ITEMS: ShopItemDef[] = [
       hero.critChance = Math.min(1, hero.critChance + CRIT_CHANCE);
     },
   },
+  {
+    id: 'ice_bow',
+    name: 'Ice Bow',
+    cost: 12,
+    description: 'Arrows that hit enemies slow them by 20% for 2s',
+    apply: (_hero) => {
+      // Slow is applied on arrow hit in stepMatch.
+    },
+  },
 ];
