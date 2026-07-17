@@ -2,38 +2,25 @@ import * as THREE from 'three';
 import { HeroState } from '../sim/state';
 import { HERO } from '../sim/rules';
 import { HealthBar } from './HealthBar';
-import { buildArcherMesh } from './ArcherMesh';
-
-const MESH_SCALE = 52.5;
-
-/** Total length of the bow-release gesture, in seconds. */
-const SHOOT_DURATION = 0.45;
+import { createHeroRig, HeroRig, MESH_SCALE } from './HeroRig';
 
 /**
- * Render-only view of a hero. Owns the Three.js mesh, health bar, and the
+ * Render-only view of a hero. Owns the Three.js group, health bar, and the
  * cosmetic flashes; each frame it *reads* a plain `HeroState` produced by the
  * simulation and mirrors it onto the mesh. No gameplay logic lives here.
+ *
+ * The body mesh + animation is delegated to a HeroRig (classic procedural
+ * archer or the GLB ranger — pick with `?hero=classic` / default ranger).
  */
 export class HeroView {
   readonly mesh: THREE.Group;
   readonly heroId: string;
 
-  private _bodyMat: THREE.MeshStandardMaterial;
+  private _rig: HeroRig;
   private _healthBar: HealthBar;
   private _flashGlow: THREE.PointLight;
   private _hitFlashTimer = 0;
   private _wasAlive = true;
-
-  // Walk animation
-  private _legL: THREE.Object3D;
-  private _legR: THREE.Object3D;
-  private _armL: THREE.Object3D;
-  private _armR: THREE.Object3D;
-  private _walkPhase = 0;
-  private _walkBlend = 0;
-  private _shootTimer = 0;
-  private _bow: THREE.Object3D;
-  private _bowRestPitch: number;
 
   constructor(
     heroId: string,
@@ -41,15 +28,10 @@ export class HeroView {
     private _heightAt: (x: number, z: number) => number,
   ) {
     this.heroId = heroId;
-    this.mesh = buildArcherMesh(color);
+    this.mesh = new THREE.Group();
     this.mesh.scale.setScalar(MESH_SCALE);
-    this._bodyMat = (this.mesh.getObjectByName('heroBody') as THREE.Mesh).material as THREE.MeshStandardMaterial;
-    this._legL = this.mesh.getObjectByName('legL')!;
-    this._legR = this.mesh.getObjectByName('legR')!;
-    this._armL = this.mesh.getObjectByName('armL')!;
-    this._armR = this.mesh.getObjectByName('armR')!;
-    this._bow = this.mesh.getObjectByName('bow')!;
-    this._bowRestPitch = this._bow.rotation.x;
+    this._rig = createHeroRig(color);
+    this.mesh.add(this._rig.root);
 
     // Hitbox ring at feet
     const ringGeo = new THREE.TorusGeometry(HERO.bodyRadius / MESH_SCALE, 0.08, 8, 64);
@@ -73,8 +55,7 @@ export class HeroView {
   /** Pulse the red hit flash (driven by a sim `hit` event). */
   flashHit(): void {
     this._hitFlashTimer = 0.15;
-    this._bodyMat.emissive?.set(0xff0000);
-    this._bodyMat.emissiveIntensity = 0.6;
+    this._rig.setEmissive(0xff0000, 0.6);
   }
 
   /** Pulse the muzzle flash (driven by a sim `fire` event). */
@@ -85,38 +66,7 @@ export class HeroView {
 
   /** Play the bow release gesture (driven by a sim `fire` event). */
   playShoot(): void {
-    this._shootTimer = SHOOT_DURATION;
-  }
-
-  /**
-   * Bow-release gesture, layered over the walk pose (must run after
-   * `_updateWalk`, which re-sets the arm rotations every frame): the bow arm
-   * snaps up extended toward the target and holds; the draw hand starts at
-   * the cheek and recoils backward/outward off the string; then everything
-   * eases back down to the walk/idle pose.
-   */
-  private _updateShoot(dt: number): void {
-    if (this._shootTimer <= 0) return;
-    this._shootTimer = Math.max(0, this._shootTimer - dt);
-    const t = 1 - this._shootTimer / SHOOT_DURATION; // 0 → 1 over the gesture
-
-    // Weight: fast snap up, hold at full pose, smooth ease back down.
-    let w: number;
-    if (t < 0.12) w = t / 0.12;
-    else if (t < 0.55) w = 1;
-    else w = 1 - (t - 0.55) / 0.45;
-    w = w * w * (3 - 2 * w);
-
-    // Draw hand releases the string over the first ~40% of the gesture.
-    const recoil = Math.min(t / 0.4, 1);
-
-    // Bow arm: extended toward the target (negative pitch = forward).
-    this._armL.rotation.x += (-1.25 - this._armL.rotation.x) * w;
-
-    // Draw arm: from the cheek (forward) back past the shoulder, opening
-    // slightly outward as the hand comes off the string.
-    this._armR.rotation.x += (-1.05 + recoil * 0.55 - this._armR.rotation.x) * w;
-    this._armR.rotation.z = recoil * 0.35 * w;
+    this._rig.playShoot();
   }
 
   /** Mirror the simulation state onto the mesh for this frame. */
@@ -138,82 +88,42 @@ export class HeroView {
     const y = this._heightAt(state.pos.x, state.pos.z) + HERO.groundOffset;
     this.mesh.position.set(state.pos.x, y, state.pos.z);
     this.mesh.rotation.y = state.facing;
-    this._updateWalk(state, dt);
-    this._updateShoot(dt);
-    // The bow hangs from the arm group; counter-pitch it so it stays upright
-    // whether the arm is walk-swinging or raised toward the target.
-    this._bow.rotation.x = this._bowRestPitch - this._armL.rotation.x;
+    this._rig.update(dt, state.moving, HERO.baseSpeed + state.speedBonus);
 
     // Invulnerability flicker (mirrors the sim's invulnerable timer).
     if (state.invulnerable) {
       const flicker = Math.sin(state.invulnerableTimer * 20) > 0;
-      this._bodyMat.transparent = true;
-      this._bodyMat.opacity = flicker ? 0.4 : 0.8;
-    } else if (this._bodyMat.transparent) {
-      this._bodyMat.transparent = false;
-      this._bodyMat.opacity = 1;
+      this._rig.setOpacity(flicker ? 0.4 : 0.8);
+    } else {
+      this._rig.setOpacity(1);
     }
 
     // Dodge visual — purple tint while dodging
     if (state.dodgeActive) {
-      this._bodyMat.emissive?.set(0x8833cc);
-      this._bodyMat.emissiveIntensity = 0.7;
+      this._rig.setEmissive(0x8833cc, 0.7);
     } else if (!state.invulnerable && this._hitFlashTimer <= 0) {
-      this._bodyMat.emissive?.set(0x000000);
-      this._bodyMat.emissiveIntensity = 0;
+      this._rig.setEmissive(0x000000, 0);
     }
 
     // Decay the cosmetic flashes.
     if (this._hitFlashTimer > 0) {
       this._hitFlashTimer -= dt;
       const t = Math.max(0, this._hitFlashTimer / 0.15);
-      this._bodyMat.emissiveIntensity = t * 0.6;
-      if (this._hitFlashTimer <= 0) this._bodyMat.emissive?.set(0x000000);
+      if (t > 0) this._rig.setEmissive(0xff0000, t * 0.6);
+      else this._rig.setEmissive(0x000000, 0);
     }
     if (this._flashGlow.intensity > 0) {
       this._flashGlow.intensity = Math.max(0, this._flashGlow.intensity - dt * 8);
     }
   }
 
-  /**
-   * Procedural walk cycle: legs swing in opposition from the hips, arms
-   * counter-swing with less travel, and the whole mesh bobs slightly.
-   * Blends in/out over ~0.15s so starting/stopping doesn't snap the pose.
-   */
-  private _updateWalk(state: HeroState, dt: number): void {
-    const target = state.moving ? 1 : 0;
-    const rate = 7 * dt;
-    this._walkBlend += Math.max(-rate, Math.min(rate, target - this._walkBlend));
-
-    if (this._walkBlend <= 0.001) {
-      this._walkBlend = 0;
-      this._walkPhase = 0;
-    } else {
-      // Cadence scales with actual move speed so boots roughly track the ground.
-      const speed = HERO.baseSpeed + state.speedBonus;
-      this._walkPhase += dt * speed * 0.055;
-    }
-
-    const swing = Math.sin(this._walkPhase) * this._walkBlend;
-    this._legL.rotation.x = swing * 0.55;
-    this._legR.rotation.x = -swing * 0.55;
-    this._armL.rotation.x = -swing * 0.22;
-    this._armR.rotation.x = swing * 0.22;
-
-    // Body is highest when the legs pass under the hips (swing ≈ 0).
-    this.mesh.position.y += Math.abs(Math.cos(this._walkPhase)) * 1.5 * this._walkBlend;
-  }
-
   dispose(): void {
+    this._rig.dispose?.();
     this.mesh.removeFromParent();
   }
 
   private _onRespawn(): void {
     this._hitFlashTimer = 0;
-    this._shootTimer = 0;
-    this._bodyMat.emissive?.set(0x000000);
-    this._bodyMat.emissiveIntensity = 0;
-    this._bodyMat.transparent = false;
-    this._bodyMat.opacity = 1;
+    this._rig.onRespawn();
   }
 }
