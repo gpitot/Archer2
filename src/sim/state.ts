@@ -184,7 +184,13 @@ export interface HeroInput {
 // ── Events (sim → clients) ────────────────────────────────────────────
 export type SimEvent =
   | { type: 'hit'; targetId: string; sourceId: string; projectileId: string; damage: number; x: number; z: number; crit?: boolean }
-  | { type: 'kill'; sourceId: string; victimId: string; gold?: number }
+  | { type: 'kill'; sourceId: string; victimId: string; gold?: number;
+      /** True when this kill was the match's first blood. */
+      firstBlood?: boolean;
+      /** Killer's kill streak after this kill (drives streak announcements). */
+      streak?: number;
+      /** Killer's multi-kill chain count after this kill (2 = double, 3+ = triple). */
+      multiKill?: number }
   | { type: 'respawn'; heroId: string }
   /**
    * Carries the full initial projectile state plus the tick it spawned on.

@@ -29,6 +29,9 @@ import { DebugPanel } from '../ui/DebugPanel';
 import { HeroPortrait } from '../ui/HeroPortrait';
 import { SpellBar, SpellSlotInfo } from '../ui/SpellBar';
 
+// ── Audio ──
+import { SoundManager, STREAK_SOUNDS, MULTI_KILL_SOUNDS } from '../audio/SoundManager';
+
 // ── Sim layer ──
 import { HeroState, ProjectileState, WardState, BlastState, CreepState, RuneState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
 import { stepMatch, xpForLevel, heroSpeed } from '../sim/stepMatch';
@@ -237,6 +240,11 @@ export class Game {
   private _shopWindow!: ShopWindow;
   private _moveIndicators!: MoveIndicatorManager;
   private _debugPanel: DebugPanel | null = null;
+
+  // ── Audio ──
+  private _sound = new SoundManager();
+  /** Lazy-init flag: set true on first user interaction (unlocks AudioContext). */
+  private _audioInit = false;
 
   constructor() {
     this._loop = new GameLoop(60);
@@ -583,6 +591,18 @@ export class Game {
     };
 
     window.addEventListener('resize', this._onResize.bind(this));
+
+    // ── Audio init — browsers require a user gesture to unlock AudioContext ──
+    const initAudio = () => {
+      if (this._audioInit) return;
+      this._audioInit = true;
+      this._sound.init().catch(() => {});
+      document.removeEventListener('pointerdown', initAudio);
+      document.removeEventListener('keydown', initAudio);
+    };
+    document.addEventListener('pointerdown', initAudio);
+    document.addEventListener('keydown', initAudio);
+
     this._loop.start();
     this._debugReady = true;
   }
@@ -1697,6 +1717,19 @@ export class Game {
         break;
       }
       case 'kill': {
+        // ── Sound announcements (WC3-style global callouts) ──
+        if (ev.firstBlood) {
+          this._sound.play('firstBlood');
+        }
+        if (ev.streak) {
+          const snd = STREAK_SOUNDS[ev.streak];
+          if (snd) this._sound.play(snd);
+        }
+        if (ev.multiKill) {
+          const snd = MULTI_KILL_SOUNDS[ev.multiKill];
+          if (snd) this._sound.play(snd);
+        }
+
         // Gold bounty indicator for the local killer, LoL-style coin + amount.
         if (ev.sourceId === this._playerId && ev.gold) {
           const victimView = this._heroViews.get(ev.victimId);
