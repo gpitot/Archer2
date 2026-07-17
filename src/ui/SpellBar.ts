@@ -11,6 +11,8 @@
 export interface SpellSlotInfo {
   /** 0..1 — 1 = ready, <1 = cooling down. */
   cooldownProgress: number;
+  /** Seconds until ready (0 = ready). Drives the countdown number. */
+  cooldownRemaining: number;
   /** Current rank (0 = unlearned/locked). */
   level: number;
   /** True when a skill point can be spent here right now (glow). */
@@ -60,7 +62,7 @@ export class SpellBar {
       const info = infos[i];
       const slot = this._slots[i];
       slot.setLocked(info.level < 1);
-      slot.setCooldown(info.cooldownProgress);
+      slot.setCooldown(info.cooldownProgress, info.cooldownRemaining);
       slot.setLevel(info.level);
       slot.setOnCooldown(info.cooldownProgress < 1);
       slot.setCanLevel(info.canLevel);
@@ -73,9 +75,18 @@ export class SpellBar {
   }
 }
 
+/**
+ * Format a cooldown countdown: whole seconds above 3s, one decimal below.
+ */
+export function formatCooldown(remaining: number): string {
+  return remaining > 3 ? String(Math.ceil(remaining)) : remaining.toFixed(1);
+}
+
 class SpellSlot {
   readonly el: HTMLDivElement;
   private _cooldown: HTMLDivElement;
+  private _cdText: HTMLDivElement;
+  private _flash: HTMLDivElement;
   private _keyLabel: HTMLDivElement;
   private _levelDots: HTMLDivElement;
   private _chargeLabel: HTMLDivElement;
@@ -95,7 +106,7 @@ class SpellSlot {
       height: ${size}px;
       border: 2px solid rgba(180,160,100,0.8);
       border-radius: 4px;
-      background: rgba(20,18,10,0.85);
+      background: transparent;
       position: relative;
       overflow: visible;
     `;
@@ -110,25 +121,51 @@ class SpellSlot {
       justify-content: center;
       font-size: 20px;
       color: #cc9944;
-      opacity: 0.6;
+      opacity: 1;
     `;
     icon.textContent = key === 'Q' ? '➹' : key === 'W' ? '↯' : key === 'E' ? '◉' : key === 'R' ? '✸' : '·';
     this._icon = icon;
     this.el.appendChild(icon);
 
-    // Cooldown overlay (sweeps from top to bottom, WC3-style blue tint)
+    // Radial cooldown mask (LoL/Dota-style clockwise wipe from 12 o'clock).
+    // Semi-transparent so the icon stays recognisable underneath.
     this._cooldown = document.createElement('div');
     this._cooldown.style.cssText = `
       position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 0%;
-      background: rgba(15,22,40,0.78);
-      transition: none;
+      inset: 0;
+      background: none;
       pointer-events: none;
     `;
     this.el.appendChild(this._cooldown);
+
+    // Countdown number — rendered above the mask, centre of the slot.
+    this._cdText = document.createElement('div');
+    this._cdText.style.cssText = `
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: sans-serif;
+      font-size: 20px;
+      font-weight: bold;
+      color: #fff;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.7);
+      pointer-events: none;
+      display: none;
+    `;
+    this.el.appendChild(this._cdText);
+
+    // Ready flash — briefly lights up when the cooldown completes.
+    this._flash = document.createElement('div');
+    this._flash.style.cssText = `
+      position: absolute;
+      inset: 0;
+      background: rgba(255,240,190,0.9);
+      opacity: 0;
+      pointer-events: none;
+    `;
+    this.el.appendChild(this._flash);
 
     // Key label
     this._keyLabel = document.createElement('div');
@@ -194,32 +231,82 @@ class SpellSlot {
     `;
     this.el.appendChild(inner);
 
-    // Move the existing icon, cooldown, key label, and level dots into inner.
-    // (They were already added to this.el — we need to re-parent them.)
+    // Move the existing layers into inner, in rendering order:
+    // icon < radial mask < labels/dots < countdown number < ready flash.
     inner.appendChild(icon);
     inner.appendChild(this._cooldown);
     inner.appendChild(this._keyLabel);
     inner.appendChild(this._levelDots);
+    inner.appendChild(this._cdText);
+    inner.appendChild(this._flash);
   }
 
   /** Dim the slot when the ability is unlearned (rank 0). */
   setLocked(locked: boolean): void {
     if (this._locked === locked) return;
     this._locked = locked;
-    this._icon.style.color = locked ? '#444' : '#cc9944';
     this.el.style.background = locked ? 'rgba(20,20,20,0.7)' : 'rgba(20,18,10,0.85)';
+    this._refreshIcon();
     this._refreshBorder();
   }
 
-  setCooldown(progress: number): void {
-    const pct = Math.round((1 - progress) * 100);
-    this._cooldown.style.height = `${pct}%`;
+  /** Icon look: locked > on-cooldown (slightly desaturated/dark) > ready. */
+  private _refreshIcon(): void {
+    if (this._locked) {
+      this._icon.style.color = '#444';
+      this._icon.style.filter = 'none';
+      this._icon.style.opacity = '0.6';
+    } else if (this._onCd) {
+      this._icon.style.color = '#cc9944';
+      this._icon.style.filter = 'grayscale(0.6) brightness(0.7)';
+      this._icon.style.opacity = '1';
+    } else {
+      this._icon.style.color = '#cc9944';
+      this._icon.style.filter = 'none';
+      this._icon.style.opacity = '1';
+    }
   }
 
-  /** Mute the border, glow, and key label when on cooldown. */
+  /**
+   * Radial wipe + countdown. `progress` is 0..1 (1 = ready); the mask
+   * is revealed clockwise from the top as the cooldown elapses.
+   */
+  setCooldown(progress: number, remaining: number): void {
+    if (progress >= 1) {
+      this._cooldown.style.background = 'none';
+      this._cdText.style.display = 'none';
+      return;
+    }
+    const angle = progress * 360; // revealed portion (elapsed)
+    this._cooldown.style.background =
+      `conic-gradient(transparent ${angle}deg, rgba(0,0,0,0.6) ${angle}deg)`;
+    this._cdText.style.display = 'flex';
+    this._cdText.textContent = formatCooldown(remaining);
+  }
+
+  /** Track cooldown state; flashes the slot when it becomes ready. */
   setOnCooldown(onCd: boolean): void {
+    if (this._onCd === onCd) return;
+    const wasOnCd = this._onCd;
     this._onCd = onCd;
+    this._refreshIcon();
     this._refreshBorder();
+    if (wasOnCd && !onCd && !this._locked) this._playReadyFlash();
+  }
+
+  /** Brief bright pulse when the cooldown completes. */
+  private _playReadyFlash(): void {
+    this._flash.animate(
+      [{ opacity: 0.9 }, { opacity: 0 }],
+      { duration: 350, easing: 'ease-out' },
+    );
+    this.el.animate(
+      [
+        { boxShadow: '0 0 12px rgba(255,230,150,0.9)' },
+        { boxShadow: '0 0 0 rgba(255,230,150,0)' },
+      ],
+      { duration: 450, easing: 'ease-out' },
+    );
   }
 
   /** Highlight dots up to `level` (0 = none). */
@@ -249,10 +336,12 @@ class SpellSlot {
       this.el.style.borderColor = 'rgba(80,80,80,0.5)';
       this._keyLabel.style.color = '#555';
     } else if (this._onCd) {
-      this.el.style.borderColor = 'rgba(55,55,65,0.55)';
-      this._keyLabel.style.color = '#666';
+      // Border stays visible during cooldown — just slightly muted.
+      this.el.style.borderColor = 'rgba(150,132,85,0.6)';
+      this._keyLabel.style.color = '#997733';
     } else {
-      this.el.style.borderColor = 'rgba(180,160,100,0.8)';
+      // Ready: brightest border.
+      this.el.style.borderColor = 'rgba(220,195,125,0.95)';
       this._keyLabel.style.color = '#cc9944';
     }
   }

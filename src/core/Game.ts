@@ -1995,6 +1995,7 @@ export class Game {
     this._spellBar.update(
       {
         cooldownProgress: cdProgress,
+        cooldownRemaining: Math.max(p.abilityCooldown, 0),
         level: p.abilityLevel,
         canLevel: hasPoint && p.abilityLevel < Math.min(ARROW.maxLevel, basicCap),
         charges: p.abilityCharges,
@@ -2002,16 +2003,19 @@ export class Game {
       },
       {
         cooldownProgress: dodgeCdProgress,
+        cooldownRemaining: Math.max(p.dodgeCooldown, 0),
         level: p.dodgeLevel,
         canLevel: hasPoint && p.dodgeLevel < Math.min(DODGE.maxLevel, basicCap),
       },
       {
         cooldownProgress: revealCdProgress,
+        cooldownRemaining: Math.max(p.revealCooldown, 0),
         level: p.revealLevel,
         canLevel: hasPoint && p.revealLevel < Math.min(SCOUT.maxLevel, basicCap),
       },
       {
         cooldownProgress: blastCdProgress,
+        cooldownRemaining: Math.max(p.blastCooldown, 0),
         level: p.blastLevel,
         canLevel: hasPoint && p.blastLevel < Math.min(BLAST.maxLevel, ultCap),
       },
@@ -2032,6 +2036,7 @@ export class Game {
       p.inventory,
       { sentry_wards: p.wardCharges },
       { blink_dagger: blinkCdProgress },
+      { blink_dagger: Math.max(p.blinkCooldown, 0) },
     );
     this._kdDisplay.update(p.kills, p.deaths);
 
