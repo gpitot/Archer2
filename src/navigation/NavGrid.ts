@@ -3,7 +3,8 @@
  * No elevation — all cells are on the same Y plane.
  */
 export class NavGrid {
-  readonly cells: boolean[][];
+  /** Flat row-major walkability map (1 = walkable), indexed `gz * width + gx`. */
+  readonly cells: Uint8Array;
 
   readonly width: number;
   readonly height: number;
@@ -25,9 +26,7 @@ export class NavGrid {
     this.originX = originX;
     this.originZ = originZ;
 
-    this.cells = Array.from({ length: height }, () =>
-      Array.from({ length: width }, () => true),
-    );
+    this.cells = new Uint8Array(width * height).fill(1);
   }
 
   // ── Coordinate conversion ────────────────────────────────
@@ -52,13 +51,15 @@ export class NavGrid {
 
   isWalkable(gx: number, gz: number): boolean {
     if (!this.isInBounds(gx, gz)) return false;
-    return this.cells[gz][gx];
+    return this.cells[gz * this.width + gx] !== 0;
   }
 
   setWalkable(gx: number, gz: number, walkable: boolean): void {
     if (!this.isInBounds(gx, gz)) return;
-    if (this.cells[gz][gx] !== walkable) {
-      this.cells[gz][gx] = walkable;
+    const idx = gz * this.width + gx;
+    const value = walkable ? 1 : 0;
+    if (this.cells[idx] !== value) {
+      this.cells[idx] = value;
       this._version++;
     }
   }

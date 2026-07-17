@@ -54,9 +54,11 @@ export class HeroView {
     this._healthBar.sprite.position.set(0, 2.5, 0); // above archer's head
     this.mesh.add(this._healthBar.sprite);
 
-    // Muzzle-flash glow, pulsed on fire.
+    // Muzzle-flash glow, pulsed on fire. Kept invisible while idle so it
+    // doesn't count toward the forward pipeline's per-fragment light loop.
     this._flashGlow = new THREE.PointLight(0xff6600, 0, 5);
     this._flashGlow.position.set(0, 1.5, 0);
+    this._flashGlow.visible = false;
     this.mesh.add(this._flashGlow);
 
     // Rune-buff indicators — hidden until the matching timer runs.
@@ -90,6 +92,7 @@ export class HeroView {
   flashFire(): void {
     this._flashGlow.intensity = 3;
     this._flashGlow.color.set(0xff6600);
+    this._flashGlow.visible = true;
   }
 
   /** Play the bow release gesture (driven by a sim `fire` event). */
@@ -159,6 +162,7 @@ export class HeroView {
     }
     if (this._flashGlow.intensity > 0) {
       this._flashGlow.intensity = Math.max(0, this._flashGlow.intensity - dt * 8);
+      if (this._flashGlow.intensity === 0) this._flashGlow.visible = false;
     }
 
     // Tick healing sparkle particles.

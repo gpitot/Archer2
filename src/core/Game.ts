@@ -875,23 +875,35 @@ export class Game {
     const player = this._state.heroes.find((h) => h.id === this._playerId);
     if (!player || !player.alive) return;
 
-    const temp = createMatchState();
-    temp.heroes = [player];
-    temp.projectiles = [];
-    temp.wards = [];
-    const tempInputs = inputs.filter((i) => i.heroId === this._playerId);
+    // The scratch state carries the live player object and stepMatch writes
+    // the predicted pos/path/facing/ability state straight onto it. The rest
+    // is reset every call so discarded side effects of a predicted cast
+    // (projectiles, blasts, income accumulation) never leak across ticks.
+    const temp = this._predictScratch;
+    temp.tick = 0;
+    temp.heroes.length = 0;
+    temp.heroes.push(player);
+    temp.projectiles.length = 0;
+    temp.wards.length = 0;
+    temp.blasts.length = 0;
+    temp.firstBlood = true;
+    temp.incomeAccumulator = 0;
+    temp.nextProjectileId = 1;
+    temp.nextWardId = 1;
+    temp.nextBlastId = 1;
+
+    const tempInputs = this._predictInputs;
+    tempInputs.length = 0;
+    for (const input of inputs) {
+      if (input.heroId === this._playerId) tempInputs.push(input);
+    }
 
     stepMatch(temp, tempInputs, dt, this._world);
-
-    player.pos = { ...temp.heroes[0].pos };
-    player.facing = temp.heroes[0].facing;
-    player.targetFacing = temp.heroes[0].targetFacing;
-    player.path = temp.heroes[0].path.map((p) => ({ ...p }));
-    player.moving = temp.heroes[0].moving;
-    // Also sync predicted charge / cooldown / recoil so the cosmetic guard
-    // and UI stay in lockstep with what the sim accepted or rejected.
-    player.abilities.arrow = { ...temp.heroes[0].abilities.arrow };
   }
+
+  /** Reused by _predictMovement so prediction allocates nothing per tick. */
+  private _predictScratch = createMatchState();
+  private _predictInputs: HeroInput[] = [];
 
   /**
    * Interpolate remote hero positions between the pair of snapshots that
@@ -1062,7 +1074,8 @@ export class Game {
 
     const pv = this._projectilePool.pop();
     if (!pv) return;
-    pv.setStyle('arrow'); // pooled views may last have flown as fireballs
+    const hasIceBow = player.inventory.includes('ice_bow');
+    pv.setStyle(hasIceBow ? 'ice' : 'arrow'); // pooled views may last have flown as other styles
 
     const spawnPos = {
       x: player.pos.x + dir.x * ARROW.spawnOffset,
@@ -1636,7 +1649,10 @@ export class Game {
       },
       (id, pv) => {
         const p = this._state.projectiles.find((sp) => sp.id === id)!;
-        pv.sync(p, this._heightAt.bind(this));
+        const isIce = p.ownerKind !== 'creep' && this._state.heroes.some(
+          (h) => h.id === p.ownerId && h.inventory.includes('ice_bow'),
+        );
+        pv.sync(p, this._heightAt.bind(this), isIce);
         if (p.kind === 'scout') this._dropScoutBreadcrumbs(p);
       },
       (id, pv) => {

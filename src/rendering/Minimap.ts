@@ -34,6 +34,7 @@ export class Minimap {
   private _fogCanvas: HTMLCanvasElement | null = null;
   private _fogCtx: CanvasRenderingContext2D | null = null;
   private _fogImage: ImageData | null = null;
+  private _fogVersion = -1;
 
   /** Called with world (x, z) when minimap is clicked. */
   onClick: ((wx: number, wz: number) => void) | null = null;
@@ -87,6 +88,7 @@ export class Minimap {
     this._fogCanvas.height = fog.cellsZ;
     this._fogCtx = this._fogCanvas.getContext('2d')!;
     this._fogImage = this._fogCtx.createImageData(fog.cellsX, fog.cellsZ);
+    this._fogVersion = -1;
   }
 
   /**
@@ -178,18 +180,23 @@ export class Minimap {
     // Fog-of-war overlay: hidden = near-black, explored = dimmed, visible = clear.
     // The fog grid covers the same arena rect as the view, row 0 = min Z = top.
     if (this._fog && this._fogCtx && this._fogImage && this._fogCanvas) {
-      const states = this._fog.team(this._fogTeam);
-      const data = this._fogImage.data;
-      for (let i = 0; i < states.length; i++) {
-        const alpha =
-          states[i] === FOG_VISIBLE ? 0 :
-          states[i] === FOG_EXPLORED ? 110 : 235;
-        data[i * 4] = 0;
-        data[i * 4 + 1] = 0;
-        data[i * 4 + 2] = 0;
-        data[i * 4 + 3] = alpha;
+      // The offscreen fog canvas only needs rebuilding when visibility
+      // actually changed; the scaled blit below stays per-frame.
+      if (this._fog.version !== this._fogVersion) {
+        this._fogVersion = this._fog.version;
+        const states = this._fog.team(this._fogTeam);
+        const data = this._fogImage.data;
+        for (let i = 0; i < states.length; i++) {
+          const alpha =
+            states[i] === FOG_VISIBLE ? 0 :
+            states[i] === FOG_EXPLORED ? 110 : 235;
+          data[i * 4] = 0;
+          data[i * 4 + 1] = 0;
+          data[i * 4 + 2] = 0;
+          data[i * 4 + 3] = alpha;
+        }
+        this._fogCtx.putImageData(this._fogImage, 0, 0);
       }
-      this._fogCtx.putImageData(this._fogImage, 0, 0);
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(this._fogCanvas, pad, pad, this._pxW, this._pxH);
     }

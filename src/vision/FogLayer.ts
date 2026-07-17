@@ -47,6 +47,7 @@ export class FogLayer {
   private _brightness: Float32Array;
   private _data: Uint8Array;
   private _lastVersion = -1;
+  private _settled = false;
   private _patched = new WeakSet<THREE.Material>();
   private _uniforms: {
     uFogMap: { value: THREE.Texture };
@@ -86,13 +87,29 @@ export class FogLayer {
     if (this._fog.version !== this._lastVersion) {
       this._lastVersion = this._fog.version;
       this._rebuildTarget();
+      this._settled = false;
     }
+    // Once every texel has reached its target there is nothing to ease and
+    // nothing new to upload — skip the full-texture walk until the next
+    // fog recompute.
+    if (this._settled) return;
+
     const target = this._targetHi;
     const k = 1 - Math.exp(-delta * 10);
+    const EPS = 0.5 / 255; // below one texture quantization step
+    let maxErr = 0;
     for (let i = 0; i < target.length; i++) {
       const b = this._brightness[i] + (target[i] - this._brightness[i]) * k;
       this._brightness[i] = b;
       this._data[i] = (b * 255) | 0;
+      const err = Math.abs(target[i] - b);
+      if (err > maxErr) maxErr = err;
+    }
+    if (maxErr < EPS) {
+      // Snap exactly onto the target so the final upload matches it.
+      this._brightness.set(target);
+      for (let i = 0; i < target.length; i++) this._data[i] = (target[i] * 255) | 0;
+      this._settled = true;
     }
     this.texture.needsUpdate = true;
   }

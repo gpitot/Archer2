@@ -40,8 +40,9 @@ export class HealthBar {
     this._draw();
   }
 
-  /** Update the displayed HP value. */
+  /** Update the displayed HP value. Repaints only when the value changed. */
   setHP(current: number, max: number): void {
+    if (current === this._currentHP && max === this._maxHP) return;
     this._currentHP = current;
     this._maxHP = max;
     this._draw();

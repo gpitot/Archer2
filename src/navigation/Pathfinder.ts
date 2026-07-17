@@ -55,16 +55,8 @@ export class Pathfinder {
     this._navVersion = this._grid.version;
 
     const w = this._grid.width;
-    const h = this._grid.height;
-    const cells = this._grid.cells;
     const walk = this._walkable;
-    for (let gz = 0; gz < h; gz++) {
-      const row = cells[gz];
-      const base = gz * w;
-      for (let gx = 0; gx < w; gx++) {
-        walk[base + gx] = row[gx] ? 1 : 0;
-      }
-    }
+    walk.set(this._grid.cells);
 
     // 4-neighbor flood fill. Diagonal moves forbid corner cutting (both
     // cardinals must be open), so 4-connectivity equals 8-connectivity here.

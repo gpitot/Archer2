@@ -68,9 +68,10 @@ export class FogOfWar {
   private _blocked: Uint8Array; // 1 = sight blocker (tree/rock) covers the cell
   private _layerAt: (x: number, z: number) => number;
   private _teams = new Map<number, Uint8Array>();
+  private _prev = new Map<number, Uint8Array>(); // pre-recompute snapshots for change detection
   private _sources: VisionSource[] = [];
   private _timer = 0; // time until next recompute; 0 → recompute on next update
-  private _version = 0; // bumped on every recompute so renderers can cache
+  private _version = 0; // bumped when a recompute changes visibility so renderers can cache
 
   /** Debug flag: when true, all cells stay VISIBLE regardless of sources. */
   debugAllVisible = false;
@@ -164,7 +165,7 @@ export class FogOfWar {
     return this.stateAt(team, wx, wz) >= FOG_EXPLORED;
   }
 
-  /** Increments whenever visibility is recomputed — cheap change detection. */
+  /** Increments whenever a recompute changes visibility — cheap change detection. */
   get version(): number {
     return this._version;
   }
@@ -187,7 +188,15 @@ export class FogOfWar {
   // ── Internal ───────────────────────────────────────────────────
 
   private _recompute(): void {
-    this._version++;
+    // Snapshot each team's map so the version only bumps on a real change.
+    for (const [team, map] of this._teams) {
+      let prev = this._prev.get(team);
+      if (!prev || prev.length !== map.length) {
+        prev = new Uint8Array(map.length);
+        this._prev.set(team, prev);
+      }
+      prev.set(map);
+    }
 
     // Currently-visible decays to explored; sources then re-light their cells.
     for (const map of this._teams.values()) {
@@ -198,12 +207,26 @@ export class FogOfWar {
 
     if (this.debugAllVisible) {
       for (const map of this._teams.values()) map.fill(FOG_VISIBLE);
-      return;
+    } else {
+      for (const src of this._sources) {
+        if (!src.active) continue;
+        this._sweep(this.team(src.team), src);
+      }
     }
 
-    for (const src of this._sources) {
-      if (!src.active) continue;
-      this._sweep(this.team(src.team), src);
+    for (const [team, map] of this._teams) {
+      const prev = this._prev.get(team);
+      if (!prev) {
+        // Team map created mid-recompute — necessarily a change.
+        this._version++;
+        return;
+      }
+      for (let i = 0; i < map.length; i++) {
+        if (map[i] !== prev[i]) {
+          this._version++;
+          return;
+        }
+      }
     }
   }
 
