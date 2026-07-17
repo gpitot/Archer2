@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { createMatchState, createHeroState, HeroInput, MatchState } from '../src/sim/state';
-import { stepMatch } from '../src/sim/stepMatch';
+import { stepMatch, addItem } from '../src/sim/stepMatch';
 import { buildSimWorldFromNavdata } from '../src/sim/buildWorld';
 import { HERO } from '../src/sim/rules';
 
@@ -140,7 +140,8 @@ function run(): void {
   // Phase 5: Test ward placement.
   console.log('[smoke] testing ward...');
   player.wardCharges = 3;
-  stepMatch(state, [{ heroId: 'p1', cmd: { type: 'ward' } }], 1 / 30, world, rng);
+  addItem(player, 'sentry_wards');
+  stepMatch(state, [{ heroId: 'p1', cmd: { type: 'useItem', slot: player.inventory.indexOf('sentry_wards') } }], 1 / 30, world, rng);
   console.log(`  wards placed: ${state.wards.length} (expected 1), charges left: ${player.wardCharges} (expected 2)`);
   if (state.wards.length !== 1) throw new Error('ward not placed');
   if (player.wardCharges !== 2) throw new Error('ward charge not consumed');

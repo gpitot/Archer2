@@ -11,22 +11,15 @@ golden traces.
 | 0 — Baseline capture | ✅ done | (baseline traces in session scratchpad; 16/16 sim pass, build clean, drive OK) |
 | 1 — Sim-internal dedup | ✅ done | `0640dd5` |
 | 2 — Ability registry | ✅ done | `fdb833d` |
-| 3 — Generic ability/item runtime records + wire bump | ✅ verified, **uncommitted** (working tree) | — |
-| 4 — Item registry with behavior hooks | ⬜ not started | — |
+| 3 — Generic ability/item runtime records + wire bump | ✅ done | `9014e2e` |
+| 4 — Item registry with behavior hooks | ✅ done | uncommitted (working tree) |
 | 5 — Unit substrate | ⬜ not started | — |
 | 6 — Game.ts decomposition | ⬜ not started | — |
 
-**Phase 3 verification so far:** tsc clean · `pnpm sim` 16/16 with traces
-byte-identical to the pre-refactor baseline (trace emitter keeps the old JSON
-keys, reading from the new record) · `smoke-sim` passes · `pnpm drive` fires 3
-arrows end-to-end over the new HeroMeta wire format · `test-ws-multi` passes
-(first run hit the script's own join-order race; second run green).
-`test-creeps-net` is blocked by a pre-existing environment issue (hardcoded
-Playwright browser path `/opt/pw-browsers`), unrelated to the refactor.
-
-Known-failing baseline (must keep failing with the same signature):
-`scripts/test-damage.ts` (crashes reading `.map` of undefined) and
-`scripts/test-terrain.ts` arrow-gap check.
+**Phase 3 verification so far:** ✅ tsc clean · `pnpm sim` 17/17 (item-actives added)
+with traces byte-identical to the pre-refactor baseline for all 16 original
+scenarios · `smoke-sim` passes · `pnpm build` clean · `pnpm drive` 3 arrows
+end-to-end.
 
 ## Context (from the audit)
 

@@ -21,7 +21,6 @@ import {
   PASSIVE_INCOME,
   SPREE_BONUS,
   ultimateRankCap,
-  WARD,
   XP_TABLE,
 } from './rules';
 import { ABILITIES, ABILITY_ORDER, AbilityId, stopMovement } from './abilities';
@@ -39,12 +38,12 @@ import {
   hitCreep,
   stepCreeps,
 } from './stepCreeps';
-import { findReachableNear, findRespawnPosition, SimWorld, sphereHitsObstacle } from './world';
-import { BLINK_COOLDOWN, ICE_BOW_SLOW_DURATION, ICE_BOW_SLOW_FACTOR } from './shopItems';
-import { breakInvisibility, stepRuneBuffs, stepRunes } from './stepRunes';
+import { findReachableNear, findRespawnPosition, SimWorld } from './world';
+import { ICE_BOW_SLOW_FACTOR, SHOP_ITEMS_BY_ID, addItem, removeItem } from './shopItems';
+import { stepRuneBuffs, stepRunes } from './stepRunes';
 import { RUNE } from './runeRules';
 import { rollAbilityDamage } from './damage';
-import { advanceProjectile, findHitHero, spawnProjectile } from './projectiles';
+import { advanceProjectile, findHitHero } from './projectiles';
 
 /**
  * Advance the match by `dt` seconds, applying `inputs` queued since the last
@@ -103,17 +102,11 @@ function applyCommand(
     case 'cast':
       ABILITIES[cmd.ability]?.cast({ state, hero, world, events, x: cmd.x, z: cmd.z });
       break;
-    case 'ward':
-      placeWard(state, hero, world, cmd.x, cmd.z);
-      break;
-    case 'blink':
-      blink(hero, cmd.x, cmd.z, world);
-      break;
     case 'buy':
       buy(hero, cmd.itemIndex, world, events);
       break;
     case 'useItem':
-      useItem(hero, cmd.slot, state, world, events);
+      useItem(hero, cmd.slot, state, world, events, cmd.x, cmd.z);
       break;
     case 'levelAbility':
       spendSkillPoint(hero, cmd.ability);
@@ -143,55 +136,6 @@ function setDestination(hero: HeroState, x: number, z: number, world: SimWorld):
   }
 }
 
-function placeWard(
-  state: MatchState,
-  hero: HeroState,
-  world: SimWorld,
-  targetX?: number,
-  targetZ?: number,
-): void {
-  if (!hero.alive) return;
-  if (hero.wardCharges <= 0) return;
-
-  // Placing a ward interrupts movement.
-  stopMovement(hero);
-
-  let pos: V.Vec2;
-  if (targetX !== undefined && targetZ !== undefined) {
-    // Validate range — reject if the target is too far.
-    if (V.distance(hero.pos, { x: targetX, z: targetZ }) > WARD.placeRange + 1) return;
-    // Reject placement inside solid obstacles (trees, rocks).
-    if (sphereHitsObstacle(world, { x: targetX, z: targetZ }, WARD.placementRadius)) return;
-    pos = { x: targetX, z: targetZ };
-  } else {
-    pos = { x: hero.pos.x, z: hero.pos.z };
-  }
-
-  hero.wardCharges--;
-  if (hero.wardCharges === 0) removeItem(hero, 'sentry_wards');
-  // Placing a ward breaks invisibility.
-  breakInvisibility(hero);
-  state.wards.push({
-    id: `w${state.nextWardId++}`,
-    team: hero.team,
-    pos,
-    life: WARD.duration,
-  });
-}
-
-function blink(hero: HeroState, tx: number, tz: number, world: SimWorld): void {
-  if (!hero.alive) return;
-  if ((hero.itemCooldowns['blink_dagger'] ?? 0) > 0) return;
-  // Snap to nearest walkable, reachable cell.
-  const snapped = findReachableNear(world, tx, tz, hero.pos.x, hero.pos.z);
-  if (!snapped) return;
-
-  // Teleport instantly — clear movement state.
-  stopMovement(hero);
-  hero.pos = { x: snapped.x, z: snapped.z };
-  hero.itemCooldowns['blink_dagger'] = BLINK_COOLDOWN;
-}
-
 function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]): void {
   const shop = world.shop;
   if (index < 0 || index >= shop.items.length) return;
@@ -210,23 +154,33 @@ function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]
 }
 
 /** Use the item in a specific inventory slot (hotkey 1–6). */
-function useItem(hero: HeroState, slot: number, state: MatchState, world: SimWorld, events: SimEvent[]): void {
+function useItem(
+  hero: HeroState,
+  slot: number,
+  state: MatchState,
+  world: SimWorld,
+  events: SimEvent[],
+  x?: number,
+  z?: number,
+): void {
   if (!hero.alive) return;
   if (slot < 0 || slot >= hero.inventory.length) return;
   const itemId = hero.inventory[slot];
   if (!itemId) return;
 
-  // Using an item interrupts movement.
+  // Using any item interrupts movement (matches old behaviour).
   stopMovement(hero);
 
-  switch (itemId) {
-    case 'sentry_wards':
-      placeWard(state, hero, world);
-      break;
-    default:
-      // Passive items (e.g. boots) — nothing to do.
-      break;
-  }
+  const def = SHOP_ITEMS_BY_ID[itemId];
+  if (!def?.use) return;
+
+  // Check readiness generically: cooldown, then any extra gate (ward charges).
+  const cd = def.use.cooldown;
+  if (cd && (hero.itemCooldowns[itemId] ?? 0) > 0) return;
+  if (def.use.canUse && !def.use.canUse(hero)) return;
+
+  // Dispatch through the registry — the execute callback handles everything.
+  def.use.execute({ state, hero, world, events, x, z });
 }
 
 function spendSkillPoint(hero: HeroState, ability: AbilityId): void {
@@ -374,8 +328,10 @@ function stepProjectiles(
       const source = state.heroes.find((h) => h.id === p.ownerId);
       state.projectiles.splice(i, 1);
       if (source) {
-        if (source.inventory.includes('ice_bow')) {
-          target.slowTimer = ICE_BOW_SLOW_DURATION;
+        // On-hit item hooks (ice bow slow, …) in inventory slot order.
+        for (const slotItemId of source.inventory) {
+          if (!slotItemId) continue;
+          SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, target);
         }
         const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
         applyDamage(state, target, source, damage, p.id, events, crit);
@@ -390,8 +346,10 @@ function stepProjectiles(
       const source = state.heroes.find((h) => h.id === p.ownerId);
       state.projectiles.splice(i, 1);
       if (source) {
-        if (source.inventory.includes('ice_bow')) {
-          creepTarget.slowTimer = ICE_BOW_SLOW_DURATION;
+        // On-hit item hooks (ice bow slow, …) in inventory slot order.
+        for (const slotItemId of source.inventory) {
+          if (!slotItemId) continue;
+          SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, creepTarget);
         }
         const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
         applyCreepDamage(state, creepTarget, source, damage, events, crit);
@@ -588,18 +546,5 @@ export function xpForLevel(level: number): number {
 }
 
 // ── Inventory helpers ─────────────────────────────────────────────────
-
-export function addItem(hero: HeroState, itemId: string): number {
-  for (let i = 0; i < hero.inventory.length; i++) {
-    if (hero.inventory[i] === null) {
-      hero.inventory[i] = itemId;
-      return i;
-    }
-  }
-  return -1;
-}
-
-export function removeItem(hero: HeroState, itemId: string): void {
-  const i = hero.inventory.indexOf(itemId);
-  if (i !== -1) hero.inventory[i] = null;
-}
+// (Live in the item registry now — re-exported for existing importers.)
+export { addItem, removeItem };

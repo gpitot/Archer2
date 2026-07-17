@@ -41,7 +41,7 @@ import { advanceProjectile } from '../sim/projectiles';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
 import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN, basicRankCap, ultimateRankCap } from '../sim/rules';
 import { ABILITIES, ABILITY_ORDER, AbilityDef, canCast } from '../sim/abilities';
-import { BLINK_COOLDOWN, SHOP_ITEMS } from '../sim/shopItems';
+import { BLINK_RANGE, SHOP_ITEMS, SHOP_ITEMS_BY_ID } from '../sim/shopItems';
 import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta, CreepMeta, RuneMeta } from '../sim/protocol';
 import { creepMaxHp } from '../sim/creepRules';
 import { Vec2, distance, clamp } from '../sim/math';
@@ -528,27 +528,24 @@ export class Game {
           this._shopWindow.close();
           return;
         }
-        const itemId = this._playerState.inventory[i - 1];
-        // Toggle: if same ward item targeting is already active, cancel.
-        if (this._targeting.isActive && itemId === 'sentry_wards' && this._targeting.sourceItemId === 'sentry_wards') {
-          this._targeting.cancel();
-          return;
-        }
-        // Toggle: if blink dagger targeting is already active, cancel.
-        if (this._targeting.isActive && itemId === 'blink_dagger' && this._targeting.sourceItemId === 'blink_dagger') {
+        const slot = i - 1;
+        const itemId = this._playerState.inventory[slot];
+        const def = itemId ? SHOP_ITEMS_BY_ID[itemId] : undefined;
+
+        // Toggle: if same item's targeting is already active, cancel.
+        if (this._targeting.isActive && itemId && this._targeting.sourceItemId === itemId) {
           this._targeting.cancel();
           return;
         }
         this._targeting.cancel();
-        if (itemId === 'sentry_wards') {
-          this._activateWardTargeting();
+
+        if (def?.use?.targeting === 'point') {
+          this._activateItemTargeting(def, slot);
           return;
         }
-        if (itemId === 'blink_dagger') {
-          this._activateBlinkTargeting();
-          return;
-        }
-        this._enqueueCommand({ type: 'useItem', slot: i - 1 });
+        // Self-targeted actives and passives alike go through the sim
+        // (passives no-op there, but still interrupt movement — as before).
+        this._enqueueCommand({ type: 'useItem', slot });
       });
     }
 
@@ -1483,49 +1480,25 @@ export class Game {
     }
   }
 
-  /** Activate ground-targeting for sentry wards. */
-  private _activateWardTargeting(): void {
-    const p = this._playerState;
-    if (!p || !p.alive || p.wardCharges <= 0) return;
-    this._targeting.activate(
-      {
-        range: WARD.placeRange,
-        indicatorColor: 0x66ff88,
-        validateTarget: walkableValidator(this._navGrid, this._world.obstacles),
-        onTarget: (x, z) => {
-          this._enqueueCommand({ type: 'ward', x, z });
-          // Stop the hero after placing (harmless if already stationary).
-          const p = this._playerState;
-          this._enqueueCommand({ type: 'moveTo', x: p.pos.x, z: p.pos.z });
-        },
-        onCancel: () => {},
-        onMove: (x, z) => {
-          this._enqueueCommand({ type: 'moveTo', x, z });
-          this._moveIndicators.spawn(
-            new THREE.Vector3(x, this._heightAt(x, z), z),
-          );
-        },
-      },
-      'sentry_wards',
-      p.pos.x, p.pos.z,
-      this._heightAt(p.pos.x, p.pos.z),
-      this._scene,
-    );
-  }
-
-  /** Activate ground-targeting for the blink dagger. */
-  private _activateBlinkTargeting(): void {
+  /** Activate ground-targeting for an item with point-targeted on-use (wards, blink). */
+  private _activateItemTargeting(def: import('../sim/shopItems').ShopItemDef, slot: number): void {
     const p = this._playerState;
     if (!p || !p.alive) return;
-    if ((p.itemCooldowns['blink_dagger'] ?? 0) > 0) return;
-    const BLINK_RANGE = 450;
+    const use = def.use!;
+    if (use.cooldown && (p.itemCooldowns[def.id] ?? 0) > 0) return;
+    if (use.canUse && !use.canUse(p)) return;
     this._targeting.activate(
       {
-        range: BLINK_RANGE,
-        indicatorColor: 0x9966ff,
+        range: use.range ?? 0,
+        indicatorColor: def.id === 'blink_dagger' ? 0x9966ff : 0x66ff88,
         validateTarget: walkableValidator(this._navGrid, this._world.obstacles),
         onTarget: (x, z) => {
-          this._enqueueCommand({ type: 'blink', x, z });
+          this._enqueueCommand({ type: 'useItem', slot, x, z });
+          // For wards, anchor the hero after placing so the ward drops at
+          // the clicked spot (harmless if already stationary).
+          if (def.id === 'sentry_wards') {
+            this._enqueueCommand({ type: 'moveTo', x: p.pos.x, z: p.pos.z });
+          }
         },
         onCancel: () => {},
         onMove: (x, z) => {
@@ -1535,7 +1508,7 @@ export class Game {
           );
         },
       },
-      'blink_dagger',
+      def.id,
       p.pos.x, p.pos.z,
       this._heightAt(p.pos.x, p.pos.z),
       this._scene,
@@ -2048,14 +2021,19 @@ export class Game {
     );
 
     this._goldDisplay.update(p.gold);
-    const blinkCooldown = p.itemCooldowns['blink_dagger'] ?? 0;
-    const blinkCdProgress = blinkCooldown <= 0 ? 1 : 1 - blinkCooldown / BLINK_COOLDOWN;
-    this._itemBar.update(
-      p.inventory,
-      { sentry_wards: p.wardCharges },
-      { blink_dagger: blinkCdProgress },
-      { blink_dagger: Math.max(blinkCooldown, 0) },
-    );
+    // Build charge/cd maps generically from the item registry.
+    const charges: Record<string, number> = {};
+    const cdProgress: Record<string, number> = {};
+    const cdRemaining: Record<string, number> = {};
+    if (p.inventory.includes('sentry_wards')) charges['sentry_wards'] = p.wardCharges;
+    for (const itemId in p.itemCooldowns) {
+      const remaining = p.itemCooldowns[itemId];
+      cdRemaining[itemId] = Math.max(remaining, 0);
+      const def = SHOP_ITEMS_BY_ID[itemId];
+      const maxCd = def?.use?.cooldown;
+      cdProgress[itemId] = remaining <= 0 || !maxCd ? 1 : 1 - remaining / maxCd;
+    }
+    this._itemBar.update(p.inventory, charges, cdProgress, cdRemaining);
     this._kdDisplay.update(p.kills, p.deaths);
 
     // Shop overlay — show when in range

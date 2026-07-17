@@ -30,16 +30,9 @@ export interface ObstacleAABB {
   maxZ: number;
 }
 
-/** One purchasable item. `apply` mutates the buyer's plain state. */
-export interface ShopItemDef {
-  id: string;
-  name: string;
-  cost: number;
-  description: string;
-  /** Stackable items (e.g. ward charges) can be re-bought while owned. */
-  stackable?: boolean;
-  apply: (hero: HeroState) => void;
-}
+// Item defs live in the registry (shopItems.ts); re-exported for compat.
+import type { ShopItemDef } from './shopItems';
+export { type ShopItemDef };
 
 export interface Shop {
   pos: Vec2;
