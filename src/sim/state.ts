@@ -12,6 +12,29 @@ import { createAbilityRuntimes, type AbilityId } from './abilities';
 /** Six inventory slots holding item ids (null = empty). */
 export type Inventory = (string | null)[];
 
+// ── Unit substrate ───────────────────────────────────────────────────
+
+/**
+ * Shared base for every in-game unit (hero or creep). Fields that both
+ * types carry verbatim live here so damage and movement helpers can be
+ * written once against this interface.
+ *
+ * To add a new unit type:
+ *   1. Define its state interface, extending `UnitCore`.
+ *   2. Add a per-type array to `MatchState` and factory + step functions.
+ *   3. Keep per-type arrays separate (heroes[], creeps[], …) — never merge
+ *      them into one generic list (iteration-order determinism).
+ */
+export interface UnitCore {
+  id: string;
+  pos: Vec2;
+  facing: number;
+  hp: number;
+  alive: boolean;
+  respawnTimer: number;
+  level: number;
+}
+
 /**
  * Per-ability mutable state. One record entry per registered ability —
  * adding a spell adds a key here automatically (via `createAbilityRuntimes`)
@@ -32,7 +55,7 @@ export interface AbilityRuntime {
   activeTimer?: number;
 }
 
-export interface HeroState {
+export interface HeroState extends UnitCore {
   id: string;
   team: number;
   pos: Vec2;
@@ -136,7 +159,7 @@ export interface RuneState {
 }
 
 /** A neutral jungle creep. Ids are stable for the whole match. */
-export interface CreepState {
+export interface CreepState extends UnitCore {
   id: string;
   campId: string;
   type: CreepTypeId;

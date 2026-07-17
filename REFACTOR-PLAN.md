@@ -12,8 +12,8 @@ golden traces.
 | 1 — Sim-internal dedup | ✅ done | `0640dd5` |
 | 2 — Ability registry | ✅ done | `fdb833d` |
 | 3 — Generic ability/item runtime records + wire bump | ✅ done | `9014e2e` |
-| 4 — Item registry with behavior hooks | ✅ done | uncommitted (working tree) |
-| 5 — Unit substrate | ⬜ not started | — |
+| 4 — Item registry with behavior hooks | ✅ done | `c8de5d7` |
+| 5 — Unit substrate | ✅ done | uncommitted (working tree) |
 | 6 — Game.ts decomposition | ⬜ not started | — |
 
 **Phase 3 verification so far:** ✅ tsc clean · `pnpm sim` 17/17 (item-actives added)

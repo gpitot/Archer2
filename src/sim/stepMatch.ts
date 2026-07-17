@@ -7,19 +7,25 @@
  *
  * Behaviour was ported to match the original single-player game exactly,
  * including a couple of quirks in the kill-reward ordering (noted inline).
+ *
+ * ── Adding a new unit type ───────────────────────────────────────────
+ * 1. Define its state interface in `state.ts`, extending `UnitCore`.
+ * 2. Add a per-type array to `MatchState` (heroes[], creeps[], …).
+ *    Never merge into one generic list — iteration order must be
+ *    deterministic on every peer.
+ * 3. Write `create` / `step` / `respawn` helpers (patterns in stepCreeps.ts).
+ * 4. Call step helpers from `stepMatch()`; handle death via the unified
+ *    `dealDamageToHero` / `dealDamageToCreep` in `damage.ts`.
+ * 5. If the unit type needs client views, add per-type diff loops in
+ *    `Game.ts` (Phase 6 will extract a generic ViewSync for this).
  */
 import * as V from './math';
 import {
   ARROW,
   basicRankCap,
   BLAST,
-  BOUNTY_TABLE,
   HERO,
-  KILL_GOLD,
-  KILL_XP_TABLE,
-  MULTI_KILL_WINDOW,
   PASSIVE_INCOME,
-  SPREE_BONUS,
   ultimateRankCap,
   XP_TABLE,
 } from './rules';
@@ -42,8 +48,9 @@ import { findReachableNear, findRespawnPosition, SimWorld } from './world';
 import { ICE_BOW_SLOW_FACTOR, SHOP_ITEMS_BY_ID, addItem, removeItem } from './shopItems';
 import { stepRuneBuffs, stepRunes } from './stepRunes';
 import { RUNE } from './runeRules';
-import { rollAbilityDamage } from './damage';
+import { rollAbilityDamage, dealDamageToHero, killHero, addXp } from './damage';
 import { advanceProjectile, findHitHero } from './projectiles';
+import { turnToward, stepToward } from './movement';
 
 /**
  * Advance the match by `dt` seconds, applying `inputs` queued since the last
@@ -264,16 +271,7 @@ function moveAlongPath(hero: HeroState, dt: number): void {
 }
 
 function updateFacing(hero: HeroState, dt: number): void {
-  let diff = hero.targetFacing - hero.facing;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-
-  const maxTurn = HERO.turnSpeed * dt;
-  if (Math.abs(diff) < maxTurn) {
-    hero.facing = hero.targetFacing;
-  } else {
-    hero.facing += Math.sign(diff) * maxTurn;
-  }
+  hero.facing = turnToward(hero.facing, hero.targetFacing, HERO.turnSpeed, dt);
 }
 
 function respawn(hero: HeroState, pos: V.Vec2): void {
@@ -365,89 +363,20 @@ function applyDamage(
   target: HeroState,
   source: HeroState,
   damage: number,
-  /** Id of the projectile (or blast) that dealt it — clients retire the matching arrow. */
   projectileId: string,
   events: SimEvent[],
   crit = false,
 ): void {
-  if (!target.alive || target.invulnerable) return;
-
-  target.hp = Math.max(0, target.hp - damage);
-  events.push({
-    type: 'hit',
-    targetId: target.id,
-    sourceId: source.id,
-    projectileId,
-    damage,
-    x: target.pos.x,
-    z: target.pos.z,
-    crit,
-  });
-
-  if (target.hp > 0) return;
-
-  // Death & kill credit. The victim's kill streak is reset *before* the reward
-  // is computed and the killer's multi-kill count is incremented *after*,
-  // preserving the original game's (quirky) bounty/multi-kill accounting.
-  killHero(target);
-
-  source.kills++;
-  source.killStreak++;
-  const gold = awardKillGold(state, source, target);
-  addXp(source, killXpReward(target, source), events);
-  source.multiKillTimer = MULTI_KILL_WINDOW;
-  source.multiKillCount++;
-
-  events.push({ type: 'kill', sourceId: source.id, victimId: target.id, gold });
+  dealDamageToHero(state, target, { kind: 'hero', hero: source }, damage, projectileId, events, crit);
 }
 
 /**
  * The victim half of a hero death — shared by hero-vs-hero kills and creep
- * kills (which carry no killer rewards).
+ * kills (which carry no killer rewards). Moved to damage.ts; re-exported
+ * for stepCreeps compat.
  */
-export function killHero(target: HeroState): void {
-  target.alive = false;
-  target.respawnTimer = HERO.respawnDelay;
-  target.path = [];
-  target.moving = false;
-  target.deaths++;
-  target.killStreak = 0;
-}
 
-function awardKillGold(state: MatchState, killer: HeroState, victim: HeroState): number {
-  let total = KILL_GOLD.base;
-
-  if (state.firstBlood) {
-    state.firstBlood = false;
-    total += KILL_GOLD.firstBlood;
-  }
-  if (killer.killStreak >= 3) {
-    total += SPREE_BONUS[Math.min(killer.killStreak, 10)] ?? 7;
-  }
-  if (victim.killStreak >= 4) {
-    total += BOUNTY_TABLE[Math.min(victim.killStreak, 10)] ?? 28;
-  }
-  if (killer.multiKillCount === 2) total += KILL_GOLD.doubleKill;
-  else if (killer.multiKillCount >= 3) total += KILL_GOLD.tripleKill;
-
-  killer.gold += total;
-  return total;
-}
-
-function killXpReward(victim: HeroState, killer: HeroState): number {
-  let xp = KILL_XP_TABLE[Math.min(victim.level, KILL_XP_TABLE.length - 1)];
-  if (victim.level > killer.level) xp += (victim.level - killer.level) * 50;
-  return xp;
-}
-
-export function addXp(hero: HeroState, amount: number, events: SimEvent[]): void {
-  hero.xp += amount;
-  while (hero.level < HERO.maxLevel && hero.xp >= XP_TABLE[hero.level + 1]) {
-    hero.level++;
-    hero.skillPoints++;
-    events.push({ type: 'levelUp', heroId: hero.id, level: hero.level });
-  }
-}
+export { killHero, addXp } from './damage';
 
 // ── Blasts ──────────────────────────────────────────────────────────────
 
