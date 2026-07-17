@@ -49,7 +49,7 @@ export class ProjectileView {
   setStyle(style: ProjectileStyle): void {
     if (style === this._style) return;
     this._style = style;
-    const orb = style !== 'arrow'; // fireball & scout share the sphere core
+    const orb = style === 'fireball' || style === 'scout'; // fireball & scout share the sphere core
     this._arrowParts.visible = !orb;
     this._fireball.visible = orb;
     const fireballMat = this._fireball.material as THREE.MeshStandardMaterial;
