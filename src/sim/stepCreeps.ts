@@ -288,6 +288,7 @@ export function applyCreepDamage(
   source: HeroState,
   damage: number,
   events: SimEvent[],
+  crit = false,
 ): void {
   if (!creep.alive) return;
 
@@ -305,6 +306,7 @@ export function applyCreepDamage(
     damage,
     x: creep.pos.x,
     z: creep.pos.z,
+    crit,
   });
 
   if (creep.hp > 0) return;

@@ -391,6 +391,7 @@ export class GameRoom extends DurableObject<Env> {
       multiKillCount: h.multiKillCount,
       multiKillTimer: q(h.multiKillTimer),
       speedBonus: h.speedBonus,
+      critChance: h.critChance,
       inventory: [...h.inventory],
       wardCharges: h.wardCharges,
       abilityLevel: h.abilityLevel,

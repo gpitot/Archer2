@@ -76,6 +76,7 @@ export interface HeroMeta {
   multiKillCount: number;
   multiKillTimer: number;
   speedBonus: number;
+  critChance: number;
   inventory: Inventory;
   wardCharges: number;
   abilityLevel: number;

@@ -44,6 +44,8 @@ export interface HeroState {
 
   // Items / abilities
   speedBonus: number;
+  /** Chance (0–1) for any ability to deal double damage. */
+  critChance: number;
   dodgeActive: boolean;
   dodgeTimer: number;
   dodgeCooldown: number;
@@ -145,7 +147,7 @@ export interface HeroInput {
 
 // ── Events (sim → clients) ────────────────────────────────────────────
 export type SimEvent =
-  | { type: 'hit'; targetId: string; sourceId: string; projectileId: string; damage: number; x: number; z: number }
+  | { type: 'hit'; targetId: string; sourceId: string; projectileId: string; damage: number; x: number; z: number; crit?: boolean }
   | { type: 'kill'; sourceId: string; victimId: string }
   | { type: 'respawn'; heroId: string }
   /**
@@ -157,7 +159,7 @@ export type SimEvent =
   | { type: 'blastExplode'; blastId: string; ownerId: string; x: number; z: number }
   | { type: 'purchase'; heroId: string; itemId: string }
   | { type: 'levelUp'; heroId: string; level: number }
-  | { type: 'creepHit'; creepId: string; sourceId: string; damage: number; x: number; z: number }
+  | { type: 'creepHit'; creepId: string; sourceId: string; damage: number; x: number; z: number; crit?: boolean }
   | {
       type: 'creepKill';
       creepId: string;
@@ -195,6 +197,7 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     multiKillCount: 0,
     multiKillTimer: 0,
     speedBonus: 0,
+    critChance: 0,
     inventory: [null, null, null, null, null, null],
     wardCharges: 0,
     abilityLevel: 0,
