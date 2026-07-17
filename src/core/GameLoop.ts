@@ -1,4 +1,5 @@
 import { Clock } from './Clock';
+import { perf } from './PerformanceMonitor';
 
 export type UpdateCallback = (delta: number) => void;
 export type RenderCallback = (interpolation: number) => void;
@@ -68,6 +69,8 @@ export class GameLoop {
       this._accumulator = 0.2;
     }
 
+    perf.beginFrame();
+
     // Fixed timestep updates
     while (this._accumulator >= this.fixedDelta) {
       this.updateCb?.(this.fixedDelta);
@@ -77,6 +80,8 @@ export class GameLoop {
     // Render with interpolation factor [0, 1)
     const interpolation = this._accumulator / this.fixedDelta;
     this.renderCb?.(interpolation);
+
+    perf.endFrame();
 
     this._rafId = requestAnimationFrame((t) => this._loop(t));
   }
