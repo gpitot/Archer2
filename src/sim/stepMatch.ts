@@ -11,6 +11,7 @@
 import * as V from './math';
 import {
   ARROW,
+  basicRankCap,
   BLAST,
   BOUNTY_TABLE,
   DODGE,
@@ -19,7 +20,9 @@ import {
   KILL_XP_TABLE,
   MULTI_KILL_WINDOW,
   PASSIVE_INCOME,
+  REVEAL,
   SPREE_BONUS,
+  ultimateRankCap,
   WARD,
   XP_TABLE,
 } from './rules';
@@ -288,18 +291,37 @@ function useItem(hero: HeroState, slot: number, state: MatchState, world: SimWor
   }
 }
 
-function spendSkillPoint(hero: HeroState, ability: 'arrow' | 'dodge'): void {
+function spendSkillPoint(hero: HeroState, ability: 'arrow' | 'dodge' | 'reveal' | 'blast'): void {
   if (hero.skillPoints <= 0) return;
-  if (ability === 'arrow' && hero.abilityLevel >= ARROW.maxLevel) return;
-  if (ability === 'dodge' && hero.dodgeLevel >= DODGE.maxLevel) return;
+
+  // MOBA-style gates: basics (Q/W/E) capped at ceil(level/2), the ultimate
+  // (R) unlocks ranks at hero levels 6/11/16. Points bank until spendable.
+  const basicCap = Math.min(basicRankCap(hero.level), 5);
+  switch (ability) {
+    case 'arrow':
+      if (hero.abilityLevel >= ARROW.maxLevel || hero.abilityLevel >= basicCap) return;
+      hero.abilityLevel++;
+      break;
+    case 'dodge':
+      if (hero.dodgeLevel >= DODGE.maxLevel || hero.dodgeLevel >= basicCap) return;
+      hero.dodgeLevel++;
+      break;
+    case 'reveal':
+      if (hero.revealLevel >= REVEAL.maxLevel || hero.revealLevel >= basicCap) return;
+      hero.revealLevel++;
+      break;
+    case 'blast':
+      if (hero.blastLevel >= BLAST.maxLevel || hero.blastLevel >= ultimateRankCap(hero.level)) return;
+      hero.blastLevel++;
+      break;
+  }
   hero.skillPoints--;
-  if (ability === 'arrow') hero.abilityLevel++;
-  else hero.dodgeLevel++;
 }
 
 /** R — Blast: mark an AoE circle that detonates after a fixed delay. */
 function castBlast(state: MatchState, hero: HeroState, x: number, z: number): void {
   if (!hero.alive) return;
+  if (hero.blastLevel < 1) return;
   if (hero.blastCooldown > 0) return;
   const target = { x, z };
   if (V.distance(hero.pos, target) > BLAST.castRange + 1) return;
@@ -309,13 +331,14 @@ function castBlast(state: MatchState, hero: HeroState, x: number, z: number): vo
   const dir = V.sub(target, hero.pos);
   if (V.length(dir) > 0.01) hero.targetFacing = V.heading(dir);
 
-  hero.blastCooldown = BLAST.cooldown;
+  hero.blastCooldown = BLAST.cooldownByLevel[hero.blastLevel];
   state.blasts.push({
     id: `b${state.nextBlastId++}`,
     ownerId: hero.id,
     team: hero.team,
     pos: target,
     timer: BLAST.delay,
+    damage: BLAST.damageByLevel[hero.blastLevel],
   });
 }
 
@@ -589,7 +612,7 @@ function awardKillGold(state: MatchState, killer: HeroState, victim: HeroState):
 }
 
 function killXpReward(victim: HeroState, killer: HeroState): number {
-  let xp = KILL_XP_TABLE[Math.min(victim.level, 10)];
+  let xp = KILL_XP_TABLE[Math.min(victim.level, KILL_XP_TABLE.length - 1)];
   if (victim.level > killer.level) xp += (victim.level - killer.level) * 50;
   return xp;
 }
@@ -632,7 +655,7 @@ function stepBlasts(state: MatchState, dt: number, events: SimEvent[], rng: () =
       if (!hero.alive || hero.invulnerable) continue;
       if (V.distanceSq(blast.pos, hero.pos) > r2) continue;
       const crit = rollCrit(source, rng);
-      applyDamage(state, hero, source, critDamage(BLAST.damage, crit), blast.id, events, crit);
+      applyDamage(state, hero, source, critDamage(blast.damage, crit), blast.id, events, crit);
     }
 
     // Creeps in the circle.
@@ -640,7 +663,7 @@ function stepBlasts(state: MatchState, dt: number, events: SimEvent[], rng: () =
       if (!creep.alive) continue;
       if (V.distanceSq(blast.pos, creep.pos) > r2) continue;
       const crit = rollCrit(source, rng);
-      applyCreepDamage(state, creep, source, critDamage(BLAST.damage, crit), events, crit);
+      applyCreepDamage(state, creep, source, critDamage(blast.damage, crit), events, crit);
     }
   }
 }
@@ -678,7 +701,7 @@ export function passiveIncome(hero: HeroState): number {
 }
 
 export function xpForLevel(level: number): number {
-  return XP_TABLE[Math.min(level, 10)] ?? 5400;
+  return XP_TABLE[Math.min(level, HERO.maxLevel)] ?? XP_TABLE[XP_TABLE.length - 1];
 }
 
 // ── Inventory helpers ─────────────────────────────────────────────────

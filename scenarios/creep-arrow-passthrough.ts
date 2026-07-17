@@ -20,6 +20,8 @@ export function run(h: SimHarness): void {
   );
   expectTrue(h.hasLineOfSight(shooter.pos, ghoul.pos), 'clear arrow line to the ghoul');
 
+  // Grant p2 a point for W rank 1 (the level-1 point is auto-spent on Q).
+  dodger.skillPoints = 1;
   h.issue('p1', { type: 'levelAbility', ability: 'arrow' });
   h.issue('p2', { type: 'levelAbility', ability: 'dodge' });
   h.tick();

@@ -60,8 +60,10 @@ export function run(h: SimHarness): void {
     expectTrue(Math.abs(step - def.projectileSpeed! * DT) < 1, 'fireball step is uniform');
   }
 
-  // Dodge: level dodge with the starting skill point, activate as the next
+  // Dodge: grant a point for W rank 1 (the level-1 point is auto-spent on
+  // Q), activate as the next
   // fireball spawns → it passes through and expires with no hit.
+  hero.skillPoints = 1;
   h.issue('p1', { type: 'levelAbility', ability: 'dodge' });
   const hpBeforeDodge = () => hero.hp;
   h.runUntil(

@@ -87,6 +87,8 @@ export interface HeroMeta {
   dodgeTimer: number;
   dodgeCooldown: number;
   dodgeLevel: number;
+  revealLevel: number;
+  blastLevel: number;
   blinkCooldown: number;
   blastCooldown: number;
 }

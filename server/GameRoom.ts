@@ -402,6 +402,8 @@ export class GameRoom extends DurableObject<Env> {
       dodgeTimer: q(h.dodgeTimer),
       dodgeCooldown: q(h.dodgeCooldown),
       dodgeLevel: h.dodgeLevel,
+      revealLevel: h.revealLevel,
+      blastLevel: h.blastLevel,
       blinkCooldown: q(h.blinkCooldown),
       blastCooldown: q(h.blastCooldown),
     }));
