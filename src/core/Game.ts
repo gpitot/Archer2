@@ -61,6 +61,7 @@ import { CreepView } from '../entities/CreepView';
 
 // ── Debug tooling ──
 import { ClientTrace } from '../testing/ClientTrace';
+import { perf } from './PerformanceMonitor';
 
 const FOG_CELL_SIZE = 40;
 
@@ -251,6 +252,13 @@ export class Game {
     const urlParams = new URLSearchParams(window.location.search);
     this._roomCode = urlParams.get('room');
     if (urlParams.get('debug')) this._trace = new ClientTrace();
+    if (urlParams.get('perf')) {
+      // Defer enable until renderer is ready (set in the renderer block below).
+      perf.getRendererStats = () => {
+        try { return this._renderer?.info ?? null; } catch { return null; }
+      };
+      perf.enable();
+    }
     if (this._roomCode) {
       this._networkMode = true;
       this._network = new NetworkClient();

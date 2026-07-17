@@ -25,4 +25,10 @@ export class Renderer {
   render(scene: THREE.Scene, camera: THREE.Camera): void {
     this._renderer.render(scene, camera);
   }
+
+  /** Expose WebGL render stats: draw calls, triangles, points. */
+  get info(): { drawCalls: number; triangles: number; points: number } {
+    const r = this._renderer.info.render;
+    return { drawCalls: r.calls, triangles: r.triangles, points: r.points };
+  }
 }
