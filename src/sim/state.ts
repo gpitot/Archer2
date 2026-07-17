@@ -48,6 +48,8 @@ export interface HeroState {
   dodgeTimer: number;
   dodgeCooldown: number;
   dodgeLevel: number;
+  revealLevel: number;
+  blastLevel: number;
   blinkCooldown: number;
   blastCooldown: number;
   inventory: Inventory;
@@ -87,6 +89,8 @@ export interface BlastState {
   pos: Vec2;
   /** Seconds until detonation. */
   timer: number;
+  /** Damage locked in at cast time (from the caster's R rank). */
+  damage: number;
 }
 
 /** A neutral jungle creep. Ids are stable for the whole match. */
@@ -133,7 +137,7 @@ export type Command =
   | { type: 'blink'; x: number; z: number }
   | { type: 'buy'; itemIndex: number }
   | { type: 'useItem'; slot: number }
-  | { type: 'levelAbility'; ability: 'arrow' | 'dodge' }
+  | { type: 'levelAbility'; ability: 'arrow' | 'dodge' | 'reveal' | 'blast' }
   | { type: 'dodge' }
   | { type: 'blast'; x: number; z: number };
 
@@ -197,7 +201,8 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     speedBonus: 0,
     inventory: [null, null, null, null, null, null],
     wardCharges: 0,
-    abilityLevel: 0,
+    // Q starts pre-learned at rank 1 (special case — it's the basic attack).
+    abilityLevel: 1,
     abilityCooldown: 0,
     abilityCharges: ARROW.maxCharges,
     abilityRecoilTimer: 0,
@@ -205,6 +210,8 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     dodgeTimer: 0,
     dodgeCooldown: 0,
     dodgeLevel: 0,
+    revealLevel: 0,
+    blastLevel: 0,
     blinkCooldown: 0,
     blastCooldown: 0,
   };

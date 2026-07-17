@@ -35,7 +35,7 @@ import { stepMatch, xpForLevel, heroSpeed } from '../sim/stepMatch';
 import { spawnCamps } from '../sim/stepCreeps';
 import { SimWorld, sphereHitsObstacle } from '../sim/world';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
-import { HERO, ARROW, DODGE, WARD, REVEAL, BLAST } from '../sim/rules';
+import { HERO, ARROW, DODGE, WARD, REVEAL, BLAST, basicRankCap, ultimateRankCap } from '../sim/rules';
 import { BLINK_COOLDOWN, SHOP_ITEMS } from '../sim/shopItems';
 import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta, CreepMeta } from '../sim/protocol';
 import { creepMaxHp } from '../sim/creepRules';
@@ -443,17 +443,27 @@ export class Game {
       }
     });
 
-    // E — Reveal enemy hero locations on the minimap
+    // E — Reveal enemy hero locations on the minimap (Shift+E to level up)
     this._input.onKeyDown('KeyE', () => {
       this._targeting.cancel();
+      if (this._input.isKeyDown('ShiftLeft') || this._input.isKeyDown('ShiftRight')) {
+        this._enqueueCommand({ type: 'levelAbility', ability: 'reveal' });
+        return;
+      }
       if (!this._playerState.alive) return;
+      if (this._playerState.revealLevel < 1) return;
       if (this._revealCooldown > 0) return;
-      this._revealTimer = REVEAL.duration;
-      this._revealCooldown = REVEAL.cooldown;
+      this._revealTimer = REVEAL.durationByLevel[this._playerState.revealLevel];
+      this._revealCooldown = REVEAL.cooldownByLevel[this._playerState.revealLevel];
     });
 
-    // R — Blast: ground-targeted AoE with a detonation delay
+    // R — Blast: ground-targeted AoE with a detonation delay (Shift+R to level up)
     this._input.onKeyDown('KeyR', () => {
+      if (this._input.isKeyDown('ShiftLeft') || this._input.isKeyDown('ShiftRight')) {
+        this._targeting.cancel();
+        this._enqueueCommand({ type: 'levelAbility', ability: 'blast' });
+        return;
+      }
       // Toggle: pressing R again while aiming cancels.
       if (this._targeting.isActive && this._targeting.sourceItemId === 'blast') {
         this._targeting.cancel();
@@ -825,6 +835,8 @@ export class Game {
     dst.dodgeTimer = src.dodgeTimer;
     dst.dodgeCooldown = src.dodgeCooldown;
     dst.dodgeLevel = src.dodgeLevel;
+    dst.revealLevel = src.revealLevel;
+    dst.blastLevel = src.blastLevel;
     dst.blinkCooldown = src.blinkCooldown;
     dst.blastCooldown = src.blastCooldown;
   }
@@ -1117,7 +1129,7 @@ export class Game {
       dir,
       speed: ARROW.speed,
       traveled: 0,
-      maxRange: ARROW.rangeByLevel[Math.min(player.abilityLevel, 4)],
+      maxRange: ARROW.rangeByLevel[Math.min(player.abilityLevel, ARROW.maxLevel)],
       serverId: null,
     });
   }
@@ -1481,6 +1493,7 @@ export class Game {
   private _activateBlastTargeting(): void {
     const p = this._playerState;
     if (!p || !p.alive) return;
+    if (p.blastLevel < 1) return;
     if (p.blastCooldown > 0) return;
     this._targeting.activate(
       {
@@ -1788,18 +1801,42 @@ export class Game {
       halfW: this._camera.viewHalfWidth(),
     });
 
-    // Spell bar cooldowns
+    // Spell bar cooldowns, levels, and skill-point gates
     const arrowCd = ARROW.cooldownByLevel[Math.max(p.abilityLevel, 1)];
     const cdProgress = p.abilityCooldown <= 0 ? 1
       : 1 - p.abilityCooldown / arrowCd;
     const dodgeCdProgress = p.dodgeCooldown <= 0 ? 1
-      : 1 - p.dodgeCooldown / DODGE.cooldownByLevel[Math.min(p.dodgeLevel, 4)];
+      : 1 - p.dodgeCooldown / DODGE.cooldownByLevel[Math.max(p.dodgeLevel, 1)];
+    const revealCdProgress = this._revealCooldown <= 0 ? 1
+      : 1 - this._revealCooldown / REVEAL.cooldownByLevel[Math.max(p.revealLevel, 1)];
+    const blastCdProgress = p.blastCooldown <= 0 ? 1
+      : 1 - p.blastCooldown / BLAST.cooldownByLevel[Math.max(p.blastLevel, 1)];
+    const basicCap = basicRankCap(p.level);
+    const ultCap = ultimateRankCap(p.level);
+    const hasPoint = p.skillPoints > 0;
     this._spellBar.update(
-      cdProgress, p.abilityLevel, p.skillPoints,
-      dodgeCdProgress, p.dodgeLevel,
-      p.abilityCharges, ARROW.maxCharges,
-      this._revealCooldown <= 0 ? 1 : 1 - this._revealCooldown / REVEAL.cooldown,
-      p.blastCooldown <= 0 ? 1 : 1 - p.blastCooldown / BLAST.cooldown,
+      {
+        cooldownProgress: cdProgress,
+        level: p.abilityLevel,
+        canLevel: hasPoint && p.abilityLevel < Math.min(ARROW.maxLevel, basicCap),
+        charges: p.abilityCharges,
+        maxCharges: ARROW.maxCharges,
+      },
+      {
+        cooldownProgress: dodgeCdProgress,
+        level: p.dodgeLevel,
+        canLevel: hasPoint && p.dodgeLevel < Math.min(DODGE.maxLevel, basicCap),
+      },
+      {
+        cooldownProgress: revealCdProgress,
+        level: p.revealLevel,
+        canLevel: hasPoint && p.revealLevel < Math.min(REVEAL.maxLevel, basicCap),
+      },
+      {
+        cooldownProgress: blastCdProgress,
+        level: p.blastLevel,
+        canLevel: hasPoint && p.blastLevel < Math.min(BLAST.maxLevel, ultCap),
+      },
     );
 
     // Hero portrait

@@ -1,4 +1,10 @@
-# Spell Leveling Rules — Change Request (for approval)
+# Spell Leveling Rules — Change Request (APPROVED)
+
+> Status: approved 2026-07-17 with the following decisions:
+> 1. E and R are locked until skilled. 2. E ranks reduce cooldown and extend
+> duration; R ranks reduce cooldown and increase damage. 3. Hero cap raised
+> to 18 for exact LoL parity (basics 5 ranks @ 1/3/5/7/9, ult @ 6/11/16).
+> 4. Q starts pre-learned at rank 1 (special case, free).
 
 ## Reference: how League of Legends does it
 
@@ -31,56 +37,56 @@ LoL is the model that matches the requested behaviour (R at 6/11/16). Its rules:
 you *can* have Q rank 2 at level 2. The 6/11/16 pattern you described is LoL,
 so LoL rules are used as the base.)
 
-## Proposed adaptation for Archer Wars
-
-Our hero caps at **level 10** (not 18), so the thresholds are compressed:
+## Final spec for Archer Wars (hero cap raised 10 → 18)
 
 | Ability | Ranks | Rank gates (hero level required) |
 |---|---|---|
-| Q — Arrow  | 4 | 1 / 3 / 5 / 7  (rank ≤ ⌈level / 2⌉) |
-| W — Dodge  | 4 | 1 / 3 / 5 / 7 |
-| E — Reveal | 4 | 1 / 3 / 5 / 7 |
-| R — Blast (ultimate) | 3 | **6 / 8 / 10** |
+| Q — Arrow  | 5 | pre-learned rank 1 / 3 / 5 / 7 / 9  (rank ≤ ⌈level / 2⌉) |
+| W — Dodge  | 5 | 1 / 3 / 5 / 7 / 9 |
+| E — Reveal | 5 | 1 / 3 / 5 / 7 / 9 |
+| R — Blast (ultimate) | 3 | **6 / 11 / 16** |
 
-- **Skill points:** 1 at level 1, +1 per level → **10 total**.
-- Max total ranks = 4+4+4+3 = **15**, so you can never max everything —
-  builds stay meaningful (LoL has the same property: 18 points vs 18 ranks,
-  but here it's tighter).
-- Unspent points **bank** indefinitely; the level-up UI stays available until
-  spent.
-- R gates scale LoL's 6/11/16 onto a 10-level curve (unlock at 6, then every
-  2 levels). R points don't affect the Q/W/E gates.
+- **Skill points:** 1 at level 1, +1 per level → **18 total**.
+- **Q special case:** every hero starts with Q already at rank 1, free of
+  charge (it's the hero's basic attack). The level-1 point can go anywhere
+  allowed. Consequence: 18 points vs 17 remaining ranks — a fully maxed
+  build finishes at level 17 and the level-18 point is surplus.
+- **E and R start locked** (unusable) until a point is spent.
+- Unspent points **bank** indefinitely; gates are level thresholds, not
+  one-time windows.
+- R points don't affect the Q/W/E gates.
 - No refunds/respec mid-match.
+
+### Per-rank stat tables
+
+- **Q Arrow** (extends existing 4-rank progression to 5):
+  damage 200/266/333/400/466 · range 800/1333/1866/2400/2933 ·
+  cooldown 2.25/2.0/1.75/1.5/1.25 s
+- **W Dodge**: duration 0.8/1.0/1.25/1.5/1.75 s · cooldown 8/7/6/5/4 s
+- **E Reveal**: duration 2/2.5/3/3.5/4 s · cooldown 15/13/11/9/7 s
+- **R Blast**: damage 300/425/550 · cooldown 20/17/14 s
+  (cast range, radius, and 1.5 s fuse unchanged)
+
+### XP curve extension (levels 11–18)
+
+The existing curve adds +100 XP per step (200, 300, … 1000). Continued:
+
+| Level | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 |
+|---|---|---|---|---|---|---|---|---|
+| Total XP | 6500 | 7700 | 9000 | 10400 | 11900 | 13500 | 15200 | 17000 |
+
+Kill-XP for victims above level 10 stays at the 300 cap.
+
+### Gate formulas (implementation)
+
+- Basics: `rank ≤ min(5, ceil(level / 2))`
+- Ultimate: rank cap = 0 below 6, 1 at 6–10, 2 at 11–15, 3 at 16+
 
 ### Concrete examples
 
-- Level 1: you may put your point in Q, W, or E (not R). Q cannot reach
-  rank 2 until level 3 even if you bank the level-2 point.
+- Level 1: Q is usable at rank 1 for free; your point can go in W or E
+  (not R, not Q — Q rank 2 needs level 3).
 - Level 6: R rank 1 becomes available. If you instead rank W at 6, you can
   still take R rank 1 at level 7 (or any later level).
-- Level 8: R rank 2 available (requires rank 1 first, of course).
-- Level 10: R rank 3 available; a typical finished build is one maxed basic
-  (4), a second basic at 3, third untouched or vice-versa, and R at 3.
-
-### Implementation notes (current code)
-
-- `stepMatch.ts` `learnAbility`-style handler currently only checks
-  `skillPoints > 0` and per-ability `maxLevel` — needs the two gate checks:
-  - basics: `newRank <= ceil(hero.level / 2)`
-  - ultimate: `newRank <= floor((hero.level - 4) / 2)` i.e. 1@6, 2@8, 3@10
-- E (Reveal) and R (Blast) are currently fixed-power, always-available
-  abilities with no ranks. This change makes them **learned/ranked**:
-  they start unlearned (unusable) and need per-rank stat tables.
-
-## Open questions for approval
-
-1. **E and R become locked until skilled** — currently they're free from
-   level 1. Confirm this is intended (it's the MOBA norm).
-2. **Per-rank numbers for E and R** need designing. Strawman:
-   - E Reveal: cooldown 15/12/9/6 s, duration 2/2.5/3/3.5 s
-   - R Blast: damage 300/425/550, cooldown 20/17/14 s
-3. R gates at **6/8/10** — alternative would be 6/9/10 or raising hero max
-   level to 18 to copy LoL exactly. Preference?
-4. Should Q start pre-learned at rank 1 (so new players always have an
-   attack), with the level-1 point free to spend elsewhere? LoL does *not*
-   do this, but our hero's basic attack **is** Q.
+- Level 11: R rank 2 available; level 16: R rank 3 (requires prior ranks).
+- Levels 1–2: no ability can exceed rank 1 ("can't level Q at 1 and 2").
