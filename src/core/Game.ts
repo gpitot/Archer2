@@ -293,12 +293,24 @@ export class Game {
     createLighting(this._scene);
 
     // ── Terrain (only build chunks overlapping the playable arena) ──
-    this._terrain = new Wc3Terrain(this._map, {
+    // ?margin=N  → custom margin in world units (default 1024 = 8 tiles)
+    // ?margin=-1 → full map (old behaviour)
+    const marginRaw = urlParams.get('margin');
+    const arenaBounds = {
       minX: this._arena.minX,
       minZ: this._arena.minZ,
       maxX: this._arena.maxX,
       maxZ: this._arena.maxZ,
-    });
+    };
+    if (marginRaw === '-1') {
+      this._terrain = new Wc3Terrain(this._map); // full map
+    } else {
+      this._terrain = new Wc3Terrain(
+        this._map,
+        arenaBounds,
+        marginRaw !== null ? Number(marginRaw) : 1024,
+      );
+    }
     this._scene.add(this._terrain.mesh);
     const heightAt = (x: number, z: number) => this._terrain.heightAt(x, z);
 

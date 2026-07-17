@@ -44,9 +44,9 @@ export class Wc3Terrain {
    *                   map is skipped entirely, which dramatically reduces
    *                   triangle count on large maps.
    * @param margin     World-space padding added to each side of `bounds`.
-   *                   Defaults to 4500 (roughly the fog start distance).
+   *                   Defaults to 1024 (8 tiles) — enough for fog fade.
    */
-  constructor(map: MapData, bounds?: TerrainBounds, margin = 4500) {
+  constructor(map: MapData, bounds?: TerrainBounds, margin = 1024) {
     this._map = map;
     this._atlas = createGroundAtlas();
     this.group = new THREE.Group();
@@ -131,9 +131,14 @@ export class Wc3Terrain {
     }
 
     const total = chunksX * chunksZ;
+    const pct = total > 0 ? Math.round((1 - skipped / total) * 100) : 0;
+    const style = skipped > 0 ? 'color:#88ff88' : 'color:#ff8844';
     console.log(
-      `[terrain] built ${total - skipped}/${total} chunks (skipped ${skipped})` +
-      (bounds ? ` within arena bounds + ${margin}u margin` : ' (full map)'),
+      `%c[terrain] built ${total - skipped}/${total} chunks (${pct}%)` +
+      (bounds
+        ? ` — arena [${bounds.minX}..${bounds.maxX}] × [${bounds.minZ}..${bounds.maxZ}] + ${margin}u margin`
+        : ' — FULL MAP (no bounds given)'),
+      style,
     );
   }
 
