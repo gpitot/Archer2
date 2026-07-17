@@ -23,9 +23,18 @@ const SHOOT_DURATION = 0.45;
 const FADE = 0.15;
 /**
  * Opacity of the team-color overlay on the body texture (0 = none, 1 = solid).
- * Kept low so the tint reads without darkening/muddying the texture.
+ * Strong enough that blue vs red team reads at a glance on the map.
  */
-const TEAM_TINT = 0.2;
+const TEAM_TINT = 0.5;
+/** The overlay uses a fully saturated variant of the team color (HSL). */
+const TINT_SATURATION = 1.0;
+const TINT_LIGHTNESS = 0.55;
+/**
+ * Constant team-colored emissive on the body. The texture is mostly dark
+ * leather/cloth, so a multiply tint alone can't produce a clear red/blue —
+ * the additive glow keeps the team readable regardless of texture darkness.
+ */
+const TEAM_GLOW = 0.35;
 
 const CLIP_IDLE = 'Idle_Weapon';
 const CLIP_RUN = 'Run_Holding';
@@ -39,6 +48,8 @@ export class RangerRig implements HeroRig {
   private _run: THREE.AnimationAction | null = null;
   private _shoot: THREE.AnimationAction | null = null;
   private _materials: THREE.MeshStandardMaterial[] = [];
+  private _bodyMat: THREE.MeshStandardMaterial | null = null;
+  private _teamEmissive: THREE.Color;
 
   private _moving = false;
   // Buffered state, applied when the async load completes.
@@ -49,6 +60,8 @@ export class RangerRig implements HeroRig {
   private _disposed = false;
 
   constructor(teamColor: number) {
+    this._teamEmissive = new THREE.Color(teamColor);
+
     this.root.rotation.y = YAW_OFFSET;
     this.root.scale.setScalar(MODEL_SCALE);
 
@@ -58,8 +71,15 @@ export class RangerRig implements HeroRig {
       this._materials = [...materials.values()];
 
       // Team tint on the body texture (materials are per-instance clones).
+      // Saturate the team color first so the multiply-tint reads as a clear
+      // blue/red instead of a subtle pastel shift.
       const body = materials.get('Ranger_Texture');
-      body?.color.lerp(new THREE.Color(teamColor), TEAM_TINT);
+      const hsl = { h: 0, s: 0, l: 0 };
+      const tint = new THREE.Color(teamColor);
+      tint.getHSL(hsl);
+      tint.setHSL(hsl.h, TINT_SATURATION, TINT_LIGHTNESS);
+      body?.color.lerp(tint, TEAM_TINT);
+      this._bodyMat = body ?? null;
 
       this._mixer = new THREE.AnimationMixer(scene);
       const clip = (name: string) => {
@@ -150,9 +170,19 @@ export class RangerRig implements HeroRig {
   }
 
   private _applyEmissive(): void {
+    const flashing = this._emissiveIntensity > 0;
     for (const m of this._materials) {
-      m.emissive.set(this._emissive);
-      m.emissiveIntensity = this._emissiveIntensity;
+      if (flashing) {
+        m.emissive.set(this._emissive);
+        m.emissiveIntensity = this._emissiveIntensity;
+      } else if (m === this._bodyMat) {
+        // At rest the body carries the team glow, not black.
+        m.emissive.copy(this._teamEmissive);
+        m.emissiveIntensity = TEAM_GLOW;
+      } else {
+        m.emissive.set(0x000000);
+        m.emissiveIntensity = 0;
+      }
     }
   }
 
