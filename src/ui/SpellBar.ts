@@ -2,7 +2,7 @@
  * MOBA-style spell bar overlay.
  *
  * Renders 4 ability slots (QWER) at the bottom centre of the screen.
- * Q is wired to the ArrowAbility; W is Dodge; E is Reveal; R is Blast.
+ * Q is wired to the ArrowAbility; W is Dodge; E is the Scout projectile; R is Blast.
  * Q also has a charge indicator above the slot when the ability has >1 max charge.
  * Basics (Q/W/E) show 5 rank dots; the ultimate (R) shows 3.
  */

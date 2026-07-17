@@ -20,7 +20,7 @@ import {
   KILL_XP_TABLE,
   MULTI_KILL_WINDOW,
   PASSIVE_INCOME,
-  REVEAL,
+  SCOUT,
   SPREE_BONUS,
   ultimateRankCap,
   WARD,
@@ -117,6 +117,9 @@ function applyCommand(
     case 'dodge':
       activateDodge(hero);
       break;
+    case 'reveal':
+      fireScout(state, hero, cmd.aimX, cmd.aimZ, events);
+      break;
     case 'blast':
       castBlast(state, hero, cmd.x, cmd.z);
       break;
@@ -199,6 +202,59 @@ function fireArrow(
   // timeline is spawnPos + dir * speed * (t - tick * dt), matching the sim's
   // same-tick stepProjectiles advance. The event carries a copy — the live
   // projectile keeps advancing while events await the next snapshot broadcast.
+  events.push({
+    type: 'fire',
+    heroId: hero.id,
+    tick: state.tick,
+    projectile: { ...projectile, pos: { ...projectile.pos }, dir: { ...projectile.dir } },
+  });
+}
+
+/**
+ * E — Scout: fire a damage-free vision projectile toward the aim point. It
+ * flies over everything (no obstacle or unit collision) and expires at max
+ * range; the client grants fog vision around it while it's in flight.
+ */
+function fireScout(
+  state: MatchState,
+  hero: HeroState,
+  aimX: number,
+  aimZ: number,
+  events: SimEvent[],
+): void {
+  if (!hero.alive) return;
+  if (hero.revealLevel < 1) return;
+  if (hero.revealCooldown > 0) return;
+
+  // Casting interrupts movement and turns the hero toward the shot.
+  stopMovement(hero);
+
+  let dir = V.sub({ x: aimX, z: aimZ }, hero.pos);
+  if (V.length(dir) < 0.01) {
+    dir = { x: Math.sin(hero.facing), z: Math.cos(hero.facing) };
+  } else {
+    dir = V.normalize(dir);
+  }
+  hero.targetFacing = V.heading(dir);
+
+  const projectile: ProjectileState = {
+    id: `p${state.nextProjectileId++}`,
+    ownerId: hero.id,
+    kind: 'scout',
+    team: hero.team,
+    pos: V.add(hero.pos, V.scale(dir, ARROW.spawnOffset)),
+    dir,
+    speed: SCOUT.speed,
+    maxRange: SCOUT.rangeByLevel[hero.revealLevel],
+    traveled: 0,
+    damage: 0,
+  };
+  state.projectiles.push(projectile);
+  hero.revealCooldown = SCOUT.cooldownByLevel[hero.revealLevel];
+
+  // Reuses the 'fire' event: it carries the full spawn state, so networked
+  // clients (including enemies — the scout is never fog-hidden) simulate the
+  // flight deterministically without per-tick re-sends.
   events.push({
     type: 'fire',
     heroId: hero.id,
@@ -307,7 +363,7 @@ function spendSkillPoint(hero: HeroState, ability: 'arrow' | 'dodge' | 'reveal' 
       hero.dodgeLevel++;
       break;
     case 'reveal':
-      if (hero.revealLevel >= REVEAL.maxLevel || hero.revealLevel >= basicCap) return;
+      if (hero.revealLevel >= SCOUT.maxLevel || hero.revealLevel >= basicCap) return;
       hero.revealLevel++;
       break;
     case 'blast':
@@ -397,6 +453,10 @@ function stepHero(hero: HeroState, dt: number): void {
     hero.blastCooldown = Math.max(0, hero.blastCooldown - dt);
   }
 
+  if (hero.revealCooldown > 0) {
+    hero.revealCooldown = Math.max(0, hero.revealCooldown - dt);
+  }
+
   if (hero.invulnerable) {
     hero.invulnerableTimer -= dt;
     if (hero.invulnerableTimer <= 0) hero.invulnerable = false;
@@ -471,6 +531,10 @@ function stepProjectiles(
     }
 
     p.pos = V.add(p.pos, V.scale(p.dir, p.speed * dt));
+
+    // Scout projectiles are vision-only: they fly over obstacles and pass
+    // through every unit, expiring only at max range (handled above).
+    if (p.kind === 'scout') continue;
 
     if (sphereHitsObstacle(world, p.pos, ARROW.collisionRadius)) {
       state.projectiles.splice(i, 1);
@@ -571,12 +635,12 @@ function applyDamage(
 
   source.kills++;
   source.killStreak++;
-  awardKillGold(state, source, target);
+  const gold = awardKillGold(state, source, target);
   addXp(source, killXpReward(target, source), events);
   source.multiKillTimer = MULTI_KILL_WINDOW;
   source.multiKillCount++;
 
-  events.push({ type: 'kill', sourceId: source.id, victimId: target.id });
+  events.push({ type: 'kill', sourceId: source.id, victimId: target.id, gold });
 }
 
 /**
@@ -592,7 +656,7 @@ export function killHero(target: HeroState): void {
   target.killStreak = 0;
 }
 
-function awardKillGold(state: MatchState, killer: HeroState, victim: HeroState): void {
+function awardKillGold(state: MatchState, killer: HeroState, victim: HeroState): number {
   let total = KILL_GOLD.base;
 
   if (state.firstBlood) {
@@ -609,6 +673,7 @@ function awardKillGold(state: MatchState, killer: HeroState, victim: HeroState):
   else if (killer.multiKillCount >= 3) total += KILL_GOLD.tripleKill;
 
   killer.gold += total;
+  return total;
 }
 
 function killXpReward(victim: HeroState, killer: HeroState): number {
@@ -695,8 +760,9 @@ export function heroSpeed(hero: HeroState): number {
 }
 
 export function passiveIncome(hero: HeroState): number {
-  if (hero.kills === 0) return PASSIVE_INCOME.base;
-  const raw = (hero.deaths * 2) / hero.kills;
+  // ~1 gold/sec baseline. Heroes far behind (many deaths, few kills) get a
+  // modest catch-up boost, capped at PASSIVE_INCOME.max.
+  const raw = (hero.deaths * 2) / Math.max(1, hero.kills);
   return Math.max(PASSIVE_INCOME.min, Math.min(PASSIVE_INCOME.max, Math.round(raw)));
 }
 

@@ -51,6 +51,8 @@ export interface HeroState {
   dodgeCooldown: number;
   dodgeLevel: number;
   revealLevel: number;
+  /** E — scout projectile cooldown (seconds remaining). */
+  revealCooldown: number;
   blastLevel: number;
   blinkCooldown: number;
   blastCooldown: number;
@@ -67,6 +69,12 @@ export interface ProjectileState {
   ownerId: string;
   /** Absent = hero-owned. Creep fireballs skip the hero kill-credit path. */
   ownerKind?: 'creep';
+  /**
+   * Absent = damaging arrow. 'scout' = the E vision projectile: no damage,
+   * no collision (flies over obstacles and units), grants fog vision around
+   * itself to the owner's team, and is always visible to enemies.
+   */
+  kind?: 'scout';
   team: number;
   pos: Vec2;
   dir: Vec2;
@@ -141,6 +149,7 @@ export type Command =
   | { type: 'useItem'; slot: number }
   | { type: 'levelAbility'; ability: 'arrow' | 'dodge' | 'reveal' | 'blast' }
   | { type: 'dodge' }
+  | { type: 'reveal'; aimX: number; aimZ: number }
   | { type: 'blast'; x: number; z: number };
 
 /** A command tagged with the hero it applies to, queued for the next tick. */
@@ -152,7 +161,7 @@ export interface HeroInput {
 // ── Events (sim → clients) ────────────────────────────────────────────
 export type SimEvent =
   | { type: 'hit'; targetId: string; sourceId: string; projectileId: string; damage: number; x: number; z: number; crit?: boolean }
-  | { type: 'kill'; sourceId: string; victimId: string }
+  | { type: 'kill'; sourceId: string; victimId: string; gold?: number }
   | { type: 'respawn'; heroId: string }
   /**
    * Carries the full initial projectile state plus the tick it spawned on.
@@ -215,6 +224,7 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     dodgeCooldown: 0,
     dodgeLevel: 0,
     revealLevel: 0,
+    revealCooldown: 0,
     blastLevel: 0,
     blinkCooldown: 0,
     blastCooldown: 0,

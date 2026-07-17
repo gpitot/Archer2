@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { ProjectileState } from '../sim/state';
 import { ARROW } from '../sim/rules';
 
-export type ProjectileStyle = 'arrow' | 'fireball';
+export type ProjectileStyle = 'arrow' | 'fireball' | 'scout';
 
 export class ProjectileView {
   readonly mesh: THREE.Group;
@@ -36,17 +36,35 @@ export class ProjectileView {
   setStyle(style: ProjectileStyle): void {
     if (style === this._style) return;
     this._style = style;
-    const fireball = style === 'fireball';
-    this._arrowParts.visible = !fireball;
-    this._fireball.visible = fireball;
-    this._trailMat.color.set(fireball ? 0xff6633 : 0xffddaa);
-    this._trailMat.emissive.set(fireball ? 0x662200 : 0x331100);
-    this._light.color.set(fireball ? 0xff5522 : 0xff9944);
+    const orb = style !== 'arrow'; // fireball & scout share the sphere core
+    this._arrowParts.visible = !orb;
+    this._fireball.visible = orb;
+    const fireballMat = this._fireball.material as THREE.MeshStandardMaterial;
+    if (style === 'scout') {
+      // Scout: cool blue vision orb.
+      fireballMat.color.set(0x55ccff);
+      fireballMat.emissive.set(0x1166cc);
+      this._trailMat.color.set(0x99ddff);
+      this._trailMat.emissive.set(0x113355);
+      this._light.color.set(0x66bbff);
+    } else if (style === 'fireball') {
+      fireballMat.color.set(0xff7733);
+      fireballMat.emissive.set(0xdd3300);
+      this._trailMat.color.set(0xff6633);
+      this._trailMat.emissive.set(0x662200);
+      this._light.color.set(0xff5522);
+    } else {
+      this._trailMat.color.set(0xffddaa);
+      this._trailMat.emissive.set(0x331100);
+      this._light.color.set(0xff9944);
+    }
   }
 
   /** Mirror the simulation state onto the mesh for this frame. */
   sync(state: ProjectileState, heightAt: (x: number, z: number) => number): void {
-    this.setStyle(state.ownerKind === 'creep' ? 'fireball' : 'arrow');
+    this.setStyle(
+      state.ownerKind === 'creep' ? 'fireball' : state.kind === 'scout' ? 'scout' : 'arrow',
+    );
     this.mesh.visible = true;
     this.mesh.position.set(
       state.pos.x,

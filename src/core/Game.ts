@@ -36,7 +36,7 @@ import { spawnCamps } from '../sim/stepCreeps';
 import type { CampPlacement } from '../sim/creepRules';
 import { SimWorld, sphereHitsObstacle } from '../sim/world';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
-import { HERO, ARROW, DODGE, WARD, REVEAL, BLAST, basicRankCap, ultimateRankCap } from '../sim/rules';
+import { HERO, ARROW, DODGE, WARD, SCOUT, BLAST, basicRankCap, ultimateRankCap } from '../sim/rules';
 import { BLINK_COOLDOWN, SHOP_ITEMS } from '../sim/shopItems';
 import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta, CreepMeta } from '../sim/protocol';
 import { creepMaxHp } from '../sim/creepRules';
@@ -96,10 +96,6 @@ export class Game {
   private _state!: MatchState;
   private _playerId!: string;
   private _pendingCommands: Command[] = [];
-
-  // E — Reveal: client-side minimap ping of enemy heroes.
-  private _revealCooldown = 0;
-  private _revealTimer = 0;
 
   // ── Networking ──
   private _network: NetworkClient | null = null;
@@ -168,6 +164,8 @@ export class Game {
     ownerId: string;
     /** Absent = hero-owned; 'creep' renders as a fireball. */
     ownerKind?: 'creep';
+    /** 'scout' = E vision projectile (no collision, never fog-hidden). */
+    kind?: 'scout';
     team: number;
     spawnPos: Vec2;
     dir: Vec2;
@@ -200,6 +198,12 @@ export class Game {
   private _fogLayer!: FogLayer;
   private _heroVisionAdapters = new Map<string, VisionSource>();
   private _wardVisionAdapters = new Map<string, VisionSource>();
+  /** Fog vision granted by in-flight scout (E) projectiles, keyed by id. */
+  private _scoutVisionAdapters = new Map<string, VisionSource>();
+  /** Lingering vision bubbles dropped along each scout's path (see SCOUT.trail*). */
+  private _scoutTrail: { src: VisionSource; ttl: number }[] = [];
+  /** Per-scout breadcrumb tracking: where the last bubble was dropped + last known pos. */
+  private _scoutTrailDrop = new Map<string, { dropX: number; dropZ: number; lastX: number; lastZ: number; team: number }>();
 
   // ── Input ──
   private _input!: InputManager;
@@ -446,18 +450,23 @@ export class Game {
       }
     });
 
-    // E — Reveal enemy hero locations on the minimap (Shift+E to level up)
+    // E — Scout: fire a vision projectile toward the cursor (Shift+E to level up)
     this._input.onKeyDown('KeyE', () => {
       this._targeting.cancel();
       if (this._input.isKeyDown('ShiftLeft') || this._input.isKeyDown('ShiftRight')) {
         this._enqueueCommand({ type: 'levelAbility', ability: 'reveal' });
         return;
       }
-      if (!this._playerState.alive) return;
-      if (this._playerState.revealLevel < 1) return;
-      if (this._revealCooldown > 0) return;
-      this._revealTimer = REVEAL.durationByLevel[this._playerState.revealLevel];
-      this._revealCooldown = REVEAL.cooldownByLevel[this._playerState.revealLevel];
+      const p = this._playerState;
+      if (!p.alive) return;
+      if (p.revealLevel < 1) return;
+      if (p.revealCooldown > 0) return;
+      const aim = this._input.aimPosition;
+      this._enqueueCommand({
+        type: 'reveal',
+        aimX: aim ? aim.x : p.pos.x + Math.sin(p.facing) * 100,
+        aimZ: aim ? aim.z : p.pos.z + Math.cos(p.facing) * 100,
+      });
     });
 
     // R — Blast: ground-targeted AoE with a detonation delay (Shift+R to level up)
@@ -840,6 +849,7 @@ export class Game {
     dst.dodgeCooldown = src.dodgeCooldown;
     dst.dodgeLevel = src.dodgeLevel;
     dst.revealLevel = src.revealLevel;
+    dst.revealCooldown = src.revealCooldown;
     dst.blastLevel = src.blastLevel;
     dst.blinkCooldown = src.blinkCooldown;
     dst.blastCooldown = src.blastCooldown;
@@ -870,6 +880,9 @@ export class Game {
         }
         if (idle.blastCooldown > 0) {
           idle.blastCooldown = Math.max(0, idle.blastCooldown - dt);
+        }
+        if (idle.revealCooldown > 0) {
+          idle.revealCooldown = Math.max(0, idle.revealCooldown - dt);
         }
       }
       return;
@@ -987,6 +1000,7 @@ export class Game {
     this._remoteProjectiles.set(p.id, {
       ownerId: p.ownerId,
       ownerKind: p.ownerKind,
+      kind: p.kind,
       team: p.team,
       // Walk back to the spawn point (`traveled` is 0 for fire events, >0 for
       // welcome-snapshot arrows already in flight).
@@ -1037,7 +1051,8 @@ export class Game {
         continue;
       }
       const pos = { x: rp.spawnPos.x + rp.dir.x * traveled, z: rp.spawnPos.z + rp.dir.z * traveled };
-      if (rp.deathTime === null && sphereHitsObstacle(this._world, pos, ARROW.collisionRadius)) {
+      // Scouts fly over obstacles — only arrows die on them.
+      if (rp.kind !== 'scout' && rp.deathTime === null && sphereHitsObstacle(this._world, pos, ARROW.collisionRadius)) {
         this._retireRemoteProjectile(id);
         continue;
       }
@@ -1046,6 +1061,7 @@ export class Game {
         id,
         ownerId: rp.ownerId,
         ownerKind: rp.ownerKind,
+        kind: rp.kind,
         team: rp.team,
         pos,
         dir: { x: rp.dir.x, z: rp.dir.z },
@@ -1066,6 +1082,9 @@ export class Game {
   /** Track our fire/hit events to link cosmetic arrows to server projectiles. */
   private _handleOwnArrowEvent(ev: SimEvent): void {
     if (ev.type === 'fire' && ev.heroId === this._playerId) {
+      // Scout (E) projectiles never spawn a cosmetic copy — they must not
+      // claim a pending Q arrow's slot.
+      if (ev.projectile.kind === 'scout') return;
       const cosmetic = this._cosmeticProjectiles.find((c) => c.serverId === null);
       // Only hide the server projectile when a local arrow actually claimed
       // it — if the cosmetic guard suppressed the spawn, the simulated remote
@@ -1211,10 +1230,6 @@ export class Game {
 
   private update(delta: number): void {
     const dt = Math.min(delta, 0.1);
-
-    // Reveal (E) timers are purely presentational — tick them locally.
-    if (this._revealCooldown > 0) this._revealCooldown = Math.max(0, this._revealCooldown - dt);
-    if (this._revealTimer > 0) this._revealTimer = Math.max(0, this._revealTimer - dt);
 
     if (this._networkMode) {
       this._updateNetwork(dt);
@@ -1546,6 +1561,7 @@ export class Game {
     }
     // Sync projectile views
     this._syncProjectileViews();
+    this._updateScoutTrail(dt);
     // Sync ward views
     this._syncWardViews();
     // Sync blast zone views + transient explosion effects
@@ -1629,7 +1645,7 @@ export class Game {
         // Bounty text for the local killer: gold + XP above the corpse.
         if (ev.killerId === this._playerId) {
           const y = this._heightAt(ev.x, ev.z);
-          this._floatingText.spawn(new THREE.Vector3(ev.x, y + 80, ev.z), ev.gold, '#ffcc44');
+          this._floatingText.spawnGold(new THREE.Vector3(ev.x, y + 80, ev.z), ev.gold);
           this._floatingText.spawn(new THREE.Vector3(ev.x, y + 50, ev.z), ev.xp, '#88ff88');
         }
         break;
@@ -1645,7 +1661,18 @@ export class Game {
         }
         break;
       }
-      case 'kill':
+      case 'kill': {
+        // Gold bounty indicator for the local killer, LoL-style coin + amount.
+        if (ev.sourceId === this._playerId && ev.gold) {
+          const victimView = this._heroViews.get(ev.victimId);
+          if (victimView) {
+            const pos = victimView.mesh.position.clone();
+            pos.y += 60;
+            this._floatingText.spawnGold(pos, ev.gold);
+          }
+        }
+        break;
+      }
       case 'respawn':
       case 'purchase':
       case 'levelUp':
@@ -1672,6 +1699,19 @@ export class Game {
           this._scene.add(fresh.mesh);
           this._projectileViews.set(p.id, fresh);
         }
+        // Scout (E) projectiles grant fog vision to their team while flying.
+        if (p.kind === 'scout') {
+          const view = this._projectileViews.get(p.id)!;
+          const team = p.team;
+          const vSrc: VisionSource = {
+            get position() { return view.mesh.position; },
+            get sightRadius() { return SCOUT.sightRadius; },
+            get active() { return true; },
+            get team() { return team; },
+          };
+          this._scoutVisionAdapters.set(p.id, vSrc);
+          this._fog.addSource(vSrc);
+        }
       }
     }
 
@@ -1680,10 +1720,70 @@ export class Game {
       if (activeIds.has(id)) {
         const p = this._state.projectiles.find((sp) => sp.id === id)!;
         pv.sync(p, this._heightAt.bind(this));
+        if (p.kind === 'scout') this._dropScoutBreadcrumbs(p);
       } else {
+        const vSrc = this._scoutVisionAdapters.get(id);
+        if (vSrc) {
+          this._fog.removeSource(vSrc);
+          this._scoutVisionAdapters.delete(id);
+          // Seal the corridor: leave a final lingering bubble where it died.
+          const track = this._scoutTrailDrop.get(id);
+          if (track) {
+            this._spawnScoutBubble(track.lastX, track.lastZ, track.team);
+            this._scoutTrailDrop.delete(id);
+          }
+        }
         pv.hide();
         this._projectileViews.delete(id);
         this._projectilePool.push(pv);
+      }
+    }
+  }
+
+  /**
+   * Leave lingering vision bubbles behind a flying scout so the revealed
+   * corridor stays lit for a few seconds instead of snapping shut.
+   */
+  private _dropScoutBreadcrumbs(p: ProjectileState): void {
+    let track = this._scoutTrailDrop.get(p.id);
+    if (!track) {
+      // First sighting: light the launch point too.
+      track = { dropX: p.pos.x, dropZ: p.pos.z, lastX: p.pos.x, lastZ: p.pos.z, team: p.team };
+      this._scoutTrailDrop.set(p.id, track);
+      this._spawnScoutBubble(p.pos.x, p.pos.z, p.team);
+      return;
+    }
+    track.lastX = p.pos.x;
+    track.lastZ = p.pos.z;
+    const dx = p.pos.x - track.dropX;
+    const dz = p.pos.z - track.dropZ;
+    if (dx * dx + dz * dz >= SCOUT.trailSpacing * SCOUT.trailSpacing) {
+      track.dropX = p.pos.x;
+      track.dropZ = p.pos.z;
+      this._spawnScoutBubble(p.pos.x, p.pos.z, p.team);
+    }
+  }
+
+  /** A stationary, self-expiring fog bubble (scout trail segment). */
+  private _spawnScoutBubble(x: number, z: number, team: number): void {
+    const src: VisionSource = {
+      position: new THREE.Vector3(x, 0, z),
+      sightRadius: SCOUT.sightRadius,
+      active: true,
+      team,
+    };
+    this._scoutTrail.push({ src, ttl: SCOUT.trailDuration });
+    this._fog.addSource(src);
+  }
+
+  /** Expire scout trail bubbles. */
+  private _updateScoutTrail(dt: number): void {
+    for (let i = this._scoutTrail.length - 1; i >= 0; i--) {
+      const b = this._scoutTrail[i];
+      b.ttl -= dt;
+      if (b.ttl <= 0) {
+        this._fog.removeSource(b.src);
+        this._scoutTrail.splice(i, 1);
       }
     }
   }
@@ -1749,17 +1849,11 @@ export class Game {
     const playerTeam = p.team;
 
     // Minimap markers
-    const revealActive = this._revealTimer > 0;
     const markers: { x: number; z: number; color: string; radius: number }[] = [];
     for (const h of this._state.heroes) {
       if (!h.alive) continue;
       const visible = h.team === playerTeam || this._fog.isVisible(playerTeam, h.pos.x, h.pos.z);
-      if (!visible && !revealActive) continue;
-      if (!visible) {
-        // Revealed by E: pulsing ping ring under the dot.
-        const pulse = 5 + 3 * Math.abs(Math.sin(performance.now() / 150));
-        markers.push({ x: h.pos.x, z: h.pos.z, color: 'rgba(255,80,80,0.35)', radius: pulse });
-      }
+      if (!visible) continue;
       markers.push({
         x: h.pos.x,
         z: h.pos.z,
@@ -1811,8 +1905,8 @@ export class Game {
       : 1 - p.abilityCooldown / arrowCd;
     const dodgeCdProgress = p.dodgeCooldown <= 0 ? 1
       : 1 - p.dodgeCooldown / DODGE.cooldownByLevel[Math.max(p.dodgeLevel, 1)];
-    const revealCdProgress = this._revealCooldown <= 0 ? 1
-      : 1 - this._revealCooldown / REVEAL.cooldownByLevel[Math.max(p.revealLevel, 1)];
+    const revealCdProgress = p.revealCooldown <= 0 ? 1
+      : 1 - p.revealCooldown / SCOUT.cooldownByLevel[Math.max(p.revealLevel, 1)];
     const blastCdProgress = p.blastCooldown <= 0 ? 1
       : 1 - p.blastCooldown / BLAST.cooldownByLevel[Math.max(p.blastLevel, 1)];
     const basicCap = basicRankCap(p.level);
@@ -1834,7 +1928,7 @@ export class Game {
       {
         cooldownProgress: revealCdProgress,
         level: p.revealLevel,
-        canLevel: hasPoint && p.revealLevel < Math.min(REVEAL.maxLevel, basicCap),
+        canLevel: hasPoint && p.revealLevel < Math.min(SCOUT.maxLevel, basicCap),
       },
       {
         cooldownProgress: blastCdProgress,
@@ -1889,11 +1983,11 @@ export class Game {
       }
     }
 
-    // Enemy projectiles
+    // Enemy projectiles — except scouts, which are always visible to everyone.
     for (const p of this._state.projectiles) {
       const pv = this._projectileViews.get(p.id);
       if (pv && p.team !== team) {
-        pv.mesh.visible = this._fog.isVisible(team, p.pos.x, p.pos.z);
+        pv.mesh.visible = p.kind === 'scout' || this._fog.isVisible(team, p.pos.x, p.pos.z);
       }
     }
 

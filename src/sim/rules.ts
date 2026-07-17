@@ -52,8 +52,8 @@ export function ultimateRankCap(level: number): number {
   return 0;
 }
 
-/** Passive gold/second floor & ceiling. */
-export const PASSIVE_INCOME = { base: 5, min: 1, max: 30 } as const;
+/** Passive gold/second: ~1/s baseline, small catch-up ceiling when far behind. */
+export const PASSIVE_INCOME = { min: 1, max: 5 } as const;
 
 /** Kill-spree bonus gold, indexed by kill streak. */
 export const SPREE_BONUS = [0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 7];
@@ -95,12 +95,28 @@ export const DODGE = {
   maxLevel: 5,
 } as const;
 
-// ── Reveal ability (E) ───────────────────────────────────────────────
-export const REVEAL = {
-  /** Seconds enemy heroes stay pinged on the minimap (index 0 = unlearned). */
-  durationByLevel: [0, 2, 2.5, 3, 3.5, 4],
-  /** Cooldown per rank (seconds). */
-  cooldownByLevel: [0, 15, 13, 11, 9, 7],
+// ── Scout ability (E) ────────────────────────────────────────────────
+// A vision-granting projectile: flies in a straight line, deals no damage,
+// ignores collision (soars over trees and units), and reveals fog around
+// itself for the caster's team while in flight. The projectile itself is
+// never fog-hidden, so enemy heroes always see it coming.
+export const SCOUT = {
+  /** Flight speed (world units / s). */
+  speed: 1000,
+  /** Fog reveal radius around the projectile while in flight. */
+  sightRadius: 800,
+  /**
+   * The revealed bubble lingers behind the projectile: a breadcrumb vision
+   * source (same radius) is dropped every `trailSpacing` units of flight and
+   * stays lit for `trailDuration` seconds — the scout paints a fat, slowly
+   * fading corridor across the map instead of a fleeting dot.
+   */
+  trailDuration: 4,
+  trailSpacing: 400,
+  /** Flight range per rank (index 0 = unlearned) — long, grows per rank. */
+  rangeByLevel: [0, 1600, 2000, 2400, 2800, 3200],
+  /** Cooldown per rank (seconds) — shrinks per rank. */
+  cooldownByLevel: [0, 22, 19, 16, 13, 10],
   maxLevel: 5,
 } as const;
 
