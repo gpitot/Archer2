@@ -18,6 +18,7 @@ import { buildCustomMap } from './custom/buildCustomMap';
 import type { CampPlacement } from '../sim/creepRules';
 import type { RunePlacement } from '../sim/runeRules';
 import type { FountainDef } from '../sim/world';
+import type { ShopSource } from './custom/mapSource';
 
 export type MapName = string;
 
@@ -35,6 +36,8 @@ export interface LoadedMap {
   runes: RunePlacement[] | null;
   /** Authored fountain placements (custom maps); null → built-in placement. */
   fountains: FountainDef[] | null;
+  /** Authored shop placements (custom maps); null → built-in placement. */
+  shops: ShopSource[] | null;
 }
 
 /**
@@ -56,6 +59,7 @@ export async function loadMap(name: MapName): Promise<LoadedMap> {
       camps: null,
       runes: null,
       fountains: null, // test map places fountains programmatically
+      shops: null,
     };
   }
   if (name === 'arena') {
@@ -67,6 +71,7 @@ export async function loadMap(name: MapName): Promise<LoadedMap> {
       camps: null,
       runes: null,
       fountains: null, // arena map places fountains programmatically
+      shops: null,
     };
   }
   return loadCustomMap(name);
@@ -88,6 +93,7 @@ async function loadCustomMap(name: MapName): Promise<LoadedMap> {
     camps: custom.camps,
     runes: custom.runes.length > 0 ? custom.runes : null,
     fountains: custom.fountains.length > 0 ? custom.fountains : null,
+    shops: custom.shops.length > 0 ? custom.shops : null,
   };
 }
 

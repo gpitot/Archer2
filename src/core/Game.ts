@@ -99,6 +99,7 @@ export class Game {
   private _mapCamps: CampPlacement[] | null = null;
   private _mapRunes: RunePlacement[] | null = null;
   private _mapFountains: FountainDef[] | null = null;
+  private _mapShops: { x: number; z: number }[] | null = null;
   private _terrain!: GroundProvider;
   private _water!: Water;
 
@@ -281,6 +282,7 @@ export class Game {
     this._mapCamps = loaded.camps;
     this._mapRunes = loaded.runes;
     this._mapFountains = loaded.fountains;
+    this._mapShops = loaded.shops;
     const bounds = this._map.bounds;
 
     // ── Renderer ──
@@ -363,14 +365,15 @@ export class Game {
       this._world.fountains = buildDefaultFountains(this._arena, this._navGrid);
     }
 
-    // Override the shop position with the actual placed shop location
-    // (buildSimWorld picks a walkable spot, but we already found one below).
-    const shopPos3 = this._findWalkableNear(this._arena.centerX, this._arena.centerZ);
-    this._world.shop.pos = { x: shopPos3.x, z: shopPos3.z };
+    // Shop position: use authored map spot if available, else arena centre.
+    const shopSrc = this._mapShops && this._mapShops.length > 0
+      ? this._findWalkableNear(this._mapShops[0].x, this._mapShops[0].z)
+      : this._findWalkableNear(this._arena.centerX, this._arena.centerZ);
+    this._world.shop.pos = { x: shopSrc.x, z: shopSrc.z };
 
     // ── Shop (3D mesh only; buy logic is in the sim) ──
     this._shop = new Shop(
-      new THREE.Vector3(shopPos3.x, heightAt(shopPos3.x, shopPos3.z), shopPos3.z),
+      new THREE.Vector3(shopSrc.x, heightAt(shopSrc.x, shopSrc.z), shopSrc.z),
       SHOP_ITEMS as ShopItem[],
     );
     this._scene.add(this._shop.mesh);

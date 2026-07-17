@@ -158,6 +158,24 @@ export class Overlays {
       ring.position.set(r.x, y + 2, r.z);
       this._markers.add(ring);
     }
+
+    // Shop placements: gold pillar stand-in + interact-radius ring.
+    for (const s of src.shops) {
+      const y = heightAt(s.x, s.z);
+      const pillar = new THREE.Mesh(
+        new THREE.CylinderGeometry(5, 6, 30, 8),
+        new THREE.MeshBasicMaterial({ color: 0xffcc44, transparent: true, opacity: 0.8 }),
+      );
+      pillar.position.set(s.x, y + 15, s.z);
+      this._markers.add(pillar);
+
+      const ring = new THREE.LineLoop(
+        circleGeometry(120, 40),
+        new THREE.LineBasicMaterial({ color: 0xffcc44, transparent: true, opacity: 0.5 }),
+      );
+      ring.position.set(s.x, y + 2, s.z);
+      this._markers.add(ring);
+    }
   }
 
   // ── Hover highlight ───────────────────────────────────────────
@@ -186,7 +204,7 @@ export class Overlays {
   // ── Placement ghost ───────────────────────────────────────────
 
   /** Simple stand-in shown under the cursor for placement tools. */
-  setGhost(kind: 'tree' | 'rock' | 'deco' | 'camp' | 'spawn' | 'rune' | null, radius: number): void {
+  setGhost(kind: 'tree' | 'rock' | 'deco' | 'camp' | 'spawn' | 'rune' | 'shop' | null, radius: number): void {
     disposeChildren(this._ghost);
     if (!kind) {
       this._ghost.visible = false;
@@ -194,7 +212,7 @@ export class Overlays {
     }
 
     const mat = new THREE.MeshBasicMaterial({
-      color: kind === 'camp' ? 0xcc4444 : kind === 'spawn' ? 0x4488cc : kind === 'rune' ? 0xffcc33 : 0x66cc66,
+      color: kind === 'camp' ? 0xcc4444 : kind === 'spawn' ? 0x4488cc : kind === 'rune' ? 0xffcc33 : kind === 'shop' ? 0xffcc44 : 0x66cc66,
       transparent: true,
       opacity: 0.5,
       depthWrite: false,
@@ -213,6 +231,10 @@ export class Overlays {
         mesh = new THREE.Mesh(new THREE.OctahedronGeometry(14, 0), mat);
         mesh.scale.y = 1.5;
         mesh.position.y = 26;
+        break;
+      case 'shop':
+        mesh = new THREE.Mesh(new THREE.ConeGeometry(14, 30, 8), mat);
+        mesh.position.y = 15;
         break;
       default:
         mesh = new THREE.Mesh(new THREE.SphereGeometry(20, 12, 8), mat);
