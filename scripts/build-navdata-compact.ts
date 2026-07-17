@@ -111,6 +111,7 @@ function main() {
         name, custom.data.terrain, custom.data.pathing, custom.data.doodads,
         custom.arena, custom.obstacles, custom.camps, custom.spawns, custom.runes,
         custom.fountains.map((f) => ({ x: f.pos.x, z: f.pos.z })),
+        custom.shops.map((s) => ({ x: s.x, z: s.z })),
       ));
     }
   }
@@ -148,6 +149,7 @@ function buildEntry(
   spawns: { x: number; z: number }[] | null = null,
   runes: RunePlacement[] | null = null,
   fountains: { x: number; z: number }[] | null = null,
+  shops: { x: number; z: number }[] | null = null,
 ): string {
   const tilesH = terrain.height - 1;
   const bounds = { minX: terrain.offsetX, minZ: -(terrain.offsetY + tilesH * 128) };
@@ -173,7 +175,10 @@ function buildEntry(
   const heightsBase64 = Buffer.from(new Uint8Array(terrain.finalHeight.buffer)).toString('base64');
 
   // Shop position (on the stamped grid, so it can't land inside a tree).
-  const shopPos = findWalkableNearOnGrid(navGrid, arena.centerX, arena.centerZ);
+  // Use authored shop if available, else fall back to arena centre.
+  const shopPos = shops && shops.length > 0
+    ? findWalkableNearOnGrid(navGrid, shops[0].x, shops[0].z)
+    : findWalkableNearOnGrid(navGrid, arena.centerX, arena.centerZ);
 
   const obsLines = obstacles.map((o) =>
     `      { minX: ${o.minX.toFixed(1)}, minZ: ${o.minZ.toFixed(1)}, maxX: ${o.maxX.toFixed(1)}, maxZ: ${o.maxZ.toFixed(1)} }`,
@@ -219,6 +224,9 @@ ${obsLines.join(',\n')}
 
     /** Authored fountain placements (custom maps); null → built-in defaults. */
     fountains: ${fountains && fountains.length > 0 ? JSON.stringify(fountains.map((f) => ({ x: round1(f.x), z: round1(f.z) }))) : 'null'},
+
+    /** Authored shop placements (custom maps); null → arena-centre default. */
+    shops: ${shops && shops.length > 0 ? JSON.stringify(shops.map((s) => ({ x: round1(s.x), z: round1(s.z) }))) : 'null'},
   }`;
 }
 

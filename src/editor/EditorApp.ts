@@ -35,6 +35,7 @@ import { listMaps, loadMapSource, saveMapSource, rememberLastMap, lastMapName } 
 const MAX_SPAWNS = 4;
 const MAX_CAMPS = 8;
 const MAX_RUNES = 6;
+const MAX_SHOPS = 4;
 /** Min distance between drag-scattered trees. */
 const SCATTER_SPACING = 70;
 const REBUILD_THROTTLE_MS = 130;
@@ -254,6 +255,12 @@ export class EditorApp {
     );
     this._world.obstacles = this._custom.obstacles;
 
+    // Override shop positions from map source
+    if (this._src.shops.length > 0) {
+      const firstShop = this._src.shops[0];
+      this._world.shop.pos = { x: firstShop.x, z: firstShop.z };
+    }
+
     this._overlays.refresh(this._src, this._custom, this._world.navGrid, heightAt);
     this._lastRebuild = performance.now();
   }
@@ -461,6 +468,8 @@ export class EditorApp {
       this._overlays.setGhost('spawn', 35);
     } else if (this._tool === 'rune') {
       this._overlays.setGhost('rune', RUNE.pickupRadius);
+    } else if (this._tool === 'shop') {
+      this._overlays.setGhost('shop', 120);
     } else {
       this._overlays.setGhost(null, 0);
     }
@@ -566,6 +575,9 @@ export class EditorApp {
         break;
       case 'rune':
         if (!fromDrag) this._placeRune();
+        break;
+      case 'shop':
+        if (!fromDrag) this._placeShop();
         break;
       case 'erase':
         this._eraseAt();
@@ -693,6 +705,15 @@ export class EditorApp {
     this._rebuild('doodads');
   }
 
+  private _placeShop(): void {
+    if (this._src.shops.length >= MAX_SHOPS) {
+      this._ui.flash(`max ${MAX_SHOPS} shops`);
+      return;
+    }
+    this._src.shops.push({ x: this._hover!.wx, z: this._hover!.wz });
+    this._rebuild('doodads');
+  }
+
   private _eraseAt(): void {
     const { wx, wz } = this._hover!;
     const candidates: { dist: number; remove: () => void }[] = [];
@@ -712,6 +733,10 @@ export class EditorApp {
     this._src.runes.forEach((r, i) => {
       const dist = Math.hypot(r.x - wx, r.z - wz);
       if (dist < 90) candidates.push({ dist, remove: () => this._src.runes.splice(i, 1) });
+    });
+    this._src.shops.forEach((s, i) => {
+      const dist = Math.hypot(s.x - wx, s.z - wz);
+      if (dist < 120) candidates.push({ dist, remove: () => this._src.shops.splice(i, 1) });
     });
 
     if (candidates.length === 0) return;
@@ -775,7 +800,7 @@ export class EditorApp {
     }
     parts.push(
       `${this._src.doodads.length} doodads, ${this._src.camps.length} camps, ` +
-      `${this._src.spawns.length} spawns, ${this._src.runes.length} runes`,
+      `${this._src.spawns.length} spawns, ${this._src.runes.length} runes, ${this._src.shops.length} shops`,
     );
     this._ui.setStatus(parts.join('  ·  '));
   }

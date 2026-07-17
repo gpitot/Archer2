@@ -76,6 +76,12 @@ export interface FountainSource {
   z: number;
 }
 
+/** A shop placement. */
+export interface ShopSource {
+  x: number;
+  z: number;
+}
+
 export interface MapSource {
   name: string;
   /** Size in tiles (tilepoint grids are +1 per axis). */
@@ -94,11 +100,12 @@ export interface MapSource {
   spawns: SpawnSource[];
   runes: RuneSource[];
   fountains: FountainSource[];
+  shops: ShopSource[];
 }
 
 export const MAP_FORMAT = 'archer-map';
 /** v3 added fountain placements (v1–v2 files load fine — no fountains). */
-export const MAP_VERSION = 3;
+export const MAP_VERSION = 4;
 export const MIN_TILES = 8;
 export const MAX_TILES = 128;
 /** Ground layer new maps start on (WC3 convention: layer 2 = height 0). */
@@ -129,6 +136,7 @@ export function createEmptyMapSource(name: string, tilesX: number, tilesZ: numbe
     spawns: [],
     runes: [],
     fountains: [],
+    shops: [],
   };
 }
 
@@ -145,6 +153,7 @@ export function cloneMapSource(src: MapSource): MapSource {
     spawns: src.spawns.map((s) => ({ ...s })),
     runes: src.runes.map((r) => ({ ...r })),
     fountains: src.fountains.map((f) => ({ ...f })),
+    shops: src.shops.map((s) => ({ ...s })),
   };
 }
 
@@ -188,6 +197,8 @@ interface MapJson {
   runes?: { x: number; z: number }[];
   /** Fountain placements — absent in v1–v2 files. */
   fountains?: { x: number; z: number }[];
+  /** Shop placements — absent in v1–v3 files. */
+  shops?: { x: number; z: number }[];
 }
 
 const FLAG_CHARS: Record<number, string> = {
@@ -244,6 +255,7 @@ export function serializeMapJson(src: MapSource): string {
     spawns: src.spawns.map((s) => ({ x: Math.round(s.x), z: Math.round(s.z) })),
     runes: src.runes.map((r) => ({ x: Math.round(r.x), z: Math.round(r.z) })),
     fountains: src.fountains.map((f) => ({ x: Math.round(f.x), z: Math.round(f.z) })),
+    shops: src.shops.map((s) => ({ x: Math.round(s.x), z: Math.round(s.z) })),
   };
   // Hand-rolled layout: one grid row / doodad per line so diffs stay readable.
   const rows = (a: string[]) => a.map((r) => `    ${JSON.stringify(r)}`).join(',\n');
@@ -277,6 +289,9 @@ ${items(json.runes ?? [])}
   ],
   "fountains": [
 ${items(json.fountains ?? [])}
+  ],
+  "shops": [
+${items(json.shops ?? [])}
   ]
 }
 `;
@@ -285,7 +300,7 @@ ${items(json.fountains ?? [])}
 export function parseMapJson(text: string): MapSource {
   const json = JSON.parse(text) as MapJson;
   if (json.format !== MAP_FORMAT) throw new Error(`not an archer map (format=${json.format})`);
-  if (json.version !== MAP_VERSION && json.version !== 2 && json.version !== 1) {
+  if (json.version !== MAP_VERSION && json.version !== 3 && json.version !== 2 && json.version !== 1) {
     throw new Error(`unsupported map version ${json.version}`);
   }
   validateMapName(json.name);
@@ -338,5 +353,6 @@ export function parseMapJson(text: string): MapSource {
     spawns: (json.spawns ?? []).map((s) => ({ x: s.x, z: s.z })),
     runes: (json.runes ?? []).map((r) => ({ x: r.x, z: r.z })),
     fountains: (json.fountains ?? []).map((f) => ({ x: f.x, z: f.z })),
+    shops: (json.shops ?? []).map((s) => ({ x: s.x, z: s.z })),
   };
 }
