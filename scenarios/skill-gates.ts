@@ -1,6 +1,6 @@
 /**
  * MOBA-style skill-point gates (LoL model):
- *  - Q starts pre-learned at rank 1 (free special case).
+ *  - The level-1 skill point is auto-spent on Q (rank 1, the basic attack).
  *  - Basics (Q/W/E) are capped at rank ceil(heroLevel / 2), max 5.
  *  - The ultimate (R) unlocks ranks at hero levels 6 / 11 / 16, max 3.
  *  - Unspendable points bank; gates are thresholds, not one-time windows.
@@ -12,11 +12,13 @@ export const name = 'skill-gates';
 export function run(h: SimHarness): void {
   const { a: hero } = h.spawnDuelists(400);
 
-  // Q starts pre-learned at rank 1 without consuming the level-1 point.
-  expectTrue(hero.abilityLevel === 1, 'Q pre-learned at rank 1');
-  expectTrue(hero.skillPoints === 1, 'level-1 skill point unspent');
+  // The level-1 point is auto-spent on Q: rank 1, nothing banked.
+  expectTrue(hero.abilityLevel === 1, 'Q auto-learned at rank 1');
+  expectTrue(hero.skillPoints === 0, 'level-1 point consumed by Q');
 
-  // Level 1: Q rank 2 is gated (cap = ceil(1/2) = 1) and R is locked.
+  // Level 1 with a banked point: Q rank 2 is gated (cap = ceil(1/2) = 1)
+  // and R is locked.
+  hero.skillPoints = 1;
   h.issue('p1', { type: 'levelAbility', ability: 'arrow' });
   h.tick();
   expectTrue(hero.abilityLevel === 1 && hero.skillPoints === 1, 'Q rank 2 blocked at level 1');

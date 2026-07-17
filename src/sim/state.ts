@@ -191,7 +191,7 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     respawnTimer: 0,
     xp: 0,
     level: 1,
-    skillPoints: 1,
+    skillPoints: 0,
     gold: 0,
     kills: 0,
     deaths: 0,
@@ -201,7 +201,8 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     speedBonus: 0,
     inventory: [null, null, null, null, null, null],
     wardCharges: 0,
-    // Q starts pre-learned at rank 1 (special case — it's the basic attack).
+    // The level-1 skill point is auto-spent on Q (it's the basic attack), so
+    // heroes start with Q rank 1 and 0 banked points — next point at level 2.
     abilityLevel: 1,
     abilityCooldown: 0,
     abilityCharges: ARROW.maxCharges,

@@ -10,11 +10,11 @@ export const name = 'arrow-hit';
 export function run(h: SimHarness): void {
   const { a: shooter, b: target } = h.spawnDuelists(400);
 
-  // Q is pre-learned at rank 1; a levelAbility at hero level 1 is gated off
-  // (rank 2 needs level 3) and must not consume the banked point.
+  // Q is auto-learned at rank 1; a levelAbility at hero level 1 is a no-op
+  // (no banked point, and rank 2 needs level 3 anyway).
   h.issue('p1', { type: 'levelAbility', ability: 'arrow' });
   h.tick();
-  expectTrue(shooter.abilityLevel === 1, 'Q usable at pre-learned rank 1');
+  expectTrue(shooter.abilityLevel === 1, 'Q usable at auto-learned rank 1');
 
   h.issue('p1', { type: 'fire', aimX: target.pos.x, aimZ: target.pos.z });
   const events = h.runUntil((_s, evs) => evs.some((e) => e.type === 'hit'), h.seconds(2), 'arrow hit');

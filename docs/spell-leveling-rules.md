@@ -4,7 +4,8 @@
 > 1. E and R are locked until skilled. 2. E ranks reduce cooldown and extend
 > duration; R ranks reduce cooldown and increase damage. 3. Hero cap raised
 > to 18 for exact LoL parity (basics 5 ranks @ 1/3/5/7/9, ult @ 6/11/16).
-> 4. Q starts pre-learned at rank 1 (special case, free).
+> 4. Q auto-learned at rank 1 using the level-1 skill point (heroes start
+> with 0 banked points; a maxed build completes exactly at level 18).
 
 ## Reference: how League of Legends does it
 
@@ -41,16 +42,15 @@ so LoL rules are used as the base.)
 
 | Ability | Ranks | Rank gates (hero level required) |
 |---|---|---|
-| Q — Arrow  | 5 | pre-learned rank 1 / 3 / 5 / 7 / 9  (rank ≤ ⌈level / 2⌉) |
+| Q — Arrow  | 5 | auto-learned rank 1 / 3 / 5 / 7 / 9  (rank ≤ ⌈level / 2⌉) |
 | W — Dodge  | 5 | 1 / 3 / 5 / 7 / 9 |
 | E — Reveal | 5 | 1 / 3 / 5 / 7 / 9 |
 | R — Blast (ultimate) | 3 | **6 / 11 / 16** |
 
-- **Skill points:** 1 at level 1, +1 per level → **18 total**.
-- **Q special case:** every hero starts with Q already at rank 1, free of
-  charge (it's the hero's basic attack). The level-1 point can go anywhere
-  allowed. Consequence: 18 points vs 17 remaining ranks — a fully maxed
-  build finishes at level 17 and the level-18 point is surplus.
+- **Skill points:** the level-1 point is **auto-spent on Q** (rank 1 — it's
+  the hero's basic attack), then +1 per level → **17 spendable** points
+  (levels 2–18) for the 17 remaining ranks. A fully maxed build completes
+  exactly at level 18.
 - **E and R start locked** (unusable) until a point is spent.
 - Unspent points **bank** indefinitely; gates are level thresholds, not
   one-time windows.
@@ -84,8 +84,9 @@ Kill-XP for victims above level 10 stays at the 300 cap.
 
 ### Concrete examples
 
-- Level 1: Q is usable at rank 1 for free; your point can go in W or E
-  (not R, not Q — Q rank 2 needs level 3).
+- Level 1: Q is usable at rank 1 (your level-1 point, auto-spent); the next
+  point arrives at level 2 and can go in W or E (not R, not Q — Q rank 2
+  needs level 3).
 - Level 6: R rank 1 becomes available. If you instead rank W at 6, you can
   still take R rank 1 at level 7 (or any later level).
 - Level 11: R rank 2 available; level 16: R rank 3 (requires prior ranks).
