@@ -21,8 +21,11 @@ const YAW_OFFSET = 0;
 const SHOOT_DURATION = 0.45;
 /** Locomotion crossfade time, in seconds. */
 const FADE = 0.15;
-/** Blend of team color into the body texture (0 = none, 1 = full tint). */
-const TEAM_TINT = 0.35;
+/**
+ * Opacity of the team-color overlay on the body texture (0 = none, 1 = solid).
+ * Kept low so the tint reads without darkening/muddying the texture.
+ */
+const TEAM_TINT = 0.2;
 
 const CLIP_IDLE = 'Idle_Weapon';
 const CLIP_RUN = 'Run_Holding';

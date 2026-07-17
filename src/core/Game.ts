@@ -349,7 +349,7 @@ export class Game {
 
       // Create hero views
       for (const hs of this._state.heroes) {
-        const color = hs.team === 0 ? 0x4488cc : 0xcc3333;
+        const color = hs.team === 0 ? 0x55aaff : 0xff5555;
         const view = new HeroView(hs.id, color, heightAt);
         view.sync(hs, 0);
         this._heroViews.set(hs.id, view);
@@ -615,7 +615,7 @@ export class Game {
     const heightAt = this._heightAt.bind(this);
     for (const hs of heroes) {
       if (this._heroViews.has(hs.id)) continue;
-      const color = hs.id === this._playerId ? 0x4488cc : 0xcc3333;
+      const color = hs.id === this._playerId ? 0x55aaff : 0xff5555;
       const view = new HeroView(hs.id, color, heightAt);
       view.sync(hs, 0);
       this._heroViews.set(hs.id, view);
