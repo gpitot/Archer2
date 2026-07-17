@@ -16,6 +16,7 @@ import { parseMapJson } from './custom/mapSource';
 import { decodeAmap } from './custom/amapCodec';
 import { buildCustomMap } from './custom/buildCustomMap';
 import type { CampPlacement } from '../sim/creepRules';
+import type { RunePlacement } from '../sim/runeRules';
 
 export type MapName = string;
 
@@ -29,6 +30,8 @@ export interface LoadedMap {
   spawns: { x: number; z: number }[] | null;
   /** Authored creep camps (custom maps); null → arena-fraction CAMP_DEFS. */
   camps: CampPlacement[] | null;
+  /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
+  runes: RunePlacement[] | null;
 }
 
 /**
@@ -48,6 +51,7 @@ export async function loadMap(name: MapName): Promise<LoadedMap> {
       arena: { ...TEST_MAP_ARENA },
       spawns: TEST_MAP_SPAWNS.map((s) => ({ ...s })),
       camps: null,
+      runes: null,
     };
   }
   if (name === 'arena') {
@@ -57,6 +61,7 @@ export async function loadMap(name: MapName): Promise<LoadedMap> {
       arena: ARENA_TERRAIN1,
       spawns: null,
       camps: null,
+      runes: null,
     };
   }
   return loadCustomMap(name);
@@ -67,7 +72,8 @@ async function loadCustomMap(name: MapName): Promise<LoadedMap> {
   const custom = buildCustomMap(src);
   console.info(
     `[map] custom '${name}': ${src.tilesX}x${src.tilesZ} tiles, ` +
-    `${src.doodads.length} doodads, ${src.camps.length} camps, ${src.spawns.length} spawns`,
+    `${src.doodads.length} doodads, ${src.camps.length} camps, ${src.spawns.length} spawns, ` +
+    `${src.runes.length} runes`,
   );
   return {
     name,
@@ -75,6 +81,7 @@ async function loadCustomMap(name: MapName): Promise<LoadedMap> {
     arena: custom.arena,
     spawns: custom.spawns.length > 0 ? custom.spawns : null,
     camps: custom.camps,
+    runes: custom.runes.length > 0 ? custom.runes : null,
   };
 }
 

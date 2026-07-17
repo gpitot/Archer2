@@ -20,6 +20,7 @@ import { buildTestMapData, testMapObstacles, TEST_MAP_ARENA } from '../src/world
 import { parseMapJson } from '../src/world/custom/mapSource';
 import { buildCustomMap } from '../src/world/custom/buildCustomMap';
 import type { CampPlacement } from '../src/sim/creepRules';
+import type { RunePlacement } from '../src/sim/runeRules';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS_DIR = path.resolve(__dirname, '..', 'assets');
@@ -108,7 +109,7 @@ function main() {
       const custom = buildCustomMap(src);
       entries.push(buildEntry(
         name, custom.data.terrain, custom.data.pathing, custom.data.doodads,
-        custom.arena, custom.obstacles, custom.camps, custom.spawns,
+        custom.arena, custom.obstacles, custom.camps, custom.spawns, custom.runes,
       ));
     }
   }
@@ -144,6 +145,7 @@ function buildEntry(
   obstacles: ObstacleAABB[],
   camps: CampPlacement[] | null = null,
   spawns: { x: number; z: number }[] | null = null,
+  runes: RunePlacement[] | null = null,
 ): string {
   const tilesH = terrain.height - 1;
   const bounds = { minX: terrain.offsetX, minZ: -(terrain.offsetY + tilesH * 128) };
@@ -209,6 +211,9 @@ ${obsLines.join(',\n')}
 
     /** Fixed hero spawns (custom maps); null → random walkable spawns. */
     spawns: ${spawns && spawns.length > 0 ? JSON.stringify(spawns.map((s) => ({ x: round1(s.x), z: round1(s.z) }))) : 'null'},
+
+    /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
+    runes: ${runes && runes.length > 0 ? JSON.stringify(runes.map((r) => ({ x: round1(r.x), z: round1(r.z) }))) : 'null'},
   }`;
 }
 

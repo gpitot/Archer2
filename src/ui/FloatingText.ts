@@ -69,6 +69,12 @@ export class FloatingTextManager {
     this._texts.push({ ft, worldPos: worldPos.clone(), elapsed: 0, duration: crit ? 1.3 : 1.0 });
   }
 
+  /** Spawn an arbitrary text banner (rune pickups etc.). Lives ~1.5 s. */
+  spawnText(worldPos: THREE.Vector3, text: string, color = '#ffffff'): void {
+    const ft = new FloatingText(worldPos, text, color, true);
+    this._texts.push({ ft, worldPos: worldPos.clone(), elapsed: 0, duration: 1.5 });
+  }
+
   update(delta: number, camera: THREE.Camera): void {
     for (let i = this._texts.length - 1; i >= 0; i--) {
       const t = this._texts[i];

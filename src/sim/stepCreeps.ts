@@ -106,8 +106,8 @@ export function stepCreeps(
       }
     }
 
-    // Validate aggro every tick (cheap): target gone/dead/invulnerable, or
-    // creep dragged past its leash → give up and go home.
+    // Validate aggro every tick (cheap): target gone/dead/invulnerable/
+    // invisible, or creep dragged past its leash → give up and go home.
     let target: HeroState | null = null;
     if (creep.aggroTargetId !== null) {
       target = state.heroes.find((h) => h.id === creep.aggroTargetId) ?? null;
@@ -115,6 +115,7 @@ export function stepCreeps(
         !target ||
         !target.alive ||
         target.invulnerable ||
+        target.invisTimer > 0 ||
         V.distanceSq(creep.pos, creep.spawnPos) > CREEP.leashRange * CREEP.leashRange
       ) {
         creep.aggroTargetId = null;
@@ -158,13 +159,14 @@ export function stepCreeps(
   }
 }
 
-/** Closest alive, non-invulnerable hero within `range`, or null. */
+/** Closest alive, non-invulnerable, non-invisible hero within `range`, or null. */
 function closestHeroInRange(state: MatchState, pos: V.Vec2, range: number): HeroState | null {
   const r2 = range * range;
   let best: HeroState | null = null;
   let bestD2 = Infinity;
   for (const hero of state.heroes) {
     if (!hero.alive || hero.invulnerable) continue;
+    if (hero.invisTimer > 0) continue; // invisible heroes draw no aggro
     const d2 = V.distanceSq(pos, hero.pos);
     if (d2 < r2 && d2 < bestD2) {
       best = hero;

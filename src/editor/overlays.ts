@@ -8,6 +8,7 @@ import type { NavGrid } from '../navigation/NavGrid';
 import type { CustomMap } from '../world/custom/buildCustomMap';
 import type { MapSource } from '../world/custom/mapSource';
 import { CREEP_TYPES } from '../sim/creepRules';
+import { RUNE } from '../sim/runeRules';
 import { TILE_SIZE } from '../world/wc3/W3EParser';
 
 type HeightAt = (x: number, z: number) => number;
@@ -138,6 +139,25 @@ export class Overlays {
       ring.position.set(s.x, y + 2, s.z);
       this._markers.add(ring);
     });
+
+    // Rune spots: floating gem stand-in + pickup-radius ring.
+    for (const r of src.runes) {
+      const y = heightAt(r.x, r.z);
+      const gem = new THREE.Mesh(
+        new THREE.OctahedronGeometry(14, 0),
+        new THREE.MeshBasicMaterial({ color: 0xffcc33, transparent: true, opacity: 0.9 }),
+      );
+      gem.scale.y = 1.5;
+      gem.position.set(r.x, y + 26, r.z);
+      this._markers.add(gem);
+
+      const ring = new THREE.LineLoop(
+        circleGeometry(RUNE.pickupRadius, 32),
+        new THREE.LineBasicMaterial({ color: 0xffcc33, transparent: true, opacity: 0.6 }),
+      );
+      ring.position.set(r.x, y + 2, r.z);
+      this._markers.add(ring);
+    }
   }
 
   // ── Hover highlight ───────────────────────────────────────────
@@ -166,7 +186,7 @@ export class Overlays {
   // ── Placement ghost ───────────────────────────────────────────
 
   /** Simple stand-in shown under the cursor for placement tools. */
-  setGhost(kind: 'tree' | 'rock' | 'deco' | 'camp' | 'spawn' | null, radius: number): void {
+  setGhost(kind: 'tree' | 'rock' | 'deco' | 'camp' | 'spawn' | 'rune' | null, radius: number): void {
     disposeChildren(this._ghost);
     if (!kind) {
       this._ghost.visible = false;
@@ -174,7 +194,7 @@ export class Overlays {
     }
 
     const mat = new THREE.MeshBasicMaterial({
-      color: kind === 'camp' ? 0xcc4444 : kind === 'spawn' ? 0x4488cc : 0x66cc66,
+      color: kind === 'camp' ? 0xcc4444 : kind === 'spawn' ? 0x4488cc : kind === 'rune' ? 0xffcc33 : 0x66cc66,
       transparent: true,
       opacity: 0.5,
       depthWrite: false,
@@ -188,6 +208,11 @@ export class Overlays {
       case 'rock':
         mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(30, 0), mat);
         mesh.position.y = 16;
+        break;
+      case 'rune':
+        mesh = new THREE.Mesh(new THREE.OctahedronGeometry(14, 0), mat);
+        mesh.scale.y = 1.5;
+        mesh.position.y = 26;
         break;
       default:
         mesh = new THREE.Mesh(new THREE.SphereGeometry(20, 12, 8), mat);

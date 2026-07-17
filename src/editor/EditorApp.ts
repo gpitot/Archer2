@@ -26,6 +26,7 @@ import {
 } from '../world/custom/mapSource';
 import { TILE_SIZE } from '../world/wc3/W3EParser';
 import { worldToTile } from '../world/wc3/MapData';
+import { RUNE } from '../sim/runeRules';
 import { Overlays, disposeObject } from './overlays';
 import { EditorUI } from './ui';
 import { ToolId, TOOL_BY_KEY, CAMP_PRESETS, DECO_KINDS, TEXTURES } from './tools';
@@ -33,6 +34,7 @@ import { listMaps, loadMapSource, saveMapSource, rememberLastMap, lastMapName } 
 
 const MAX_SPAWNS = 4;
 const MAX_CAMPS = 8;
+const MAX_RUNES = 6;
 /** Min distance between drag-scattered trees. */
 const SCATTER_SPACING = 70;
 const REBUILD_THROTTLE_MS = 130;
@@ -457,6 +459,8 @@ export class EditorApp {
       this._overlays.setGhost('camp', 80);
     } else if (this._tool === 'spawn') {
       this._overlays.setGhost('spawn', 35);
+    } else if (this._tool === 'rune') {
+      this._overlays.setGhost('rune', RUNE.pickupRadius);
     } else {
       this._overlays.setGhost(null, 0);
     }
@@ -559,6 +563,9 @@ export class EditorApp {
         break;
       case 'spawn':
         if (!fromDrag) this._placeSpawn();
+        break;
+      case 'rune':
+        if (!fromDrag) this._placeRune();
         break;
       case 'erase':
         this._eraseAt();
@@ -677,6 +684,15 @@ export class EditorApp {
     this._rebuild('doodads');
   }
 
+  private _placeRune(): void {
+    if (this._src.runes.length >= MAX_RUNES) {
+      this._ui.flash(`max ${MAX_RUNES} rune spots`);
+      return;
+    }
+    this._src.runes.push({ x: this._hover!.wx, z: this._hover!.wz });
+    this._rebuild('doodads');
+  }
+
   private _eraseAt(): void {
     const { wx, wz } = this._hover!;
     const candidates: { dist: number; remove: () => void }[] = [];
@@ -692,6 +708,10 @@ export class EditorApp {
     this._src.spawns.forEach((s, i) => {
       const dist = Math.hypot(s.x - wx, s.z - wz);
       if (dist < 90) candidates.push({ dist, remove: () => this._src.spawns.splice(i, 1) });
+    });
+    this._src.runes.forEach((r, i) => {
+      const dist = Math.hypot(r.x - wx, r.z - wz);
+      if (dist < 90) candidates.push({ dist, remove: () => this._src.runes.splice(i, 1) });
     });
 
     if (candidates.length === 0) return;
@@ -754,7 +774,8 @@ export class EditorApp {
       parts.push(`tile ${i},${j}`, `xz ${Math.round(this._hover.wx)},${Math.round(this._hover.wz)}`);
     }
     parts.push(
-      `${this._src.doodads.length} doodads, ${this._src.camps.length} camps, ${this._src.spawns.length} spawns`,
+      `${this._src.doodads.length} doodads, ${this._src.camps.length} camps, ` +
+      `${this._src.spawns.length} spawns, ${this._src.runes.length} runes`,
     );
     this._ui.setStatus(parts.join('  ·  '));
   }

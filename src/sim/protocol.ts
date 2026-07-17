@@ -18,6 +18,7 @@
  */
 import { Command, Inventory, ProjectileState, WardState, BlastState, SimEvent } from './state';
 import { CreepTypeId } from './creepRules';
+import { RuneTypeId } from './runeRules';
 import { Vec2 } from './math';
 
 // ── Client → Server ──────────────────────────────────────────────────
@@ -79,6 +80,10 @@ export interface HeroMeta {
   critChance: number;
   inventory: Inventory;
   wardCharges: number;
+  /** Rune buff timers (seconds remaining; 0 = inactive). */
+  ddTimer: number;
+  hasteTimer: number;
+  invisTimer: number;
   abilityLevel: number;
   abilityCooldown: number;
   abilityCharges: number;
@@ -123,6 +128,21 @@ export interface CreepMeta {
   spawnPos: Vec2;
 }
 
+// ── Wire rune representations ──────────────────────────────────
+
+/**
+ * Rune registry entry, sent once in the welcome. Rune ids/positions are
+ * stable for the whole match; pickups and respawns afterwards are
+ * event-carried (`runePickup` / `runeSpawn` piggyback on snapshots), so
+ * runes never appear in per-tick snapshots.
+ */
+export interface RuneMeta {
+  id: string;
+  pos: Vec2;
+  type: RuneTypeId;
+  active: boolean;
+}
+
 // ── Server → Client ──────────────────────────────────────────────────
 
 export interface WelcomeMessage {
@@ -140,6 +160,8 @@ export interface WelcomeMessage {
   meta: HeroMeta[];
   /** Cold registry for every creep in the match. */
   creepMeta: CreepMeta[];
+  /** Registry for every rune spot in the match. */
+  runeMeta: RuneMeta[];
 }
 
 export interface SnapshotMessage {

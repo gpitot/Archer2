@@ -10,7 +10,7 @@ export type ToolId =
   | 'pan'
   | 'raise' | 'lower' | 'ramp' | 'water' | 'paint'
   | 'treeDark' | 'treeGreen' | 'treeTeal' | 'rock' | 'deco'
-  | 'camp' | 'spawn' | 'erase';
+  | 'camp' | 'spawn' | 'rune' | 'erase';
 
 export interface ToolInfo {
   id: ToolId;
@@ -33,6 +33,7 @@ export const TOOLS: ToolInfo[] = [
   { id: 'deco', key: 'T', label: 'Decoration', hint: 'cosmetic only ([ ] cycles bush/flower/mushroom)' },
   { id: 'camp', key: 'C', label: 'Creep camp', hint: 'places a jungle camp ([ ] cycles composition)' },
   { id: 'spawn', key: 'P', label: 'Hero spawn', hint: 'numbered spawn points (max 4)' },
+  { id: 'rune', key: 'U', label: 'Rune spot', hint: 'power-up rune spawn location (max 6)' },
   { id: 'erase', key: 'X', label: 'Erase', hint: 'click/drag removes the nearest placed object' },
 ];
 

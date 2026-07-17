@@ -477,6 +477,9 @@ export const NAVDATA = {
 
     /** Fixed hero spawns (custom maps); null → random walkable spawns. */
     spawns: null,
+
+    /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
+    runes: null,
   },
   "test": {
     /** Bit-packed walkable cells, 1 bit per cell, row-major (south-to-north). */
@@ -512,6 +515,9 @@ export const NAVDATA = {
 
     /** Fixed hero spawns (custom maps); null → random walkable spawns. */
     spawns: null,
+
+    /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
+    runes: null,
   },
   "glade": {
     /** Bit-packed walkable cells, 1 bit per cell, row-major (south-to-north). */
@@ -548,6 +554,9 @@ export const NAVDATA = {
 
     /** Fixed hero spawns (custom maps); null → random walkable spawns. */
     spawns: [{"x":-600,"z":1200},{"x":600,"z":1200}],
+
+    /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
+    runes: null,
   }
 } as const;
 

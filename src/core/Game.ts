@@ -30,15 +30,17 @@ import { HeroPortrait } from '../ui/HeroPortrait';
 import { SpellBar } from '../ui/SpellBar';
 
 // ── Sim layer ──
-import { HeroState, ProjectileState, WardState, BlastState, CreepState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
+import { HeroState, ProjectileState, WardState, BlastState, CreepState, RuneState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
 import { stepMatch, xpForLevel, heroSpeed } from '../sim/stepMatch';
 import { spawnCamps } from '../sim/stepCreeps';
+import { spawnRunes } from '../sim/stepRunes';
 import type { CampPlacement } from '../sim/creepRules';
+import { RUNE_TYPES, RunePlacement } from '../sim/runeRules';
 import { SimWorld, sphereHitsObstacle } from '../sim/world';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
 import { HERO, ARROW, DODGE, WARD, REVEAL, BLAST, basicRankCap, ultimateRankCap } from '../sim/rules';
 import { BLINK_COOLDOWN, SHOP_ITEMS } from '../sim/shopItems';
-import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta, CreepMeta } from '../sim/protocol';
+import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta, CreepMeta, RuneMeta } from '../sim/protocol';
 import { creepMaxHp } from '../sim/creepRules';
 import { Vec2, distance, clamp } from '../sim/math';
 
@@ -50,6 +52,7 @@ import { HeroView } from '../entities/HeroView';
 import { ProjectileView } from '../combat/ProjectileView';
 import { WardView } from '../entities/WardView';
 import { BlastView } from '../entities/BlastView';
+import { RuneView } from '../entities/RuneView';
 import { ExplosionEffects } from '../rendering/ExplosionEffect';
 import { CreepView } from '../entities/CreepView';
 
@@ -83,6 +86,7 @@ export class Game {
   /** Fixed spawn points from the map definition (test map); null → random. */
   private _mapSpawns: { x: number; z: number }[] | null = null;
   private _mapCamps: CampPlacement[] | null = null;
+  private _mapRunes: RunePlacement[] | null = null;
   private _terrain!: GroundProvider;
   private _water!: Water;
 
@@ -187,6 +191,7 @@ export class Game {
   private _blastViews = new Map<string, BlastView>();
   private _explosions!: ExplosionEffects;
   private _creepViews = new Map<string, CreepView>();
+  private _runeViews = new Map<string, RuneView>();
   private _projectilePool: ProjectileView[] = [];
 
   // ── Player helpers ──
@@ -249,6 +254,7 @@ export class Game {
     this._arena = loaded.arena;
     this._mapSpawns = loaded.spawns;
     this._mapCamps = loaded.camps;
+    this._mapRunes = loaded.runes;
     const bounds = this._map.bounds;
 
     // ── Renderer ──
@@ -333,6 +339,9 @@ export class Game {
     } else {
       // ── Offline mode: jungle creep camps, simulated by the local stepMatch ──
       spawnCamps(this._state, this._world, this._mapCamps);
+
+      // ── Offline mode: power-up rune spots ──
+      spawnRunes(this._state, this._world, this._mapRunes);
 
       // ── Offline mode: create local heroes ──
       // Maps with fixed spawns (test map) place the heroes deterministically.
@@ -591,7 +600,7 @@ export class Game {
 
     // Apply the welcome snapshot to initialise our state and views.
     this._playerId = welcome.playerId;
-    this._applySnapshot(welcome.snapshot, welcome.meta, welcome.creepMeta ?? []);
+    this._applySnapshot(welcome.snapshot, welcome.meta, welcome.creepMeta ?? [], welcome.runeMeta ?? []);
 
     // Confirm our hero made it into the snapshot (`_applySnapshot` set
     // `_playerState` from it).
@@ -659,7 +668,7 @@ export class Game {
    * Hydrates full HeroStates from the wire hot fields + cold meta, then
    * builds views. Nothing aliases the snapshot.
    */
-  private _applySnapshot(snap: Snapshot, meta: HeroMeta[], creepMeta: CreepMeta[] = []): void {
+  private _applySnapshot(snap: Snapshot, meta: HeroMeta[], creepMeta: CreepMeta[] = [], runeMeta: RuneMeta[] = []): void {
     const metaById = new Map(meta.map((m) => [m.id, m]));
     this._state.heroes = snap.heroes.map((h) => this._heroFromWire(h, metaById.get(h.id)));
     this._state.projectiles = this._cloneProjectiles(snap.projectiles);
@@ -669,6 +678,8 @@ export class Game {
     // the whole match, so this list is never rebuilt — snapshots update hot
     // fields, events carry death/respawn/level.
     this._state.creeps = creepMeta.map((m) => this._creepFromMeta(m));
+    // Same for runes: welcome registry, pickup/respawn are event-carried.
+    this._state.runes = runeMeta.map((m) => this._runeFromMeta(m));
     this._state.tick = snap.tick;
 
     // Seed the remote-projectile registry with arrows already in flight,
@@ -700,6 +711,17 @@ export class Game {
       aggroTargetId: null,
       attackCooldown: 0,
       lastActiveTick: 0,
+    };
+  }
+
+  /** Build a persistent local RuneState from a welcome registry entry. */
+  private _runeFromMeta(m: RuneMeta): RuneState {
+    return {
+      id: m.id,
+      pos: { x: m.pos.x, z: m.pos.z },
+      type: m.type,
+      active: m.active,
+      respawnTimer: 0,
     };
   }
 
@@ -826,6 +848,9 @@ export class Game {
     dst.critChance = src.critChance;
     dst.inventory = [...src.inventory];
     dst.wardCharges = src.wardCharges;
+    dst.ddTimer = src.ddTimer;
+    dst.hasteTimer = src.hasteTimer;
+    dst.invisTimer = src.invisTimer;
     dst.abilityLevel = src.abilityLevel;
     // Don't reconcile the local player's charge / cooldown / recoil timers —
     // prediction ticks them correctly and the server's value could be stale
@@ -1553,6 +1578,8 @@ export class Game {
     this._explosions.update(dt);
     // Sync creep views
     this._syncCreepViews(dt);
+    // Sync rune views
+    this._syncRuneViews(dt);
   }
 
   // ── Blast zone view sync ───────────────────────────────────────────────────
@@ -1642,6 +1669,30 @@ export class Game {
           creep.level = ev.level;
           creep.hp = creepMaxHp(creep.type, ev.level);
           creep.pos = { x: creep.spawnPos.x, z: creep.spawnPos.z };
+        }
+        break;
+      }
+      case 'runeSpawn': {
+        // Event-carried respawn with the freshly rolled type. (Offline the
+        // sim already set this — idempotent.)
+        const rune = this._state.runes.find((r) => r.id === ev.runeId);
+        if (rune) {
+          rune.active = true;
+          rune.type = ev.runeType;
+        }
+        break;
+      }
+      case 'runePickup': {
+        const rune = this._state.runes.find((r) => r.id === ev.runeId);
+        if (rune) rune.active = false;
+        // Pickup banner — for the local player always, otherwise only when
+        // the pickup happened inside our vision.
+        const mine = ev.heroId === this._playerId;
+        if (mine || this._fog.isVisible(this._playerState.team, ev.x, ev.z)) {
+          const def = RUNE_TYPES[ev.runeType];
+          const y = this._heightAt(ev.x, ev.z);
+          const color = `#${def.color.toString(16).padStart(6, '0')}`;
+          this._floatingText.spawnText(new THREE.Vector3(ev.x, y + 80, ev.z), def.name.toUpperCase() + '!', color);
         }
         break;
       }
@@ -1740,6 +1791,22 @@ export class Game {
     }
   }
 
+  // ── Rune view sync ───────────────────────────────────────────────────
+
+  private _syncRuneViews(dt: number): void {
+    // Rune ids are stable for the whole match, so views are created once;
+    // pickup/respawn is just a visibility toggle in sync.
+    for (const r of this._state.runes) {
+      let rv = this._runeViews.get(r.id);
+      if (!rv) {
+        rv = new RuneView(r.id);
+        this._scene.add(rv.mesh);
+        this._runeViews.set(r.id, rv);
+      }
+      rv.sync(r, dt, this._heightAt.bind(this));
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────
 
   private _render(_interpolation: number): void {
@@ -1753,6 +1820,8 @@ export class Game {
     const markers: { x: number; z: number; color: string; radius: number }[] = [];
     for (const h of this._state.heroes) {
       if (!h.alive) continue;
+      // Rune invisibility beats fog vision AND the E reveal.
+      if (h.team !== playerTeam && h.invisTimer > 0) continue;
       const visible = h.team === playerTeam || this._fog.isVisible(playerTeam, h.pos.x, h.pos.z);
       if (!visible && !revealActive) continue;
       if (!visible) {
@@ -1793,6 +1862,17 @@ export class Game {
     }
     for (const camp of camps.values()) {
       markers.push({ x: camp.x, z: camp.z, color: camp.alive ? '#999966' : '#444444', radius: 3 });
+    }
+
+    // Rune spots: type-colored while a rune is up and in vision, dim otherwise.
+    for (const r of this._state.runes) {
+      const up = r.active && this._fog.isVisible(playerTeam, r.pos.x, r.pos.z);
+      markers.push({
+        x: r.pos.x,
+        z: r.pos.z,
+        color: up ? `#${RUNE_TYPES[r.type].color.toString(16).padStart(6, '0')}` : '#555555',
+        radius: up ? 3 : 2,
+      });
     }
 
     // Shop marker
@@ -1880,12 +1960,13 @@ export class Game {
   private _applyFogVisibility(): void {
     const team = this._playerState.team;
 
-    // Enemy heroes
+    // Enemy heroes — hidden by fog, and outright while rune-invisible.
     for (const hero of this._state.heroes) {
       if (hero.team === team) continue;
       const view = this._heroViews.get(hero.id);
       if (view) {
-        view.mesh.visible = hero.alive && this._fog.isVisible(team, hero.pos.x, hero.pos.z);
+        view.mesh.visible = hero.alive && hero.invisTimer <= 0 &&
+          this._fog.isVisible(team, hero.pos.x, hero.pos.z);
       }
     }
 
@@ -1912,6 +1993,14 @@ export class Game {
       const cv = this._creepViews.get(c.id);
       if (cv) {
         cv.mesh.visible = c.alive && this._fog.isVisible(team, c.pos.x, c.pos.z);
+      }
+    }
+
+    // Runes: like DotA, only visible while the spot is inside our vision.
+    for (const r of this._state.runes) {
+      const rv = this._runeViews.get(r.id);
+      if (rv && rv.mesh.visible) {
+        rv.mesh.visible = this._fog.isVisible(team, r.pos.x, r.pos.z);
       }
     }
   }
