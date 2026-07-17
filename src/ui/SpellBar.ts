@@ -106,7 +106,7 @@ class SpellSlot {
       height: ${size}px;
       border: 2px solid rgba(180,160,100,0.8);
       border-radius: 4px;
-      background: transparent;
+      background: rgba(255, 255, 255, 0.1);
       position: relative;
       overflow: visible;
     `;

@@ -171,7 +171,7 @@ export class ItemBar {
         this._wasOnCd[i] = onCd;
         // Border stays visible during cooldown — slightly muted; bright when ready.
         slot.style.borderColor = onCd ? 'rgba(150,132,85,0.6)' : 'rgba(255,200,60,0.7)';
-        slot.style.background = 'rgba(30, 20, 5, 0.8)';
+        slot.style.background = 'rgba(255, 255, 255, 0.1)';
         this._hotkeys[i].style.color = onCd ? '#997733' : '#ffcc44';
         this._icons[i].style.filter = onCd ? 'grayscale(0.6) brightness(0.7)' : 'none';
         const count = charges[itemId];
@@ -189,7 +189,7 @@ export class ItemBar {
         cdText.style.display = 'none';
         this._wasOnCd[i] = false;
         slot.style.borderColor = 'rgba(180, 160, 100, 0.5)';
-        slot.style.background = 'rgba(0, 0, 0, 0.65)';
+        slot.style.background = 'rgba(255, 255, 255, 0.1)';
         this._hotkeys[i].style.color = '#ffcc44';
       }
     }
