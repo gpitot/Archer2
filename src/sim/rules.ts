@@ -75,8 +75,6 @@ export const MULTI_KILL_WINDOW = 7;
 export const ARROW = {
   /** Damage per ability level (index 0 = unlearned). */
   damageByLevel: [0, 200, 266, 333, 400, 466],
-  /** Max flight range per ability level. */
-  rangeByLevel: [0, 800, 1333, 1866, 2400, 2933],
   /**
    * Per-charge recharge time per ability level (seconds). Halved from the
    * original per-shot cooldown [2.25, 2.0, 1.75, 1.5, 1.25]: the original
@@ -86,6 +84,8 @@ export const ARROW = {
    * the recharge reproduces that parallel-cooldown sustained fire rate.
    */
   cooldownByLevel: [0, 1.125, 1.0, 0.875, 0.75, 0.625],
+  /** Max flight range per ability level (fixed at 800 for all ranks). */
+  rangeByLevel: [0, 800, 800, 800, 800, 800],
   maxLevel: 5,
   /** Maximum number of charges the ability holds. */
   maxCharges: 2,
@@ -114,8 +114,8 @@ export const ARROW = {
 
 // ── Dodge ability (W) ────────────────────────────────────────────────
 export const DODGE = {
-  /** Dodge window duration per level. */
-  durationByLevel: [0, 0.8, 1.0, 1.25, 1.5, 1.75],
+  /** Dodge window duration (fixed at 0.8s for all ranks). */
+  durationByLevel: [0, 0.8, 0.8, 0.8, 0.8, 0.8],
   /** Cooldown per level (seconds). */
   cooldownByLevel: [0, 8, 7, 6, 5, 4],
   maxLevel: 5,
@@ -129,8 +129,8 @@ export const DODGE = {
 export const SCOUT = {
   /** Flight speed (world units / s). */
   speed: 1000,
-  /** Fog reveal radius around the projectile while in flight. */
-  sightRadius: 800,
+  /** Fog reveal radius around the projectile per rank (index 0 = unlearned). */
+  sightRadiusByLevel: [0, 800, 1000, 1200, 1400, 1600],
   /**
    * The revealed bubble lingers behind the projectile: a breadcrumb vision
    * source (same radius) is dropped every `trailSpacing` units of flight and
@@ -139,8 +139,8 @@ export const SCOUT = {
    */
   trailDuration: 4,
   trailSpacing: 400,
-  /** Flight range per rank (index 0 = unlearned) — long, grows per rank. */
-  rangeByLevel: [0, 1600, 2000, 2400, 2800, 3200],
+  /** Flight range (fixed at 5000 for all ranks; index 0 = unlearned). */
+  rangeByLevel: [0, 5000, 5000, 5000, 5000, 5000],
   /** Cooldown per rank (seconds) — shrinks per rank. */
   cooldownByLevel: [0, 22, 19, 16, 13, 10],
   maxLevel: 5,
@@ -157,7 +157,7 @@ export const BLAST = {
   /** Damage per rank (index 0 = unlearned). */
   damageByLevel: [0, 300, 425, 550],
   /** Cooldown per rank (seconds). */
-  cooldownByLevel: [0, 20, 17, 14],
+  cooldownByLevel: [0, 8, 6, 4],
   maxLevel: 3,
 } as const;
 

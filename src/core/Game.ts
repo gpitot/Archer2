@@ -222,7 +222,7 @@ export class Game {
   /** Lingering vision bubbles dropped along each scout's path (see SCOUT.trail*). */
   private _scoutTrail: { src: VisionSource; ttl: number }[] = [];
   /** Per-scout breadcrumb tracking: where the last bubble was dropped + last known pos. */
-  private _scoutTrailDrop = new Map<string, { dropX: number; dropZ: number; lastX: number; lastZ: number; team: number }>();
+  private _scoutTrailDrop = new Map<string, { dropX: number; dropZ: number; lastX: number; lastZ: number; team: number; radius: number }>();
 
   // ── Input ──
   private _input!: InputManager;
@@ -545,6 +545,10 @@ export class Game {
     this._minimap = new Minimap(this._map, this._arena, 200, 8);
     this._minimap.setFog(this._fog, this._playerState.team);
     this._minimap.onClick = (wx, wz) => {
+      this._cameraLocked = false;
+      this._camera.setTarget(new THREE.Vector3(wx, this._smoothHeightAt(wx, wz), wz));
+    };
+    this._minimap.onDrag = (wx, wz) => {
       this._cameraLocked = false;
       this._camera.setTarget(new THREE.Vector3(wx, this._smoothHeightAt(wx, wz), wz));
     };
@@ -1674,9 +1678,10 @@ export class Game {
         // Scout (E) projectiles grant fog vision to their team while flying.
         if (p.kind === 'scout') {
           const team = p.team;
+          const radius = p.sightRadius ?? SCOUT.sightRadiusByLevel[1];
           const vSrc: VisionSource = {
             get position() { return pv.mesh.position; },
-            get sightRadius() { return SCOUT.sightRadius; },
+            get sightRadius() { return radius; },
             get active() { return true; },
             get team() { return team; },
           };
@@ -1700,7 +1705,7 @@ export class Game {
           this._scoutVisionAdapters.delete(id);
           const track = this._scoutTrailDrop.get(id);
           if (track) {
-            this._spawnScoutBubble(track.lastX, track.lastZ, track.team);
+            this._spawnScoutBubble(track.lastX, track.lastZ, track.team, track.radius);
             this._scoutTrailDrop.delete(id);
           }
         }
@@ -1716,11 +1721,12 @@ export class Game {
    */
   private _dropScoutBreadcrumbs(p: ProjectileState): void {
     let track = this._scoutTrailDrop.get(p.id);
+    const radius = p.sightRadius ?? SCOUT.sightRadiusByLevel[1];
     if (!track) {
       // First sighting: light the launch point too.
-      track = { dropX: p.pos.x, dropZ: p.pos.z, lastX: p.pos.x, lastZ: p.pos.z, team: p.team };
+      track = { dropX: p.pos.x, dropZ: p.pos.z, lastX: p.pos.x, lastZ: p.pos.z, team: p.team, radius };
       this._scoutTrailDrop.set(p.id, track);
-      this._spawnScoutBubble(p.pos.x, p.pos.z, p.team);
+      this._spawnScoutBubble(p.pos.x, p.pos.z, p.team, radius);
       return;
     }
     track.lastX = p.pos.x;
@@ -1730,15 +1736,15 @@ export class Game {
     if (dx * dx + dz * dz >= SCOUT.trailSpacing * SCOUT.trailSpacing) {
       track.dropX = p.pos.x;
       track.dropZ = p.pos.z;
-      this._spawnScoutBubble(p.pos.x, p.pos.z, p.team);
+      this._spawnScoutBubble(p.pos.x, p.pos.z, p.team, radius);
     }
   }
 
   /** A stationary, self-expiring fog bubble (scout trail segment). */
-  private _spawnScoutBubble(x: number, z: number, team: number): void {
+  private _spawnScoutBubble(x: number, z: number, team: number, radius: number): void {
     const src: VisionSource = {
       position: new THREE.Vector3(x, 0, z),
-      sightRadius: SCOUT.sightRadius,
+      sightRadius: radius,
       active: true,
       team,
     };

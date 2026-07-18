@@ -60,10 +60,11 @@ so LoL rules are used as the base.)
 ### Per-rank stat tables
 
 - **Q Arrow** (extends existing 4-rank progression to 5):
-  damage 200/266/333/400/466 · range 800/1333/1866/2400/2933 ·
+  damage 200/266/333/400/466 · range 800 (all ranks) ·
   cooldown 2.25/2.0/1.75/1.5/1.25 s
-- **W Dodge**: duration 0.8/1.0/1.25/1.5/1.75 s · cooldown 8/7/6/5/4 s
-- **E Reveal**: duration 2/2.5/3/3.5/4 s · cooldown 15/13/11/9/7 s
+- **W Dodge**: duration 0.8 s (all ranks) · cooldown 8/7/6/5/4 s
+- **E Reveal**: range 5000 (all ranks) · sight radius 800/1000/1200/1400/1600 ·
+  cooldown 22/19/16/13/10 s
 - **R Blast**: damage 300/425/550 · cooldown 20/17/14 s
   (cast range, radius, and 1.5 s fuse unchanged)
 

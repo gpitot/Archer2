@@ -299,6 +299,7 @@ function castScout(ctx: CastContext): void {
     dir,
     speed: SCOUT.speed,
     maxRange: SCOUT.rangeByLevel[a.level],
+    sightRadius: SCOUT.sightRadiusByLevel[a.level],
     traveled: 0,
     damage: 0,
   });
@@ -348,7 +349,7 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     description: 'Fire a fast arrow that damages the first enemy it strikes. Holds multiple charges.',
     stats: [
       { label: 'Damage', values: perRank(ARROW.damageByLevel) },
-      { label: 'Range', values: perRank(ARROW.rangeByLevel) },
+      { label: 'Range', values: [String(ARROW.rangeByLevel[1])] },
       { label: 'Cooldown', values: perRank(ARROW.cooldownByLevel, 's') },
       { label: 'Charges', values: [String(ARROW.maxCharges)] },
     ],
@@ -381,7 +382,7 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     name: 'Dodge',
     description: 'Enter an evasive stance that avoids all incoming arrows for a short window.',
     stats: [
-      { label: 'Duration', values: perRank(DODGE.durationByLevel, 's') },
+      { label: 'Duration', values: [`${DODGE.durationByLevel[1]}s`] },
       { label: 'Cooldown', values: perRank(DODGE.cooldownByLevel, 's') },
     ],
     kind: 'basic',
@@ -406,8 +407,8 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     name: 'Scout',
     description: 'Launch a soaring vision projectile that reveals fog of war along its path.',
     stats: [
-      { label: 'Range', values: perRank(SCOUT.rangeByLevel) },
-      { label: 'Sight Radius', values: [String(SCOUT.sightRadius)] },
+      { label: 'Range', values: [String(SCOUT.rangeByLevel[1])] },
+      { label: 'Sight Radius', values: perRank(SCOUT.sightRadiusByLevel) },
       { label: 'Cooldown', values: perRank(SCOUT.cooldownByLevel, 's') },
     ],
     kind: 'basic',
