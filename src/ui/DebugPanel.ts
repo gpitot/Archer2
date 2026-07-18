@@ -23,7 +23,7 @@ export class DebugPanel {
     this.el.style.cssText = `
       position: fixed;
       top: 12px;
-      right: 12px;
+      left: 12px;
       z-index: 600;
       display: flex;
       flex-direction: column;

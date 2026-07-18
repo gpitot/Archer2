@@ -1827,6 +1827,7 @@ export class Game {
       shopOverlay: this._shopOverlay,
       camera: this._camera,
       isPlayerNearShop: this._isPlayerNearShop(),
+      gameTime: this._state.tick / 60,
     };
     updateHud(ctx);
   }
