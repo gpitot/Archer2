@@ -107,6 +107,13 @@ export class InputManager {
   private _onWindowMouseMove(event: MouseEvent): void {
     this._mouseScreenX = event.clientX;
     this._mouseScreenY = event.clientY;
+    // Suppress edge panning when the cursor is over a UI element (spell bar,
+    // item bar, minimap, shop window, etc.) so the camera doesn't drift while
+    // the player hovers the HUD.
+    if (event.target && !this._canvas.contains(event.target as Node)) {
+      this._panDirection.set(0, 0, 0);
+      return;
+    }
     this._updatePanDirection();
   }
 
