@@ -25,6 +25,7 @@ import { CampState, CreepState, HeroState, MatchState, ProjectileState, SimEvent
 import { addXp, killHero, dealDamageToHero, dealDamageToCreep } from './damage';
 import { spawnProjectile } from './projectiles';
 import { findReachableNear, findWalkableNear, SimWorld } from './world';
+import { followPath, computePath } from './movement';
 
 // ── Camp construction ─────────────────────────────────────────────────
 
@@ -278,31 +279,15 @@ function moveCreepTo(
     repathCreep(creep, goal, world);
   }
 
-  const wp = creep.path[0];
-  if (!wp) return; // unreachable this tick; try again next stagger slot
+  if (!creep.path[0]) return; // unreachable this tick; try again next stagger slot
   const speed = creep.slowTimer > 0 ? def.speed * 0.8 : def.speed;
-  const dir = V.sub(wp, creep.pos);
-  const dist = V.length(dir);
-  if (dist < CREEP.arriveEpsilon) {
-    creep.pos = { x: wp.x, z: wp.z };
-    creep.path.shift();
-    return;
-  }
-  const unitDir = V.scale(dir, 1 / dist);
-  creep.pos = V.add(creep.pos, V.scale(unitDir, Math.min(speed * dt, dist)));
-  creep.facing = V.heading(unitDir);
+  followPath(creep, dt, { speed, arriveEpsilon: CREEP.arriveEpsilon, facingMode: 'snap' });
 }
 
 /** (Re)compute a creep's path to `goal`, snapping to reachable ground if the
- *  exact goal is unwalkable — mirrors the hero `setDestination` fallback. */
+ *  exact goal is unwalkable — the same `computePath` heroes use. */
 function repathCreep(creep: CreepState, goal: V.Vec2, world: SimWorld): void {
-  let path = world.pathfinder.findSmoothedPath(creep.pos.x, creep.pos.z, goal.x, goal.z);
-  if (!path || path.length <= 1) {
-    const snapped = findReachableNear(world, goal.x, goal.z, creep.pos.x, creep.pos.z);
-    if (snapped) path = world.pathfinder.findSmoothedPath(creep.pos.x, creep.pos.z, snapped.x, snapped.z);
-  }
-  // path[0] is the creep's current position — keep the rest as waypoints.
-  creep.path = path && path.length > 1 ? path.slice(1).map((p) => ({ x: p.wx, z: p.wz })) : [];
+  creep.path = computePath(world, creep.pos, goal);
 }
 
 function fireCreepProjectile(

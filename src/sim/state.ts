@@ -33,6 +33,9 @@ export interface UnitCore {
   alive: boolean;
   respawnTimer: number;
   level: number;
+  /** Remaining path waypoints (world-space cell centers), first = next target.
+   *  Sim-internal — never sent over the wire. Followed by `followPath`. */
+  path: Vec2[];
 }
 
 /**
@@ -63,8 +66,6 @@ export interface HeroState extends UnitCore {
   facing: number;
   /** Facing the hero is turning toward. */
   targetFacing: number;
-  /** Remaining path waypoints (world-space cell centers), first = next target. */
-  path: Vec2[];
   moving: boolean;
 
   // Health / life-cycle
@@ -174,12 +175,6 @@ export interface CreepState extends UnitCore {
   respawnTimer: number;
   aggroTargetId: string | null;
   attackCooldown: number;
-  /**
-   * Remaining path waypoints (world-space), first = next target. Creeps path
-   * around cliffs/water with the same A* the heroes use; recomputed as the
-   * chased hero drifts (see `stepCreeps`). Sim-internal — never on the wire.
-   */
-  path: Vec2[];
   /** Last tick this creep moved/fought/changed — drives snapshot idle-omission. */
   lastActiveTick: number;
   /** Slow debuff timer from Ice Bow (seconds remaining; 0 = inactive). */

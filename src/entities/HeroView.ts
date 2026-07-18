@@ -5,6 +5,7 @@ import { RUNE_TYPES, RuneTypeId } from '../sim/runeRules';
 import { heroSpeed } from '../sim/stepMatch';
 import { HealthBar } from './HealthBar';
 import { createHeroRig, HeroRig, MESH_SCALE } from './HeroRig';
+import { UnitView } from './UnitView';
 
 /**
  * Render-only view of a hero. Owns the Three.js group, health bar, and the
@@ -14,14 +15,12 @@ import { createHeroRig, HeroRig, MESH_SCALE } from './HeroRig';
  * The body mesh + animation is delegated to a HeroRig (classic procedural
  * archer or the GLB ranger — pick with `?hero=classic` / default ranger).
  */
-export class HeroView {
-  readonly mesh: THREE.Group;
+export class HeroView extends UnitView {
   readonly heroId: string;
 
   private _rig: HeroRig;
   private _healthBar: HealthBar;
   private _flashGlow: THREE.PointLight;
-  private _hitFlashTimer = 0;
   private _healFlashTimer = 0;
   private _wasAlive = true;
   /** Rune-buff indicator sprites floating above the head (DotA-style). */
@@ -35,20 +34,15 @@ export class HeroView {
     color: number,
     private _heightAt: (x: number, z: number) => number,
   ) {
+    super(new THREE.Group());
     this.heroId = heroId;
-    this.mesh = new THREE.Group();
     this.mesh.scale.setScalar(MESH_SCALE);
     this._rig = createHeroRig(color);
     this.mesh.add(this._rig.root);
 
-    // Hitbox ring at feet
-    const ringGeo = new THREE.TorusGeometry(HERO.bodyRadius / MESH_SCALE, 0.08, 8, 64);
-    const ringMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.25, depthTest: false });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.05;
-    ring.renderOrder = 0;
-    this.mesh.add(ring);
+    // Hitbox ring at feet (team-colored). Radius authored in the group's local
+    // space, which is scaled up by MESH_SCALE.
+    this.addFootRing(HERO.bodyRadius / MESH_SCALE, color);
 
     this._healthBar = new HealthBar(maxHpForLevel(1));
     this._healthBar.sprite.position.set(0, 2.5, 0); // above archer's head

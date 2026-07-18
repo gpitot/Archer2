@@ -12,16 +12,18 @@
  */
 import * as THREE from 'three';
 import { CreepState } from '../sim/state';
-import { CreepTypeId, creepMaxHp } from '../sim/creepRules';
+import { CreepTypeId, creepMaxHp, CREEP_TYPES } from '../sim/creepRules';
 import { HERO } from '../sim/rules';
 import { HealthBar } from './HealthBar';
+import { UnitView } from './UnitView';
 import { createMonsterInstance, pickClip, MonsterModelConfig } from './MonsterModel';
 
 const FADE = 0.15;
 const ATTACK_DURATION = 0.5;
+/** Amber ground ring — creeps are neutral-hostile, distinct from hero team colors. */
+const CREEP_RING_COLOR = 0xffaa33;
 
-export class CreepView {
-  readonly mesh: THREE.Group;
+export class CreepView extends UnitView {
   readonly creepId: string;
 
   private _type: CreepTypeId;
@@ -38,7 +40,6 @@ export class CreepView {
   private _hitReact: THREE.AnimationAction | null = null;
 
   private _moving = false;
-  private _hitFlashTimer = 0;
   private _lastX = 0;
   private _lastZ = 0;
 
@@ -47,9 +48,12 @@ export class CreepView {
     type: CreepTypeId,
     private _heightAt: (x: number, z: number) => number,
   ) {
+    super(new THREE.Group());
     this.creepId = creepId;
     this._type = type;
-    this.mesh = new THREE.Group();
+
+    // Amber foot ring in raw world units (the creep group isn't scaled).
+    this.addFootRing(CREEP_TYPES[type].bodyRadius, CREEP_RING_COLOR, { tube: 3, y: 2, opacity: 0.3 });
 
     this._healthBar = new HealthBar(creepMaxHp(type, 1));
     this._healthBar.sprite.position.set(0, 80, 0);

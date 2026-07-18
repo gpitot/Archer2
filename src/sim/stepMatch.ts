@@ -45,13 +45,13 @@ import {
   hitCreep,
   stepCreeps,
 } from './stepCreeps';
-import { findReachableNear, findRespawnPosition, SimWorld } from './world';
+import { findRespawnPosition, SimWorld } from './world';
 import { ICE_BOW_SLOW_FACTOR, SHOP_ITEMS_BY_ID, addItem, removeItem } from './shopItems';
 import { stepRuneBuffs, stepRunes } from './stepRunes';
 import { RUNE } from './runeRules';
 import { rollAbilityDamage, dealDamageToHero, killHero, addXp } from './damage';
 import { advanceProjectile, findHitHero } from './projectiles';
-import { turnToward, stepToward } from './movement';
+import { turnToward, followPath, computePath } from './movement';
 
 /**
  * Advance the match by `dt` seconds, applying `inputs` queued since the last
@@ -124,24 +124,11 @@ function applyCommand(
 
 function setDestination(hero: HeroState, x: number, z: number, world: SimWorld): void {
   if (!hero.alive) return;
-  let path = world.pathfinder.findSmoothedPath(hero.pos.x, hero.pos.z, x, z);
-  if (!path || path.length <= 1) {
-    // Unwalkable or unreachable target (cliff, tree, fogged terrain): walk
-    // to the nearest cell the hero can actually reach instead of ignoring
-    // the click. Runs identically in server sim and client prediction.
-    const snapped = findReachableNear(world, x, z, hero.pos.x, hero.pos.z);
-    if (snapped) {
-      path = world.pathfinder.findSmoothedPath(hero.pos.x, hero.pos.z, snapped.x, snapped.z);
-    }
-  }
-  if (path && path.length > 1) {
-    // path[0] is the hero's current position — walk the rest.
-    hero.path = path.slice(1).map((p) => ({ x: p.wx, z: p.wz }));
-    hero.moving = true;
-  } else {
-    hero.path = [];
-    hero.moving = false;
-  }
+  // Unwalkable/unreachable targets snap to the nearest reachable cell inside
+  // computePath (cliff, tree, fogged terrain) — same helper the creeps use, so
+  // server sim and client prediction stay in step.
+  hero.path = computePath(world, hero.pos, { x, z });
+  hero.moving = hero.path.length > 0;
 }
 
 function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]): void {
@@ -246,29 +233,17 @@ function stepHero(hero: HeroState, dt: number): void {
   }
 
   if (hero.moving && hero.path.length > 0) {
-    moveAlongPath(hero, dt);
-  } else if (hero.path.length === 0) {
-    hero.moving = false;
+    followPath(hero, dt, {
+      speed: heroSpeed(hero),
+      arriveEpsilon: HERO.arriveEpsilon,
+      facingMode: 'smooth',
+    });
   }
+  // followPath doesn't touch `moving`; clear it once the path is exhausted
+  // (covers both the just-emptied and already-empty cases).
+  if (hero.path.length === 0) hero.moving = false;
 
   updateFacing(hero, dt);
-}
-
-function moveAlongPath(hero: HeroState, dt: number): void {
-  const target = hero.path[0];
-  const dir = V.sub(target, hero.pos);
-  const dist = V.length(dir);
-
-  if (dist < HERO.arriveEpsilon) {
-    hero.pos = { x: target.x, z: target.z };
-    hero.path.shift();
-    if (hero.path.length === 0) hero.moving = false;
-  } else {
-    const step = Math.min(heroSpeed(hero) * dt, dist);
-    const unit = V.normalize(dir);
-    hero.pos = V.add(hero.pos, V.scale(unit, step));
-    hero.targetFacing = V.heading(unit);
-  }
 }
 
 function updateFacing(hero: HeroState, dt: number): void {
