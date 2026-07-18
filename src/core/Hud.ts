@@ -39,6 +39,8 @@ export interface HudContext {
   statusBar: HeroStatusBar;
   camera: IsometricCamera;
   isPlayerNearShop: boolean;
+  /** Game time in seconds (tick / tickRate). */
+  gameTime: number;
 }
 
 /** Update all HUD elements (minimap + bars) from current game state. */
@@ -146,8 +148,8 @@ export function updateHud(ctx: HudContext): void {
     cdProgress[itemId] = remaining <= 0 || !maxCd ? 1 : 1 - remaining / maxCd;
   }
   ctx.itemBar.update(p.inventory, charges, cdProgress, cdRemaining);
-  ctx.kdDisplay.update(p.kills, p.deaths);
   ctx.statusBar.update(p.hp, p.level, p.xp);
+  ctx.kdDisplay.update(p.kills, p.deaths, ctx.gameTime);
 
   // ── Shop ─────────────────────────────────────────────────────────
 
