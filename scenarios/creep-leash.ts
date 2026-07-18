@@ -26,17 +26,16 @@ export function run(h: SimHarness): void {
   expectTrue(ghoul.hp === def.baseHp - 200, `ghoul wounded: ${ghoul.hp}`);
   expectTrue(ghoul.aggroTargetId === 'p1', 'retaliation aggro from out-of-range damage');
 
-  // Run away — the slower ghoul chases until it crosses its leash range,
-  // then gives up.
-  h.issue('p1', { type: 'moveTo', x: -800, z: 420 });
-  h.runUntil(() => ghoul.aggroTargetId === null, h.seconds(10), 'leash breaks aggro');
-  expectTrue(
-    Math.hypot(ghoul.pos.x - ghoul.spawnPos.x, ghoul.pos.z - ghoul.spawnPos.z) >
-      CREEP.leashRange - def.speed / 10,
-    'aggro dropped out at the leash boundary',
-  );
+  // Creeps chase as far as leashRange (1200) — wider than the whole test map —
+  // so rather than kiting it off the edge, drag it past the leash boundary
+  // directly to exercise the give-up-and-go-home path.
+  ghoul.pos = { x: ghoul.spawnPos.x, z: ghoul.spawnPos.z - (CREEP.leashRange + 50) };
+  h.tick();
+  expectTrue(ghoul.aggroTargetId === null, 'aggro dropped past the leash boundary');
+  expectTrue(ghoul.leashing, 'creep committed to returning home');
 
-  // It walks home, snaps to spawn, and heals to full.
+  // Put it back on walkable ground; it paths home, snaps to spawn, heals full.
+  ghoul.pos = h.findWalkableNear(ghoul.spawnPos.x - 250, ghoul.spawnPos.z);
   h.runUntil(
     () =>
       ghoul.pos.x === ghoul.spawnPos.x &&
@@ -46,4 +45,5 @@ export function run(h: SimHarness): void {
     'ghoul home and healed',
   );
   expectTrue(ghoul.aggroTargetId === null, 'still idle after returning');
+  expectTrue(!ghoul.leashing, 'leash lock cleared at home');
 }

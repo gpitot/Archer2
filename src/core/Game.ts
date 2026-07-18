@@ -690,8 +690,10 @@ export class Game {
       respawnTimer: 0,
       aggroTargetId: null,
       attackCooldown: 0,
+      path: [],
       lastActiveTick: 0,
       slowTimer: 0,
+      leashing: false,
     };
   }
 

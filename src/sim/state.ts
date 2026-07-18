@@ -174,10 +174,22 @@ export interface CreepState extends UnitCore {
   respawnTimer: number;
   aggroTargetId: string | null;
   attackCooldown: number;
+  /**
+   * Remaining path waypoints (world-space), first = next target. Creeps path
+   * around cliffs/water with the same A* the heroes use; recomputed as the
+   * chased hero drifts (see `stepCreeps`). Sim-internal — never on the wire.
+   */
+  path: Vec2[];
   /** Last tick this creep moved/fought/changed — drives snapshot idle-omission. */
   lastActiveTick: number;
   /** Slow debuff timer from Ice Bow (seconds remaining; 0 = inactive). */
   slowTimer: number;
+  /**
+   * True while returning home after crossing the leash — suppresses re-aggro so
+   * a creep dragged to its leash edge walks all the way back instead of
+   * oscillating at the boundary. Cleared on arrival home or on being attacked.
+   */
+  leashing: boolean;
 }
 
 /**

@@ -24,7 +24,7 @@ import { ARROW } from './rules';
 import { CampState, CreepState, HeroState, MatchState, ProjectileState, SimEvent } from './state';
 import { addXp, killHero, dealDamageToHero, dealDamageToCreep } from './damage';
 import { spawnProjectile } from './projectiles';
-import { findReachableNear, findWalkableNear, SimWorld, sphereHitsObstacle } from './world';
+import { findReachableNear, findWalkableNear, SimWorld } from './world';
 
 // ── Camp construction ─────────────────────────────────────────────────
 
@@ -49,8 +49,10 @@ export function createCreep(
     respawnTimer: 0,
     aggroTargetId: null,
     attackCooldown: 0,
+    path: [],
     lastActiveTick: 0,
     slowTimer: 0,
+    leashing: false,
   };
 }
 
@@ -141,8 +143,9 @@ export function stepCreeps(
     }
 
     // Acquire aggro. Idle scans are throttled and staggered by creep index so
-    // a full camp never scans on the same tick.
-    if (creep.aggroTargetId === null && state.tick % CREEP.aggroScanEvery === i % CREEP.aggroScanEvery) {
+    // a full camp never scans on the same tick. A leashing creep won't
+    // re-aggro until it's home again (prevents oscillation at the leash edge).
+    if (creep.aggroTargetId === null && !creep.leashing && state.tick % CREEP.aggroScanEvery === i % CREEP.aggroScanEvery) {
       const target = closestHeroInRange(state, creep.pos, def.aggroRange);
       if (target) {
         creep.aggroTargetId = target.id;
@@ -155,14 +158,11 @@ export function stepCreeps(
     let target: HeroState | null = null;
     if (creep.aggroTargetId !== null) {
       target = state.heroes.find((h) => h.id === creep.aggroTargetId) ?? null;
-      if (
-        !target ||
-        !target.alive ||
-        target.invulnerable ||
-        target.invisTimer > 0 ||
-        V.distanceSq(creep.pos, creep.spawnPos) > CREEP.leashRange * CREEP.leashRange
-      ) {
+      const leashed = V.distanceSq(creep.pos, creep.spawnPos) > CREEP.leashRange * CREEP.leashRange;
+      if (!target || !target.alive || target.invulnerable || target.invisTimer > 0 || leashed) {
         creep.aggroTargetId = null;
+        // Dragged past the leash → commit to walking home before re-aggroing.
+        if (leashed) creep.leashing = true;
         target = null;
       }
     }
@@ -170,10 +170,13 @@ export function stepCreeps(
     if (target) {
       const dist = V.distance(creep.pos, target.pos);
       if (dist > def.attackRange) {
-        moveCreep(creep, target.pos, def, dt, world);
+        // Chase with real pathfinding so cliffs/water are routed around, not
+        // walked into. Re-path as the hero drifts (throttled per creep).
+        moveCreepTo(creep, target.pos, def, dt, world, state.tick, i);
         creep.lastActiveTick = state.tick;
       } else {
-        // In range: face the target, swing/shoot when off cooldown.
+        // In range: stop, face the target, swing/shoot when off cooldown.
+        creep.path.length = 0;
         const dir = V.normalize(V.sub(target.pos, creep.pos));
         if (dir.x !== 0 || dir.z !== 0) creep.facing = V.heading(dir);
         if (creep.attackCooldown <= 0) {
@@ -188,17 +191,26 @@ export function stepCreeps(
         creep.lastActiveTick = state.tick;
       }
     } else if (V.distanceSq(creep.pos, creep.spawnPos) > CREEP.arriveEpsilon * CREEP.arriveEpsilon) {
-      moveCreep(creep, creep.spawnPos, def, dt, world);
+      moveCreepTo(creep, creep.spawnPos, def, dt, world, state.tick, i);
       creep.lastActiveTick = state.tick;
-    } else if (creep.pos.x !== creep.spawnPos.x || creep.pos.z !== creep.spawnPos.z) {
-      // Arrived home: snap and heal to full, so an at-rest creep is always
-      // "at spawn, full hp" — the invariant behind snapshot idle-omission.
-      creep.pos = V.clone(creep.spawnPos);
-      creep.hp = creepMaxHp(creep.type, creep.level);
-      creep.lastActiveTick = state.tick;
-    } else if (creep.hp < creepMaxHp(creep.type, creep.level)) {
-      creep.hp = creepMaxHp(creep.type, creep.level);
-      creep.lastActiveTick = state.tick;
+    } else {
+      // At home (within arriveEpsilon): settle in one shot — snap to spawn,
+      // heal to full, drop the leash lock, clear the path. An at-rest creep is
+      // then always "at spawn, full hp" (the invariant behind snapshot
+      // idle-omission); once settled this does nothing, so it stays silent.
+      const settled =
+        creep.pos.x === creep.spawnPos.x &&
+        creep.pos.z === creep.spawnPos.z &&
+        creep.hp === creepMaxHp(creep.type, creep.level) &&
+        !creep.leashing &&
+        creep.path.length === 0;
+      if (!settled) {
+        creep.pos = V.clone(creep.spawnPos);
+        creep.hp = creepMaxHp(creep.type, creep.level);
+        creep.leashing = false;
+        creep.path.length = 0;
+        creep.lastActiveTick = state.tick;
+      }
     }
   }
 
@@ -243,28 +255,54 @@ function closestHeroInRange(state: MatchState, pos: V.Vec2, range: number): Hero
 }
 
 /**
- * Straight-line movement — no pathfinding. Creeps stop at doodads and
- * unwalkable terrain, which keeps them cheap and lets heroes kite them
- * around trees.
+ * Move a creep toward `goal` along an A*-smoothed path — the same pathfinder
+ * heroes use — so it routes around cliffs, water, and doodads instead of
+ * walking into them. The path is recomputed when it's empty, or when the goal
+ * has drifted past `repathThreshold` (throttled to this creep's stagger slot so
+ * a whole camp's re-paths don't land on one tick). `tick`/`index` drive that
+ * stagger. Follows waypoints like `moveAlongPath` does for heroes.
  */
-function moveCreep(
+function moveCreepTo(
   creep: CreepState,
-  targetPos: V.Vec2,
+  goal: V.Vec2,
   def: CreepTypeDef,
   dt: number,
   world: SimWorld,
+  tick: number,
+  index: number,
 ): void {
+  const end = creep.path.length > 0 ? creep.path[creep.path.length - 1] : null;
+  const drifted = !end || V.distanceSq(goal, end) > CREEP.repathThreshold * CREEP.repathThreshold;
+  const mayRepath = tick % CREEP.repathEvery === index % CREEP.repathEvery;
+  if (creep.path.length === 0 || (drifted && mayRepath)) {
+    repathCreep(creep, goal, world);
+  }
+
+  const wp = creep.path[0];
+  if (!wp) return; // unreachable this tick; try again next stagger slot
   const speed = creep.slowTimer > 0 ? def.speed * 0.8 : def.speed;
-  const dir = V.sub(targetPos, creep.pos);
+  const dir = V.sub(wp, creep.pos);
   const dist = V.length(dir);
-  if (dist < 1e-3) return;
+  if (dist < CREEP.arriveEpsilon) {
+    creep.pos = { x: wp.x, z: wp.z };
+    creep.path.shift();
+    return;
+  }
   const unitDir = V.scale(dir, 1 / dist);
-  const next = V.add(creep.pos, V.scale(unitDir, Math.min(speed * dt, dist)));
-  if (sphereHitsObstacle(world, next, def.bodyRadius)) return;
-  const { gx, gz } = world.navGrid.worldToGrid(next.x, next.z);
-  if (!world.navGrid.isWalkable(gx, gz)) return;
-  creep.pos = next;
+  creep.pos = V.add(creep.pos, V.scale(unitDir, Math.min(speed * dt, dist)));
   creep.facing = V.heading(unitDir);
+}
+
+/** (Re)compute a creep's path to `goal`, snapping to reachable ground if the
+ *  exact goal is unwalkable — mirrors the hero `setDestination` fallback. */
+function repathCreep(creep: CreepState, goal: V.Vec2, world: SimWorld): void {
+  let path = world.pathfinder.findSmoothedPath(creep.pos.x, creep.pos.z, goal.x, goal.z);
+  if (!path || path.length <= 1) {
+    const snapped = findReachableNear(world, goal.x, goal.z, creep.pos.x, creep.pos.z);
+    if (snapped) path = world.pathfinder.findSmoothedPath(creep.pos.x, creep.pos.z, snapped.x, snapped.z);
+  }
+  // path[0] is the creep's current position — keep the rest as waypoints.
+  creep.path = path && path.length > 1 ? path.slice(1).map((p) => ({ x: p.wx, z: p.wz })) : [];
 }
 
 function fireCreepProjectile(
@@ -319,6 +357,8 @@ function respawnCamp(state: MatchState, camp: CampState, events: SimEvent[]): vo
     creep.aggroTargetId = null;
     creep.attackCooldown = 0;
     creep.slowTimer = 0;
+    creep.leashing = false;
+    creep.path = [];
     creep.lastActiveTick = state.tick;
     events.push({ type: 'creepRespawn', creepId: creep.id, creepType: creep.type, level });
   }

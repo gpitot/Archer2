@@ -182,9 +182,9 @@ export const CREEP_TYPES: Record<CreepTypeId, CreepTypeDef> = {
 
 export const CREEP = {
   /** Seconds from a camp being fully cleared to it respawning (one tier up). */
-  respawnInterval: 60,
+  respawnInterval: 15,
   /** Distance from spawnPos beyond which aggro drops and the creep leashes. */
-  leashRange: 600,
+  leashRange: 1200,
   /** Cap on the per-unit level a camp tier reaches (rewards/stats plateau). */
   maxLevel: 10,
   /** Idle creeps scan for aggro every Nth tick, staggered by creep index. */
@@ -195,6 +195,11 @@ export const CREEP = {
   activeLingerTicks: 30,
   /** Per-unit spawn offset inside a camp. */
   spawnSpread: 50,
+  /** An aggroed creep recomputes its path at most every Nth tick (staggered
+   *  by creep index) as the target drifts — bounds A* cost across the camp. */
+  repathEvery: 8,
+  /** Re-path once the goal has drifted this many world units from the path end. */
+  repathThreshold: 60,
   /** Extra unit slots a camp can grow by across its tier ladder (see
    *  `campComposition`). Bounds the pre-allocated creep pool per camp. */
   maxExtraUnits: 3,

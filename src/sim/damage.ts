@@ -125,10 +125,16 @@ export function dealDamageToCreep(
 
   creep.hp = Math.max(0, creep.hp - damage);
   creep.lastActiveTick = state.tick;
-  // Retaliate: being shot from outside aggro range still pulls the creep
-  // (leash still bounds the chase), so camps can't be sniped risk-free.
-  if (creep.aggroTargetId === null && creep.hp > 0) {
-    creep.aggroTargetId = source.hero.id;
+  // Retaliate camp-wide: attacking any creep pulls every idle campmate onto
+  // the attacker (leash still bounds the chase), so you can't peel a camp one
+  // creep at a time or snipe it risk-free. A leashing creep re-engages too.
+  for (const c of state.creeps) {
+    if (c.campId !== creep.campId || !c.alive) continue;
+    if (c.aggroTargetId === null) {
+      c.aggroTargetId = source.hero.id;
+      c.leashing = false;
+      c.lastActiveTick = state.tick;
+    }
   }
   const hitEvent: SimEvent = {
     type: 'creepHit',
