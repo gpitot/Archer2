@@ -521,8 +521,10 @@ export class Game {
     // ── UI ──
     this._spellBar = new SpellBar(ABILITY_ORDER.map((id) => ({
       key: ABILITIES[id].slot,
+      abilityId: id,
       maxLevel: ABILITIES[id].maxLevel,
       tooltip: (level: number) => abilityTooltip(ABILITIES[id], level),
+      onLevel: (abilityId: string) => this._enqueueCommand({ type: 'levelAbility', ability: abilityId as 'arrow' | 'dodge' | 'reveal' | 'blast' }),
     })));
     this._statusBar = new HeroStatusBar();
     this._goldDisplay = new GoldDisplay();
