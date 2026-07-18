@@ -54,6 +54,10 @@ export interface ShopItemDef {
   id: string;
   name: string;
   cost: number;
+  /** Emoji icon shown in the inventory bar and shop. */
+  icon: string;
+  /** Hex colour (e.g. '#8B6914') used for item swatches (scoreboard, shop). */
+  color: string;
   /** One-sentence summary of what the item does. */
   description: string;
   /** Stat rows (bonuses, cooldowns, …) shown in the tooltip and shop cards. */
@@ -104,6 +108,8 @@ export const SHOP_ITEMS: ShopItemDef[] = [
   {
     id: 'boots',
     name: 'Boots of Speed',
+    icon: '🥾',
+    color: '#8B6914',
     cost: 5,
     description: 'Sturdy boots that quicken your stride across the battlefield.',
     stats: [{ label: 'Movement Speed', values: ['+60'] }],
@@ -114,6 +120,8 @@ export const SHOP_ITEMS: ShopItemDef[] = [
   {
     id: 'sentry_wards',
     name: 'Sentry Wards',
+    icon: '👁️',
+    color: '#C8A050',
     cost: 10,
     description: 'Deployable wards that grant vision of an area. Press W to place one.',
     stats: [
@@ -164,6 +172,8 @@ export const SHOP_ITEMS: ShopItemDef[] = [
   {
     id: 'blink_dagger',
     name: 'Blink Dagger',
+    icon: '🗡️',
+    color: '#9370DB',
     cost: 15,
     description: 'Instantly teleport a short distance to a targeted location.',
     stats: [
@@ -195,6 +205,8 @@ export const SHOP_ITEMS: ShopItemDef[] = [
   {
     id: 'crit_gem',
     name: 'Gem of Critical Strike',
+    icon: '💎',
+    color: '#FF4444',
     cost: 20,
     description: 'A gleaming gem that empowers your abilities to occasionally strike for double damage.',
     stats: [
@@ -208,6 +220,8 @@ export const SHOP_ITEMS: ShopItemDef[] = [
   {
     id: 'ice_bow',
     name: 'Ice Bow',
+    icon: '❄️',
+    color: '#66CCFF',
     cost: 12,
     description: 'Frost-enchanted arrows that chill enemies on hit, slowing their movement.',
     stats: [

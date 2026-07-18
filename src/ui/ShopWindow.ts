@@ -1,5 +1,6 @@
 import { ShopItem } from '../world/Shop';
 import { renderStatRows } from './Tooltip';
+import { SHOP_ITEMS_BY_ID } from '../sim/shopItems';
 
 interface ShopCallback {
   onBuy: (index: number) => void;
@@ -95,6 +96,22 @@ export class ShopWindow {
         row.addEventListener('mouseleave', () => { row.style.background = 'rgba(40,30,10,0.6)'; });
         row.addEventListener('click', (e) => { e.stopPropagation(); this._cb.onBuy(i); this.close(); });
       }
+
+      // Item icon (from source-of-truth item def or ShopItem fields)
+      const def = SHOP_ITEMS_BY_ID[item.id];
+      const itemIcon = def?.icon ?? item.icon;
+      const itemColor = def?.color ?? item.color;
+      const icon = document.createElement('span');
+      icon.textContent = itemIcon ?? '●';
+      icon.style.cssText = `
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 24px; height: 24px;
+        border-radius: 3px;
+        background: ${itemColor ?? '#444'};
+        color: #fff; font-size: 13px;
+        flex-shrink: 0;
+      `;
+      row.appendChild(icon);
 
       // Hotkey number
       const key = document.createElement('span');

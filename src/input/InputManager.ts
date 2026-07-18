@@ -198,6 +198,8 @@ export class InputManager {
   }
 
   private _onKeyDown(event: KeyboardEvent): void {
+    // Prevent Tab from moving focus away from the game canvas.
+    if (event.code === 'Tab') event.preventDefault();
     if (this._keysDown.has(event.code)) return;
     this._keysDown.add(event.code);
 

@@ -18,6 +18,7 @@ import type { ItemBar } from '../ui/ItemBar';
 import type { KDDisplay } from '../ui/KDDisplay';
 import type { ShopWindow } from '../ui/ShopWindow';
 import type { ShopOverlay } from '../ui/ShopOverlay';
+import type { ScoreWindow } from '../ui/ScoreWindow';
 import type { HeroStatusBar } from '../ui/HeroStatusBar';
 import type { ShopItem } from '../world/Shop';
 import type { FogOfWar } from '../vision/FogOfWar';
@@ -36,6 +37,7 @@ export interface HudContext {
   kdDisplay: KDDisplay;
   shopWindow: ShopWindow;
   shopOverlay: ShopOverlay;
+  scoreWindow: ScoreWindow;
   statusBar: HeroStatusBar;
   camera: IsometricCamera;
   isPlayerNearShop: boolean;
@@ -161,5 +163,10 @@ export function updateHud(ctx: HudContext): void {
   }
   if (ctx.shopWindow.visible) {
     ctx.shopWindow.refresh(p.gold, p.inventory);
+  }
+
+  // ── Scoreboard ───────────────────────────────────────────────────
+  if (ctx.scoreWindow.visible) {
+    ctx.scoreWindow.refresh(state.heroes);
   }
 }

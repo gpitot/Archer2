@@ -5,6 +5,8 @@ import type { StatLine } from '../ui/Tooltip';
 export interface ShopItem {
   id: string;
   name: string;
+  icon?: string;
+  color?: string;
   cost: number;
   description: string;
   /** Stat rows (bonuses, cooldowns, …) shown on the shop card. */

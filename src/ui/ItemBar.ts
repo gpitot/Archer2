@@ -18,14 +18,6 @@ export class ItemBar {
   private _wasOnCd: boolean[] = [];
   private _hotkeys: HTMLSpanElement[] = [];
 
-  // Simple icons for known item IDs
-  private static readonly _icons: Record<string, string> = {
-    boots: '🥾',
-    sentry_wards: '👁️',
-    blink_dagger: '🗡️',
-    crit_gem: '💎',
-  };
-
   constructor() {
     this.container = document.createElement('div');
     this.container.style.cssText = `
@@ -167,7 +159,7 @@ export class ItemBar {
       const cdText = this._cdTexts[i];
       this._itemIds[i] = itemId ?? null;
       if (itemId) {
-        this._icons[i].textContent = ItemBar._icons[itemId] ?? '●';
+        this._icons[i].textContent = SHOP_ITEMS_BY_ID[itemId]?.icon ?? '●';
         const progress = cooldowns[itemId] ?? 1;
         const onCd = progress < 1;
         if (onCd) {
