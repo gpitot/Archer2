@@ -26,7 +26,7 @@ import { ShopOverlay } from '../ui/ShopOverlay';
 import { GoldDisplay } from '../ui/GoldDisplay';
 import { MoveIndicatorManager } from '../ui/MoveIndicator';
 import { DebugPanel } from '../ui/DebugPanel';
-import { HeroPortrait } from '../ui/HeroPortrait';
+import { HeroStatusBar } from '../ui/HeroStatusBar';
 import { SpellBar } from '../ui/SpellBar';
 
 // ── Audio ──
@@ -43,7 +43,7 @@ import { SimWorld, sphereHitsObstacle, FountainDef, findWalkableNearOnGrid, find
 import { advanceProjectile } from '../sim/projectiles';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
 import { AiController } from '../sim/ai/AiController';
-import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN } from '../sim/rules';
+import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN, maxHpForLevel } from '../sim/rules';
 import { ABILITIES, ABILITY_ORDER, AbilityDef, abilityTooltip, canCast } from '../sim/abilities';
 import { SHOP_ITEMS } from '../sim/shopItems';
 import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta, CreepMeta, RuneMeta } from '../sim/protocol';
@@ -237,7 +237,7 @@ export class Game {
   private _cameraLocked = true;
   private _minimap!: Minimap;
   private _spellBar!: SpellBar;
-  private _portrait!: HeroPortrait;
+  private _statusBar!: HeroStatusBar;
   private _goldDisplay!: GoldDisplay;
   private _itemBar!: ItemBar;
   private _kdDisplay!: KDDisplay;
@@ -417,8 +417,6 @@ export class Game {
       const dummyState = createHeroState('dummy', 1, { x: dummySpawn.x, z: dummySpawn.z });
       this._state.heroes.push(dummyState);
 
-      // Offline: the enemy hero is played by the perfect-information AI.
-      this._ai = new AiController('dummy');
 
       // Create hero views
       for (const hs of this._state.heroes) {
@@ -514,7 +512,7 @@ export class Game {
       maxLevel: ABILITIES[id].maxLevel,
       tooltip: (level: number) => abilityTooltip(ABILITIES[id], level),
     })));
-    this._portrait = new HeroPortrait();
+    this._statusBar = new HeroStatusBar();
     this._goldDisplay = new GoldDisplay();
     this._itemBar = new ItemBar();
     this._kdDisplay = new KDDisplay();
@@ -529,6 +527,7 @@ export class Game {
         () => this._debugAddGold(),
         this._mapName === 'test' ? 'arena' : 'test',
         () => this._swapMap(),
+        () => this._toggleAI(),
       );
     }
 
@@ -1359,7 +1358,7 @@ export class Game {
   /** If the local hero is within a fountain's heal radius, trigger a sparkle effect. */
   private _updateHealSparkle(_dt: number): void {
     const hero = this._playerState;
-    if (!hero || !hero.alive || hero.hp >= HERO.maxHp) return;
+    if (!hero || !hero.alive || hero.hp >= maxHpForLevel(hero.level)) return;
     const view = this._playerView;
     if (!view) return;
     for (const fountain of this._world.fountains) {
@@ -1834,7 +1833,7 @@ export class Game {
       fog: this._fog,
       minimap: this._minimap,
       spellBar: this._spellBar,
-      portrait: this._portrait,
+      statusBar: this._statusBar,
       goldDisplay: this._goldDisplay,
       itemBar: this._itemBar,
       kdDisplay: this._kdDisplay,
@@ -1959,6 +1958,17 @@ export class Game {
     const url = new URL(window.location.href);
     url.searchParams.set('map', this._mapName === 'test' ? 'arena' : 'test');
     window.location.href = url.toString();
+  }
+
+  private _toggleAI(): void {
+    if (this._networkMode) return;
+    if (this._ai) {
+      this._ai = null;
+      this._debugPanel?.setAILabel(false);
+    } else {
+      this._ai = new AiController('dummy');
+      this._debugPanel?.setAILabel(true);
+    }
   }
 }
 

@@ -25,6 +25,7 @@ import {
   basicRankCap,
   BLAST,
   HERO,
+  maxHpForLevel,
   PASSIVE_INCOME,
   ultimateRankCap,
   XP_TABLE,
@@ -276,7 +277,7 @@ function updateFacing(hero: HeroState, dt: number): void {
 
 function respawn(hero: HeroState, pos: V.Vec2): void {
   hero.pos = { x: pos.x, z: pos.z };
-  hero.hp = HERO.maxHp;
+  hero.hp = maxHpForLevel(hero.level);
   hero.alive = true;
   hero.invulnerable = true;
   hero.invulnerableTimer = HERO.respawnInvuln;
@@ -426,10 +427,11 @@ function stepBlasts(state: MatchState, dt: number, events: SimEvent[], rng: () =
 function stepFountains(state: MatchState, dt: number, world: SimWorld): void {
   if (world.fountains.length === 0) return;
   for (const hero of state.heroes) {
-    if (!hero.alive || hero.hp >= HERO.maxHp) continue;
+    const maxHp = maxHpForLevel(hero.level);
+    if (!hero.alive || hero.hp >= maxHp) continue;
     for (const fountain of world.fountains) {
       if (V.distanceSq(hero.pos, fountain.pos) <= fountain.healRadius * fountain.healRadius) {
-        hero.hp = Math.min(HERO.maxHp, hero.hp + fountain.healPerSecond * dt);
+        hero.hp = Math.min(maxHp, hero.hp + fountain.healPerSecond * dt);
         break; // one fountain at a time is sufficient
       }
     }

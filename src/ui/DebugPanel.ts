@@ -9,6 +9,7 @@ export class DebugPanel {
   private _btnLevel: HTMLButtonElement;
   private _btnGold: HTMLButtonElement;
   private _btnMap: HTMLButtonElement;
+  private _btnAI: HTMLButtonElement;
 
   constructor(
     private _onFogToggle: () => void,
@@ -16,6 +17,7 @@ export class DebugPanel {
     private _onAddGold: () => void,
     otherMapName: string,
     private _onSwapMap: () => void,
+    private _onToggleAI: () => void,
   ) {
     this.el = document.createElement('div');
     this.el.style.cssText = `
@@ -34,11 +36,13 @@ export class DebugPanel {
     this._btnLevel = this._makeButton('Level Up', () => this._onLevelUp());
     this._btnGold = this._makeButton('+10 Gold', () => this._onAddGold());
     this._btnMap = this._makeButton(`Map: ${otherMapName}`, () => this._onSwapMap());
+    this._btnAI = this._makeButton('AI: OFF', () => this._onToggleAI());
 
     this.el.appendChild(this._btnFog);
     this.el.appendChild(this._btnLevel);
     this.el.appendChild(this._btnGold);
     this.el.appendChild(this._btnMap);
+    this.el.appendChild(this._btnAI);
 
     document.body.appendChild(this.el);
   }
@@ -49,6 +53,14 @@ export class DebugPanel {
     this._btnFog.style.background = enabled
       ? 'rgba(30,30,30,0.85)'
       : 'rgba(20,50,20,0.85)';
+  }
+
+  /** Update the AI button label to reflect current state. */
+  setAILabel(enabled: boolean): void {
+    this._btnAI.textContent = enabled ? 'AI: ON' : 'AI: OFF';
+    this._btnAI.style.background = enabled
+      ? 'rgba(30,30,30,0.85)'
+      : 'rgba(50,20,20,0.85)';
   }
 
   destroy(): void {

@@ -8,6 +8,8 @@
 // ── Hero ──────────────────────────────────────────────────────────────
 export const HERO = {
   maxHp: 625,
+  /** Max HP gained per hero level (after level 1). */
+  hpPerLevel: 30,
   baseSpeed: 350,
   /** Fog-of-war sight radius (world units) — WC3 hero daytime sight. */
   sightRadius: 900,
@@ -24,6 +26,11 @@ export const HERO = {
   /** Height offset the render layer lifts the hero above the terrain. */
   groundOffset: 0.5,
 } as const;
+
+/** Max HP for a hero at a given level (1..maxLevel). */
+export function maxHpForLevel(level: number): number {
+  return HERO.maxHp + HERO.hpPerLevel * (level - 1);
+}
 
 /** Total XP required to have reached each level (index = level, 1-based). */
 export const XP_TABLE = [

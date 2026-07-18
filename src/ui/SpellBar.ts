@@ -41,7 +41,7 @@ export class SpellBar {
     this.container = document.createElement('div');
     this.container.style.cssText = `
       position: fixed;
-      bottom: 24px;
+      bottom: 36px;
       left: 50%;
       transform: translateX(-50%);
       display: flex;
