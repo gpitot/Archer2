@@ -480,14 +480,8 @@ export class Game {
       const shopWPt = this._world.shop.pos;
       const heroDist = Math.hypot(this._playerState.pos.x - shopWPt.x, this._playerState.pos.z - shopWPt.z);
       const clickDist = Math.hypot(pos.x - shopWPt.x, pos.z - shopWPt.z);
-      if (clickDist < this._world.shop.interactRadius) {
-        if (heroDist <= this._world.shop.interactRadius) {
-          this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory);
-          return;
-        }
-        const nearShop = this._findWalkableNear(shopWPt.x, shopWPt.z);
-        this._enqueueCommand({ type: 'moveTo', x: nearShop.x, z: nearShop.z });
-        this._moveIndicators.spawn(new THREE.Vector3(nearShop.x, this._heightAt(nearShop.x, nearShop.z), nearShop.z));
+      if (clickDist < this._world.shop.interactRadius && heroDist <= this._world.shop.interactRadius) {
+        this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory);
         return;
       }
       this._enqueueCommand({ type: 'moveTo', x: pos.x, z: pos.z });
