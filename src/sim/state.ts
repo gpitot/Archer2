@@ -116,6 +116,8 @@ export interface ProjectileState {
    * itself to the owner's team, and is always visible to enemies.
    */
   kind?: 'scout';
+  /** Scout only: fog reveal radius around the projectile (per caster's E rank). */
+  sightRadius?: number;
   team: number;
   pos: Vec2;
   dir: Vec2;
