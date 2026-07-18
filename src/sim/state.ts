@@ -6,7 +6,7 @@
 import { CreepTypeId } from './creepRules';
 import { RuneTypeId } from './runeRules';
 import { Vec2 } from './math';
-import { HERO } from './rules';
+import { HERO, maxHpForLevel } from './rules';
 import { createAbilityRuntimes, type AbilityId } from './abilities';
 
 /** Six inventory slots holding item ids (null = empty). */
@@ -259,7 +259,7 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     targetFacing: 0,
     path: [],
     moving: false,
-    hp: HERO.maxHp,
+    hp: maxHpForLevel(1),
     alive: true,
     invulnerable: false,
     invulnerableTimer: 0,

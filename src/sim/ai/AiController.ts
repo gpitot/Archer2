@@ -18,7 +18,7 @@
  * harness runs are reproducible.
  */
 import * as V from '../math';
-import { ARROW, BLAST, HERO } from '../rules';
+import { ARROW, BLAST, HERO, maxHpForLevel } from '../rules';
 import type { Command, CreepState, HeroInput, HeroState, MatchState, RuneState } from '../state';
 import { type SimWorld, findWalkableNear } from '../world';
 import { ABILITIES, canCast } from '../abilities';
@@ -205,7 +205,7 @@ export class AiController {
     enemy: HeroState | null,
   ): Mode {
     const arrowRange = this._arrowRange(hero);
-    const hpFrac = hero.hp / HERO.maxHp;
+    const hpFrac = hero.hp / maxHpForLevel(hero.level);
     const enemyDist = enemy ? V.distance(hero.pos, enemy.pos) : Infinity;
     const enemyEngageable = !!enemy && !enemy.invulnerable;
     const margin = enemy ? fightWinMargin(hero, enemy) : 0;

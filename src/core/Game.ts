@@ -43,7 +43,7 @@ import { SimWorld, sphereHitsObstacle, FountainDef, findWalkableNearOnGrid, find
 import { advanceProjectile } from '../sim/projectiles';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
 import { AiController } from '../sim/ai/AiController';
-import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN } from '../sim/rules';
+import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN, maxHpForLevel } from '../sim/rules';
 import { ABILITIES, ABILITY_ORDER, AbilityDef, abilityTooltip, canCast } from '../sim/abilities';
 import { SHOP_ITEMS } from '../sim/shopItems';
 import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta, CreepMeta, RuneMeta } from '../sim/protocol';
@@ -1359,7 +1359,7 @@ export class Game {
   /** If the local hero is within a fountain's heal radius, trigger a sparkle effect. */
   private _updateHealSparkle(_dt: number): void {
     const hero = this._playerState;
-    if (!hero || !hero.alive || hero.hp >= HERO.maxHp) return;
+    if (!hero || !hero.alive || hero.hp >= maxHpForLevel(hero.level)) return;
     const view = this._playerView;
     if (!view) return;
     for (const fountain of this._world.fountains) {
