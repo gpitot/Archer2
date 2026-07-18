@@ -549,6 +549,10 @@ export class Game {
       this._cameraLocked = false;
       this._camera.setTarget(new THREE.Vector3(wx, this._smoothHeightAt(wx, wz), wz));
     };
+    this._minimap.onDrag = (wx, wz) => {
+      this._cameraLocked = false;
+      this._camera.setTarget(new THREE.Vector3(wx, this._smoothHeightAt(wx, wz), wz));
+    };
 
     window.addEventListener('resize', this._onResize.bind(this));
 

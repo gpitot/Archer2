@@ -36,8 +36,16 @@ export class Minimap {
   private _fogImage: ImageData | null = null;
   private _fogVersion = -1;
 
-  /** Called with world (x, z) when minimap is clicked. */
+  // Drag state
+  private _dragging = false;
+  private _dragStartPx = 0;
+  private _dragStartPy = 0;
+  private static readonly _DRAG_THRESHOLD = 3; // px — below this it's a click
+
+  /** Called with world (x, z) when minimap is clicked (no drag). */
   onClick: ((wx: number, wz: number) => void) | null = null;
+  /** Called with world (x, z) continuously while the minimap is being dragged. */
+  onDrag: ((wx: number, wz: number) => void) | null = null;
 
   constructor(map: MapData, view: ArenaRect, size = 200, padding = 8) {
     this._view = view;
@@ -65,16 +73,55 @@ export class Minimap {
     document.body.appendChild(this.canvas);
     this._ctx = this.canvas.getContext('2d')!;
 
-    this.canvas.addEventListener('click', (e) => {
+    this.canvas.addEventListener('pointerdown', (e) => {
       const rect = this.canvas.getBoundingClientRect();
       const px = e.clientX - rect.left - padding;
       const py = e.clientY - rect.top - padding;
       if (px < 0 || px > this._pxW || py < 0 || py > this._pxH) return;
-      // Canvas top = north = min Z
+      this._dragging = true;
+      this._dragStartPx = px;
+      this._dragStartPy = py;
+      this.canvas.setPointerCapture(e.pointerId);
+      // Immediately jump to the pointer position.
       const wx = this._view.minX + (px / this._pxW) * this._view.width;
       const wz = this._view.minZ + (py / this._pxH) * this._view.height;
-      this.onClick?.(wx, wz);
+      this.onDrag?.(wx, wz);
+      e.preventDefault();
     });
+
+    this.canvas.addEventListener('pointermove', (e) => {
+      if (!this._dragging) return;
+      const rect = this.canvas.getBoundingClientRect();
+      let px = e.clientX - rect.left - padding;
+      let py = e.clientY - rect.top - padding;
+      // Clamp so the camera doesn't fly outside the view rect bounds.
+      px = Math.max(0, Math.min(px, this._pxW));
+      py = Math.max(0, Math.min(py, this._pxH));
+      const wx = this._view.minX + (px / this._pxW) * this._view.width;
+      const wz = this._view.minZ + (py / this._pxH) * this._view.height;
+      this.onDrag?.(wx, wz);
+    });
+
+    const endDrag = (e: PointerEvent) => {
+      if (!this._dragging) return;
+      this._dragging = false;
+      this.canvas.releasePointerCapture(e.pointerId);
+      // If the pointer barely moved, treat it as a click.
+      const rect = this.canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left - padding;
+      const py = e.clientY - rect.top - padding;
+      const dx = px - this._dragStartPx;
+      const dy = py - this._dragStartPy;
+      if (Math.sqrt(dx * dx + dy * dy) < Minimap._DRAG_THRESHOLD
+          && px >= 0 && px <= this._pxW && py >= 0 && py <= this._pxH) {
+        const wx = this._view.minX + (px / this._pxW) * this._view.width;
+        const wz = this._view.minZ + (py / this._pxH) * this._view.height;
+        this.onClick?.(wx, wz);
+      }
+    };
+
+    this.canvas.addEventListener('pointerup', endDrag);
+    this.canvas.addEventListener('pointerleave', endDrag);
 
     this._baked = this._bakeTerrain(map);
   }
