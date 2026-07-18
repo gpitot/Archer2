@@ -23,7 +23,6 @@ import { KDDisplay } from '../ui/KDDisplay';
 import { ShopWindow } from '../ui/ShopWindow';
 import { FloatingTextManager } from '../ui/FloatingText';
 import { ShopOverlay } from '../ui/ShopOverlay';
-import { GoldDisplay } from '../ui/GoldDisplay';
 import { MoveIndicatorManager } from '../ui/MoveIndicator';
 import { DebugPanel } from '../ui/DebugPanel';
 import { HeroStatusBar } from '../ui/HeroStatusBar';
@@ -239,7 +238,6 @@ export class Game {
   private _minimap!: Minimap;
   private _spellBar!: SpellBar;
   private _statusBar!: HeroStatusBar;
-  private _goldDisplay!: GoldDisplay;
   private _itemBar!: ItemBar;
   private _kdDisplay!: KDDisplay;
   private _shop!: Shop;
@@ -521,11 +519,12 @@ export class Game {
     // ── UI ──
     this._spellBar = new SpellBar(ABILITY_ORDER.map((id) => ({
       key: ABILITIES[id].slot,
+      abilityId: id,
       maxLevel: ABILITIES[id].maxLevel,
       tooltip: (level: number) => abilityTooltip(ABILITIES[id], level),
+      onLevel: (abilityId: string) => this._enqueueCommand({ type: 'levelAbility', ability: abilityId as 'arrow' | 'dodge' | 'reveal' | 'blast' }),
     })));
     this._statusBar = new HeroStatusBar();
-    this._goldDisplay = new GoldDisplay();
     this._itemBar = new ItemBar();
     this._kdDisplay = new KDDisplay();
     this._moveIndicators = new MoveIndicatorManager(this._scene);
@@ -1852,7 +1851,6 @@ export class Game {
       minimap: this._minimap,
       spellBar: this._spellBar,
       statusBar: this._statusBar,
-      goldDisplay: this._goldDisplay,
       itemBar: this._itemBar,
       kdDisplay: this._kdDisplay,
       shopWindow: this._shopWindow,

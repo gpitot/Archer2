@@ -22,11 +22,11 @@ export class ItemBar {
     this.container = document.createElement('div');
     this.container.style.cssText = `
       position: fixed;
-      bottom: 15px;
+      bottom: 2px;
       left: 16px;
       display: grid;
-      grid-template-columns: repeat(3, 36px);
-      grid-template-rows: repeat(2, 36px);
+      grid-template-columns: repeat(3, 42px);
+      grid-template-rows: repeat(2, 42px);
       gap: 4px;
       z-index: 200;
       pointer-events: none;
@@ -35,7 +35,7 @@ export class ItemBar {
     for (let i = 0; i < 6; i++) {
       const slot = document.createElement('div');
       slot.style.cssText = `
-        width: 36px; height: 36px;
+        width: 42px; height: 42px;
         background: rgba(0, 0, 0, 0.65);
         border: 2px solid rgba(180, 160, 100, 0.5);
         border-radius: 3px;

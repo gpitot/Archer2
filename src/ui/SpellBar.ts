@@ -26,10 +26,14 @@ export interface SpellSlotInfo {
 export interface SpellSlotDef {
   /** Hotkey label (Q/W/E/R). */
   key: string;
+  /** Ability id passed to the level-up callback. */
+  abilityId: string;
   /** Rank-dot count (5 for basics, 3 for the ultimate). */
   maxLevel: number;
   /** Hover-tooltip content for the given current rank. */
   tooltip: (level: number) => TooltipContent;
+  /** Called when the player left-clicks the slot while it can be leveled. */
+  onLevel?: (abilityId: string) => void;
 }
 
 export class SpellBar {
@@ -51,8 +55,8 @@ export class SpellBar {
       pointer-events: none;
     `;
 
-    for (const { key, maxLevel, tooltip } of defs) {
-      const slot = new SpellSlot(key, maxLevel, tooltip);
+    for (const { key, abilityId, maxLevel, tooltip, onLevel } of defs) {
+      const slot = new SpellSlot(key, abilityId, maxLevel, tooltip, onLevel);
       this._slots.push(slot);
       this.container.appendChild(slot.el);
     }
@@ -101,10 +105,14 @@ class SpellSlot {
   private _onCd = false;
   private _canLevel = false;
   private _level = 0;
+  private _onLevel?: (abilityId: string) => void;
+  private _abilityId: string;
 
-  constructor(key: string, maxLevel: number, tooltip: (level: number) => TooltipContent) {
+  constructor(key: string, abilityId: string, maxLevel: number, tooltip: (level: number) => TooltipContent, onLevel?: (abilityId: string) => void) {
     const size = 56;
     this._maxLevel = maxLevel;
+    this._onLevel = onLevel;
+    this._abilityId = abilityId;
 
     this.el = document.createElement('div');
     this.el.style.cssText = `
@@ -248,6 +256,14 @@ class SpellSlot {
 
     // Hover tooltip (LoL/Dota-style), reflecting the current rank.
     Tooltip.shared().attach(this.el, () => tooltip(this._level));
+
+    // Left-click to level up when a skill point is available.
+    this.el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this._canLevel && this._onLevel) {
+        this._onLevel(this._abilityId);
+      }
+    });
   }
 
   /** Dim the slot when the ability is unlearned (rank 0). */
@@ -331,6 +347,18 @@ class SpellSlot {
   setCanLevel(can: boolean): void {
     this._canLevel = can;
     this._refreshBorder();
+    this._refreshPointer();
+  }
+
+  /** Enable pointer events and cursor only when the slot is clickable. */
+  private _refreshPointer(): void {
+    if (this._canLevel && this._onLevel) {
+      this.el.style.pointerEvents = 'auto';
+      this.el.style.cursor = 'pointer';
+    } else {
+      this.el.style.pointerEvents = 'none';
+      this.el.style.cursor = '';
+    }
   }
 
   /** Border/glow priority: can-level glow > locked > on-cooldown > ready. */
