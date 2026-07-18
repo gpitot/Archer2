@@ -13,12 +13,12 @@ import type { HeroState, MatchState, WardState, CreepState, RuneState } from '..
 import type { SimWorld } from '../sim/world';
 import type { Minimap } from '../rendering/Minimap';
 import type { SpellBar, SpellSlotInfo } from '../ui/SpellBar';
-import type { HeroPortrait } from '../ui/HeroPortrait';
 import type { GoldDisplay } from '../ui/GoldDisplay';
 import type { ItemBar } from '../ui/ItemBar';
 import type { KDDisplay } from '../ui/KDDisplay';
 import type { ShopWindow } from '../ui/ShopWindow';
 import type { ShopOverlay } from '../ui/ShopOverlay';
+import type { HeroStatusBar } from '../ui/HeroStatusBar';
 import type { ShopItem } from '../world/Shop';
 import type { FogOfWar } from '../vision/FogOfWar';
 import type { IsometricCamera } from '../rendering/Camera';
@@ -31,12 +31,12 @@ export interface HudContext {
   fog: FogOfWar;
   minimap: Minimap;
   spellBar: SpellBar;
-  portrait: HeroPortrait;
   goldDisplay: GoldDisplay;
   itemBar: ItemBar;
   kdDisplay: KDDisplay;
   shopWindow: ShopWindow;
   shopOverlay: ShopOverlay;
+  statusBar: HeroStatusBar;
   camera: IsometricCamera;
   isPlayerNearShop: boolean;
 }
@@ -132,9 +132,6 @@ export function updateHud(ctx: HudContext): void {
     return info;
   }));
 
-  // ── Portrait, gold, items, KD ────────────────────────────────────
-
-  ctx.portrait.update(p.xp, xpForLevel(p.level + 1), xpForLevel(p.level), p.level, '#4488cc');
   ctx.goldDisplay.update(p.gold);
 
   const charges: Record<string, number> = {};
@@ -150,6 +147,7 @@ export function updateHud(ctx: HudContext): void {
   }
   ctx.itemBar.update(p.inventory, charges, cdProgress, cdRemaining);
   ctx.kdDisplay.update(p.kills, p.deaths);
+  ctx.statusBar.update(p.hp, p.level, p.xp);
 
   // ── Shop ─────────────────────────────────────────────────────────
 

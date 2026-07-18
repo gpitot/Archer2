@@ -209,6 +209,7 @@ export function addXp(hero: HeroState, amount: number, events: SimEvent[]): void
   hero.xp += amount;
   while (hero.level < HERO.maxLevel && hero.xp >= XP_TABLE[hero.level + 1]) {
     hero.level++;
+    hero.hp += HERO.hpPerLevel;
     hero.skillPoints++;
     events.push({ type: 'levelUp', heroId: hero.id, level: hero.level });
   }

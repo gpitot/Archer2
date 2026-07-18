@@ -26,7 +26,7 @@ import { ShopOverlay } from '../ui/ShopOverlay';
 import { GoldDisplay } from '../ui/GoldDisplay';
 import { MoveIndicatorManager } from '../ui/MoveIndicator';
 import { DebugPanel } from '../ui/DebugPanel';
-import { HeroPortrait } from '../ui/HeroPortrait';
+import { HeroStatusBar } from '../ui/HeroStatusBar';
 import { SpellBar } from '../ui/SpellBar';
 
 // ── Audio ──
@@ -237,7 +237,7 @@ export class Game {
   private _cameraLocked = true;
   private _minimap!: Minimap;
   private _spellBar!: SpellBar;
-  private _portrait!: HeroPortrait;
+  private _statusBar!: HeroStatusBar;
   private _goldDisplay!: GoldDisplay;
   private _itemBar!: ItemBar;
   private _kdDisplay!: KDDisplay;
@@ -417,8 +417,6 @@ export class Game {
       const dummyState = createHeroState('dummy', 1, { x: dummySpawn.x, z: dummySpawn.z });
       this._state.heroes.push(dummyState);
 
-      // Offline: the enemy hero is played by the perfect-information AI.
-      this._ai = new AiController('dummy');
 
       // Create hero views
       for (const hs of this._state.heroes) {
@@ -514,7 +512,7 @@ export class Game {
       maxLevel: ABILITIES[id].maxLevel,
       tooltip: (level: number) => abilityTooltip(ABILITIES[id], level),
     })));
-    this._portrait = new HeroPortrait();
+    this._statusBar = new HeroStatusBar();
     this._goldDisplay = new GoldDisplay();
     this._itemBar = new ItemBar();
     this._kdDisplay = new KDDisplay();
@@ -1825,7 +1823,7 @@ export class Game {
       fog: this._fog,
       minimap: this._minimap,
       spellBar: this._spellBar,
-      portrait: this._portrait,
+      statusBar: this._statusBar,
       goldDisplay: this._goldDisplay,
       itemBar: this._itemBar,
       kdDisplay: this._kdDisplay,

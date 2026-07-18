@@ -30,8 +30,8 @@ export class ItemBar {
     this.container = document.createElement('div');
     this.container.style.cssText = `
       position: fixed;
-      bottom: 56px;
-      left: 124px;
+      bottom: 15px;
+      left: 16px;
       display: grid;
       grid-template-columns: repeat(3, 36px);
       grid-template-rows: repeat(2, 36px);
