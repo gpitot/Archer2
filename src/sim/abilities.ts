@@ -162,11 +162,22 @@ function tickCooldown(runtime: AbilityRuntime, dt: number): void {
 
 function canCastArrow(hero: HeroState): boolean {
   const a = hero.abilities.arrow;
-  return a.level >= 1 && (a.charges ?? 0) > 0 && (a.recoil ?? 0) <= 0;
+  return (
+    a.level >= 1 &&
+    (a.charges ?? 0) > 0 &&
+    (a.recoil ?? 0) <= 0 &&
+    (a.windup ?? 0) <= 0 // not already mid-draw
+  );
 }
 
+/**
+ * Begin the arrow's cast point: the hero commits, stops, and turns toward the
+ * aim, but the shot doesn't loose until the wind-up elapses in
+ * `stepArrowWindup`. The charge is spent then, not now — so a cancelled draw
+ * (see `cancelArrowWindup`) costs nothing, matching the original cast point.
+ */
 function castArrow(ctx: CastContext): void {
-  const { state, hero, events } = ctx;
+  const { hero } = ctx;
   if (!hero.alive || !canCastArrow(hero)) return;
   const a = hero.abilities.arrow;
 
@@ -174,9 +185,38 @@ function castArrow(ctx: CastContext): void {
   beginCast(hero, true);
 
   // Turn toward the shot (same smoothed turn as movement).
-  const dir = aimDir(hero, ctx.x ?? hero.pos.x, ctx.z ?? hero.pos.z);
-  hero.targetFacing = V.heading(dir);
+  const aimX = ctx.x ?? hero.pos.x;
+  const aimZ = ctx.z ?? hero.pos.z;
+  hero.targetFacing = V.heading(aimDir(hero, aimX, aimZ));
 
+  a.windup = ARROW.windup;
+  a.windupAim = { x: aimX, z: aimZ };
+}
+
+/**
+ * Advance an in-progress arrow cast point and loose the shot when it elapses.
+ * Called once per hero per tick from the sim step (it needs `state`/`events`
+ * to spawn the projectile, which the per-ability `tick` can't reach).
+ */
+export function stepArrowWindup(
+  state: MatchState,
+  hero: HeroState,
+  events: SimEvent[],
+  dt: number,
+): void {
+  const a = hero.abilities.arrow;
+  if ((a.windup ?? 0) <= 0) return;
+  if (!hero.alive) {
+    cancelArrowWindup(hero);
+    return;
+  }
+  a.windup = Math.max(0, (a.windup ?? 0) - dt);
+  if ((a.windup ?? 0) > 0) return;
+
+  // Cast point complete — loose the arrow toward the captured aim.
+  const aim = a.windupAim ?? hero.pos;
+  a.windupAim = undefined;
+  const dir = aimDir(hero, aim.x, aim.z);
   spawnProjectile(state, events, {
     ownerId: hero.id,
     team: hero.team,
@@ -192,6 +232,15 @@ function castArrow(ctx: CastContext): void {
   // Start recharge if not already ticking; never reset a running recharge.
   if (a.charges! < ARROW.maxCharges && a.cooldown <= 0) {
     a.cooldown = ARROW.cooldownByLevel[a.level];
+  }
+}
+
+/** Abort an in-progress arrow draw (a fresh order interrupts the cast point). */
+export function cancelArrowWindup(hero: HeroState): void {
+  const a = hero.abilities.arrow;
+  if ((a.windup ?? 0) > 0) {
+    a.windup = 0;
+    a.windupAim = undefined;
   }
 }
 

@@ -52,6 +52,14 @@ export interface AbilityRuntime {
   charges?: number;
   /** Minimum delay between consecutive casts (charge abilities only). */
   recoil?: number;
+  /**
+   * Seconds left in the pre-fire cast point (0/undefined = not winding up).
+   * The shot looses when this reaches 0; a fresh order clears it (see
+   * `cancelArrowWindup`). Arrow only.
+   */
+  windup?: number;
+  /** Aim point captured at cast; the wind-up looses toward it. Arrow only. */
+  windupAim?: Vec2;
   /** True while the ability's active window is open (e.g. dodge). */
   active?: boolean;
   /** Seconds left in the active window. */
@@ -123,6 +131,12 @@ export interface ProjectileState {
   maxRange: number;
   traveled: number;
   damage: number;
+  /**
+   * Ids of units this projectile has already damaged. Hero arrows pierce —
+   * they keep flying and hit every enemy along the path once (matching the
+   * original), tracked here so a unit isn't re-hit each tick it overlaps.
+   */
+  hitIds?: string[];
 }
 
 export interface WardState {

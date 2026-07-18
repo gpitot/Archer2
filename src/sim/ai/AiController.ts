@@ -271,8 +271,11 @@ export class AiController {
     // Blast the enemy when it can't reasonably escape the 1.5s fuse.
     this._maybeBlast(state, hero, enemy, out);
 
-    if (!threat.skipCast) this._tryShootHero(world, hero, enemy, out);
-    if (!threat.skipMove) this._kite(world, hero, enemy, out);
+    const fired = !threat.skipCast && this._tryShootHero(world, hero, enemy, out);
+    // Hold position through the shot's cast point — kiting now would cancel it.
+    if (!threat.skipMove && !this._committingShot(hero, fired)) {
+      this._kite(world, hero, enemy, out);
+    }
   }
 
   private _doChase(
@@ -287,9 +290,9 @@ export class AiController {
     const arrowRange = this._arrowRange(hero);
 
     // Fire opportunistically — the enemy may already be at the range edge.
-    if (!threat.skipCast) this._tryShootHero(world, hero, enemy, out);
+    const fired = !threat.skipCast && this._tryShootHero(world, hero, enemy, out);
 
-    if (!threat.skipMove) {
+    if (!threat.skipMove && !this._committingShot(hero, fired)) {
       // Blink to close the gap and lock in the kill when the dagger is up.
       if (dist > arrowRange && this._blinkReady(hero)) {
         const dir = V.normalize(V.sub(enemy.pos, hero.pos));
@@ -314,6 +317,20 @@ export class AiController {
     out: Command[],
   ): void {
     if (threat.skipMove) return; // a sidestep/evac already owns movement
+
+    // Parting shot: a fleeing archer that never stops to shoot can't contest a
+    // snowball now that firing roots (the cast point). When we're not critically
+    // low, briefly stand and loose a clean shot at the chaser before running —
+    // the per-frame threat pass still dodges incoming arrows during the draw.
+    if (
+      enemy &&
+      !threat.skipCast &&
+      hero.hp > maxHpForLevel(hero.level) * 0.25 &&
+      this._tryShootHero(world, hero, enemy, out)
+    ) {
+      return; // committed to the shot this frame; resume fleeing next think
+    }
+    if (enemy && this._committingShot(hero, false)) return; // draw still in progress
 
     // Defensive blink to break away when an enemy is on top of us.
     if (enemy && this._blinkReady(hero) && V.distance(hero.pos, enemy.pos) < BLINK_RANGE * 1.2) {
@@ -376,9 +393,9 @@ export class AiController {
     // Stand outside the creep's reach but inside our own range.
     const standoff = Math.min(arrowRange - FIRE_MARGIN, Math.max(type.attackRange + 100, 200));
 
-    if (!threat.skipCast) this._tryShootCreep(world, hero, creep, out);
+    const fired = !threat.skipCast && this._tryShootCreep(world, hero, creep, out);
 
-    if (!threat.skipMove) {
+    if (!threat.skipMove && !this._committingShot(hero, fired)) {
       const dist = V.distance(hero.pos, creep.pos);
       if (!hasLineOfFire(world, hero.pos, creep.pos)) {
         // No shot from here (an obstacle sits between us) — close in and let
@@ -395,37 +412,52 @@ export class AiController {
 
   // ── Combat helpers ──────────────────────────────────────────────────
 
+  /**
+   * True while the arrow is committed this frame — either we just issued the
+   * cast or a previous cast is still in its cast point (wind-up). Movement must
+   * be withheld in both cases: issuing a move would cancel the draw before the
+   * arrow looses (stutter-step, matching the rooted cast point).
+   */
+  private _committingShot(hero: HeroState, firedThisFrame: boolean): boolean {
+    return firedThisFrame || (hero.abilities.arrow.windup ?? 0) > 0;
+  }
+
   /** Fire at a hero target with a lead shot, honouring every fire gate. */
-  private _tryShootHero(world: SimWorld, hero: HeroState, target: HeroState, out: Command[]): void {
-    if (!canCast(ABILITIES.arrow, hero)) return;
-    if (target.invulnerable) return; // never shoot respawn-invuln heroes
-    if (target.abilities.dodge.active) return; // wait out the dodge window
-    this._fireIntercept(world, hero, target.pos, heroVelocity(target), out);
+  private _tryShootHero(world: SimWorld, hero: HeroState, target: HeroState, out: Command[]): boolean {
+    if (!canCast(ABILITIES.arrow, hero)) return false;
+    if (target.invulnerable) return false; // never shoot respawn-invuln heroes
+    if (target.abilities.dodge.active) return false; // wait out the dodge window
+    return this._fireIntercept(world, hero, target.pos, heroVelocity(target), out);
   }
 
   /** Fire at a (slow, non-dodging) creep. */
-  private _tryShootCreep(world: SimWorld, hero: HeroState, creep: CreepState, out: Command[]): void {
-    if (!canCast(ABILITIES.arrow, hero)) return;
-    this._fireIntercept(world, hero, creep.pos, { x: 0, z: 0 }, out);
+  private _tryShootCreep(world: SimWorld, hero: HeroState, creep: CreepState, out: Command[]): boolean {
+    if (!canCast(ABILITIES.arrow, hero)) return false;
+    return this._fireIntercept(world, hero, creep.pos, { x: 0, z: 0 }, out);
   }
 
-  /** Shared intercept-solve + range/LoF gate + cast emission. */
+  /** Shared intercept-solve + range/LoF gate + cast emission. Returns whether it fired. */
   private _fireIntercept(
     world: SimWorld,
     hero: HeroState,
     targetPos: V.Vec2,
     targetVel: V.Vec2,
     out: Command[],
-  ): void {
-    const shot = solveIntercept(hero.pos, targetPos, targetVel, ARROW.speed);
-    if (!shot) return; // target outruns the arrow → hold fire
+  ): boolean {
+    // The arrow doesn't loose until the cast point elapses, and the hero is
+    // rooted for it — so lead from where the target will be after the wind-up,
+    // otherwise a strafing target has slid past the aim by the time we fire.
+    const launchTargetPos = V.add(targetPos, V.scale(targetVel, ARROW.windup));
+    const shot = solveIntercept(hero.pos, launchTargetPos, targetVel, ARROW.speed);
+    if (!shot) return false; // target outruns the arrow → hold fire
 
     const flightDist = ARROW.speed * shot.time;
-    if (flightDist > this._arrowRange(hero) - FIRE_MARGIN) return;
-    if (!hasLineOfFire(world, hero.pos, shot.point)) return;
+    if (flightDist > this._arrowRange(hero) - FIRE_MARGIN) return false;
+    if (!hasLineOfFire(world, hero.pos, shot.point)) return false;
 
     out.push({ type: 'cast', ability: 'arrow', x: shot.point.x, z: shot.point.z });
     this._lastDest = null; // the cast stopped movement — force a fresh step
+    return true;
   }
 
   /** Stutter-step kite: hold the range band on our current bearing, with jink. */

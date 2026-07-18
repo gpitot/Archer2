@@ -20,7 +20,12 @@ export function run(h: SimHarness): void {
   ai.abilities.arrow.level = 4;
   ai.abilities.dodge.level = 4;
   shooter.level = 11;
-  shooter.abilities.arrow.level = 5;
+  // Rank 4 is the original's max Shoot Arrow (rank 5 is our extension). With
+  // the halved per-charge recharge the shooter now looses ~2× the arrows the
+  // pre-charge build did, so a rank-4 volley is already a real evasion stress
+  // test — and its 400 damage doesn't insta-kill on a 2-arrow leak the way the
+  // 466-damage rank-5 volley did (that was an HP knife-edge, not a dodge fail).
+  shooter.abilities.arrow.level = 4;
   h.attachAi('p1');
 
   let fires = 0;
@@ -34,7 +39,7 @@ export function run(h: SimHarness): void {
     // Fire a leading arrow at the AI whenever there's a clean, in-range shot.
     if (canCast(ABILITIES.arrow, shooter)) {
       const shot = solveIntercept(shooter.pos, ai.pos, heroVelocity(ai), ARROW.speed);
-      const maxRange = ARROW.rangeByLevel[5];
+      const maxRange = ARROW.rangeByLevel[4];
       if (shot && ARROW.speed * shot.time <= maxRange - 50 && hasLineOfFire(h.world, shooter.pos, shot.point)) {
         h.issue('p2', { type: 'cast', ability: 'arrow', x: shot.point.x, z: shot.point.z });
       }

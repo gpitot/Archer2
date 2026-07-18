@@ -30,7 +30,14 @@ import {
   ultimateRankCap,
   XP_TABLE,
 } from './rules';
-import { ABILITIES, ABILITY_ORDER, AbilityId, stopMovement } from './abilities';
+import {
+  ABILITIES,
+  ABILITY_ORDER,
+  AbilityId,
+  cancelArrowWindup,
+  stepArrowWindup,
+  stopMovement,
+} from './abilities';
 import {
   Command,
   HeroInput,
@@ -42,9 +49,9 @@ import {
 import {
   applyCreepDamage,
   applyCreepDamageToHero,
-  hitCreep,
   stepCreeps,
 } from './stepCreeps';
+import { CREEP_TYPES } from './creepRules';
 import { findRespawnPosition, SimWorld } from './world';
 import { ICE_BOW_SLOW_FACTOR, SHOP_ITEMS_BY_ID, addItem, removeItem } from './shopItems';
 import { stepRuneBuffs, stepRunes } from './stepRunes';
@@ -74,6 +81,10 @@ export function stepMatch(
 
   for (const hero of state.heroes) {
     stepHero(hero, dt);
+    // Resolve any in-progress arrow cast point (spawns the arrow when the
+    // wind-up elapses). Runs before stepProjectiles so a just-loosed arrow
+    // advances this same tick, like a fireball spawned in stepCreeps.
+    stepArrowWindup(state, hero, events, dt);
     if (!hero.alive && hero.respawnTimer <= 0) {
       respawn(hero, findRespawnPosition(world, rng));
       events.push({ type: 'respawn', heroId: hero.id });
@@ -103,6 +114,13 @@ function applyCommand(
   world: SimWorld,
   events: SimEvent[],
 ): void {
+  // Any fresh order interrupts an in-progress arrow cast point (the shot is
+  // aborted, no charge spent) — except re-issuing the arrow itself, which its
+  // own guard already rejects while a draw is pending.
+  if (!(cmd.type === 'cast' && cmd.ability === 'arrow') && cmd.type !== 'levelAbility') {
+    cancelArrowWindup(hero);
+  }
+
   switch (cmd.type) {
     case 'moveTo':
       setDestination(hero, cmd.x, cmd.z, world);
@@ -297,37 +315,44 @@ function stepProjectiles(
       continue;
     }
 
-    const target = findHitHero(state, p, p.ownerId);
-    if (target) {
-      const source = state.heroes.find((h) => h.id === p.ownerId);
-      state.projectiles.splice(i, 1);
-      if (source) {
-        // On-hit item hooks (ice bow slow, …) in inventory slot order.
-        for (const slotItemId of source.inventory) {
-          if (!slotItemId) continue;
-          SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, target);
-        }
-        const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
-        applyDamage(state, target, source, damage, p.id, events, crit);
+    // Hero arrow: pierces. It keeps flying (retiring only at range or on an
+    // obstacle, handled above) and damages every enemy it overlaps once —
+    // tracked in `hitIds` — matching the original's thick, non-terminating
+    // arrow. Heroes are damaged before creeps so a shot through a dodging
+    // hero can still reach the creep behind them.
+    const source = state.heroes.find((h) => h.id === p.ownerId);
+    if (!source) continue;
+    const hitIds = (p.hitIds ??= []);
+
+    for (const hero of state.heroes) {
+      if (hero.id === p.ownerId) continue;
+      if (!hero.alive || hero.invulnerable) continue;
+      if (hero.abilities.dodge.active) continue; // dodge evades — don't mark as hit
+      if (hitIds.includes(hero.id)) continue;
+      const r = HERO.bodyRadius + ARROW.collisionRadius;
+      if (V.distanceSq(p.pos, hero.pos) >= r * r) continue;
+      hitIds.push(hero.id);
+      // On-hit item hooks (ice bow slow, …) in inventory slot order.
+      for (const slotItemId of source.inventory) {
+        if (!slotItemId) continue;
+        SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, hero);
       }
-      continue;
+      const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
+      applyDamage(state, hero, source, damage, p.id, events, crit);
     }
 
-    // Creeps are checked after heroes so an arrow that passes through a
-    // dodging hero flies on and can hit the creep behind them.
-    const creepTarget = hitCreep(state, p);
-    if (creepTarget) {
-      const source = state.heroes.find((h) => h.id === p.ownerId);
-      state.projectiles.splice(i, 1);
-      if (source) {
-        // On-hit item hooks (ice bow slow, …) in inventory slot order.
-        for (const slotItemId of source.inventory) {
-          if (!slotItemId) continue;
-          SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, creepTarget);
-        }
-        const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
-        applyCreepDamage(state, creepTarget, source, damage, events, crit);
+    for (const creep of state.creeps) {
+      if (!creep.alive) continue;
+      if (hitIds.includes(creep.id)) continue;
+      const r = CREEP_TYPES[creep.type].bodyRadius + ARROW.collisionRadius;
+      if (V.distanceSq(p.pos, creep.pos) >= r * r) continue;
+      hitIds.push(creep.id);
+      for (const slotItemId of source.inventory) {
+        if (!slotItemId) continue;
+        SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, creep);
       }
+      const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
+      applyCreepDamage(state, creep, source, damage, events, crit);
     }
   }
 }

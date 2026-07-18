@@ -77,16 +77,35 @@ export const ARROW = {
   damageByLevel: [0, 200, 266, 333, 400, 466],
   /** Max flight range per ability level. */
   rangeByLevel: [0, 800, 1333, 1866, 2400, 2933],
-  /** Cooldown per ability level (seconds) — also the recharge time per charge. */
-  cooldownByLevel: [0, 2.25, 2.0, 1.75, 1.5, 1.25],
+  /**
+   * Per-charge recharge time per ability level (seconds). Halved from the
+   * original per-shot cooldown [2.25, 2.0, 1.75, 1.5, 1.25]: the original
+   * bound *two* identical "Shoot Arrow" copies to the attack key, each with
+   * its own cooldown ticking in parallel, so the sustained rate was two
+   * arrows per per-shot-cooldown. Our single Q holds two charges, so halving
+   * the recharge reproduces that parallel-cooldown sustained fire rate.
+   */
+  cooldownByLevel: [0, 1.125, 1.0, 0.875, 0.75, 0.625],
   maxLevel: 5,
   /** Maximum number of charges the ability holds. */
   maxCharges: 2,
+  /**
+   * Cast point (seconds): the archer must stand still for this long after the
+   * order before the arrow looses. Issuing any fresh order during it cancels
+   * the shot with no charge spent — the original hero unit's 0.3s cast point.
+   */
+  windup: 0.3,
   /** Minimum delay between consecutive shots when a charge is available (seconds). */
   recoilTime: 0.2,
   speed: 900,
-  /** Projectile collision radius (world units). */
-  collisionRadius: 8,
+  /**
+   * Projectile collision radius (world units). Widened from 8 toward the
+   * original arrow's thicker hitbox: the WC3 arrow's ≈60u enum radius scales
+   * to ≈48u hit radius at our 0.8× distance scale, so bodyRadius 27 + 16 ≈ 43
+   * lands close to it while keeping arrows dodgeable (this is the enemy's
+   * hitbox against arrows and the arrow's own clearance past obstacles).
+   */
+  collisionRadius: 16,
   /** Distance in front of the hero the arrow spawns (0.8 × mesh scale of 60). */
   spawnOffset: 48,
   /** Height above terrain the arrow rides (presentation only). */

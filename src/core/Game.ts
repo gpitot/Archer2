@@ -876,7 +876,10 @@ export class Game {
 
   /** Run local stepMatch for the player's hero only (instant movement feel). */
   private _predictMovement(inputs: HeroInput[], dt: number): void {
-    if (inputs.length === 0 && !this._playerState?.moving) {
+    // A pending arrow cast point must run through the full step (below) so the
+    // wind-up ticks and looses — the timers-only fast path can't spawn it.
+    const drawingArrow = (this._playerState?.abilities.arrow.windup ?? 0) > 0;
+    if (inputs.length === 0 && !this._playerState?.moving && !drawingArrow) {
       // Prediction isn't stepping this frame, but predicted timers must still
       // run — otherwise a stationary hero's cooldown stays stuck until the
       // next move and the fire guard wrongly rejects follow-up shots.
@@ -922,7 +925,15 @@ export class Game {
       if (input.heroId === this._playerId) tempInputs.push(input);
     }
 
-    stepMatch(temp, tempInputs, dt, this._world);
+    const predEvents = stepMatch(temp, tempInputs, dt, this._world);
+    // Our own arrows loose when their predicted cast point elapses; spawn the
+    // visible cosmetic from that fire event so the shot is delayed by the
+    // wind-up and never appears for a draw the player cancelled.
+    for (const ev of predEvents) {
+      if (ev.type === 'fire' && ev.heroId === this._playerId && ev.projectile.kind !== 'scout') {
+        this._spawnCosmeticFromFire(ev.projectile);
+      }
+    }
   }
 
   /** Reused by _predictMovement so prediction allocates nothing per tick. */
@@ -1081,45 +1092,38 @@ export class Game {
 
   // ── Cosmetic projectiles ────────────────────────────────────────────
 
-  /** Spawn a local arrow instantly when the player fires. */
-  private _spawnCosmeticProjectile(cmd: Command & { type: 'cast' }): void {
+  /**
+   * Spawn the local cosmetic arrow from our own predicted `fire` event — i.e.
+   * once the cast point has elapsed, mirroring exactly when and where the sim
+   * loosed the shot (pos already carries the spawn offset, dir/speed/range are
+   * the sim's). No cast guard is needed: prediction only emits this for a shot
+   * that actually fired.
+   */
+  private _spawnCosmeticFromFire(proj: ProjectileState): void {
     const player = this._playerState;
     if (!player) return;
-    // Mirror the sim's arrow guard so we don't show a ghost arrow for a shot
-    // the server will reject.
-    if (!canCast(ABILITIES.arrow, player)) return;
-
-    const dirX = (cmd.x ?? player.pos.x) - player.pos.x;
-    const dirZ = (cmd.z ?? player.pos.z) - player.pos.z;
-    const len = Math.hypot(dirX, dirZ);
-    const dir = len < 0.01
-      ? { x: Math.sin(player.facing), z: Math.cos(player.facing) }
-      : { x: dirX / len, z: dirZ / len };
 
     const pv = this._projectilePool.pop();
     if (!pv) return;
     const hasIceBow = player.inventory.includes('ice_bow');
     pv.setStyle(hasIceBow ? 'ice' : 'arrow'); // pooled views may last have flown as other styles
 
-    const spawnPos = {
-      x: player.pos.x + dir.x * ARROW.spawnOffset,
-      z: player.pos.z + dir.z * ARROW.spawnOffset,
-    };
+    const spawnPos = { x: proj.pos.x, z: proj.pos.z };
     pv.mesh.position.set(
       spawnPos.x,
       this._heightAt(spawnPos.x, spawnPos.z) + ARROW.flyHeight,
       spawnPos.z,
     );
-    pv.mesh.rotation.y = Math.atan2(dir.x, dir.z);
+    pv.mesh.rotation.y = Math.atan2(proj.dir.x, proj.dir.z);
     pv.mesh.visible = true;
 
     this._cosmeticProjectiles.push({
       view: pv,
       pos: spawnPos,
-      dir,
-      speed: ARROW.speed,
+      dir: { x: proj.dir.x, z: proj.dir.z },
+      speed: proj.speed,
       traveled: 0,
-      maxRange: ARROW.rangeByLevel[Math.min(player.abilities.arrow.level, ARROW.maxLevel)],
+      maxRange: proj.maxRange,
       serverId: null,
     });
   }
@@ -1236,11 +1240,11 @@ export class Game {
     const localInputs: HeroInput[] = [];
     for (const cmd of this._pendingCommands) {
       localInputs.push({ heroId: this._playerId, cmd });
-      if (cmd.type === 'cast' && cmd.ability === 'arrow') {
-        this._spawnCosmeticProjectile(cmd);
-      }
     }
     this._pendingCommands = [];
+    // Note: the cosmetic arrow is no longer spawned here on cast — it now
+    // spawns from the predicted `fire` event in `_predictMovement`, so it is
+    // delayed by the arrow's cast point and suppressed for a cancelled draw.
 
     // ── Drain snapshots into buffer, sync the render clock ──
     const snaps = this._network?.drainSnapshots() ?? [];
