@@ -1,6 +1,6 @@
 /**
- * HUD render: minimap markers, spell bar, hero portrait, gold, item bar,
- * KD, and shop overlay. Decoupled from Game.ts — receives all state via
+ * HUD render: minimap markers, spell bar, hero portrait, item bar,
+ * KD/gold/time panel, and shop overlay. Decoupled from Game.ts — receives all state via
  * method parameters so it can be driven by both offline and network update
  * paths identically.
  */
@@ -13,7 +13,6 @@ import type { HeroState, MatchState, WardState, CreepState, RuneState } from '..
 import type { SimWorld } from '../sim/world';
 import type { Minimap } from '../rendering/Minimap';
 import type { SpellBar, SpellSlotInfo } from '../ui/SpellBar';
-import type { GoldDisplay } from '../ui/GoldDisplay';
 import type { ItemBar } from '../ui/ItemBar';
 import type { KDDisplay } from '../ui/KDDisplay';
 import type { ShopWindow } from '../ui/ShopWindow';
@@ -32,7 +31,6 @@ export interface HudContext {
   fog: FogOfWar;
   minimap: Minimap;
   spellBar: SpellBar;
-  goldDisplay: GoldDisplay;
   itemBar: ItemBar;
   kdDisplay: KDDisplay;
   shopWindow: ShopWindow;
@@ -136,8 +134,6 @@ export function updateHud(ctx: HudContext): void {
     return info;
   }));
 
-  ctx.goldDisplay.update(p.gold);
-
   const charges: Record<string, number> = {};
   const cdProgress: Record<string, number> = {};
   const cdRemaining: Record<string, number> = {};
@@ -151,7 +147,7 @@ export function updateHud(ctx: HudContext): void {
   }
   ctx.itemBar.update(p.inventory, charges, cdProgress, cdRemaining);
   ctx.statusBar.update(p.hp, p.level, p.xp);
-  ctx.kdDisplay.update(p.kills, p.deaths, ctx.gameTime);
+  ctx.kdDisplay.update(p.kills, p.deaths, p.gold, ctx.gameTime);
 
   // ── Shop ─────────────────────────────────────────────────────────
 
