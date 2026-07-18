@@ -28,6 +28,7 @@ import { MoveIndicatorManager } from '../ui/MoveIndicator';
 import { DebugPanel } from '../ui/DebugPanel';
 import { HeroStatusBar } from '../ui/HeroStatusBar';
 import { SpellBar } from '../ui/SpellBar';
+import { ScoreWindow } from '../ui/ScoreWindow';
 
 // ── Audio ──
 import { SoundManager, STREAK_SOUNDS, MULTI_KILL_SOUNDS } from '../audio/SoundManager';
@@ -244,6 +245,7 @@ export class Game {
   private _shop!: Shop;
   private _shopOverlay!: ShopOverlay;
   private _shopWindow!: ShopWindow;
+  private _scoreWindow!: ScoreWindow;
   private _moveIndicators!: MoveIndicatorManager;
   private _debugPanel: DebugPanel | null = null;
 
@@ -388,6 +390,10 @@ export class Game {
       onClose: () => {},
     });
 
+    this._scoreWindow = new ScoreWindow({
+      onClose: () => {},
+    });
+
     // ── Match state ──
     this._state = createMatchState();
 
@@ -498,10 +504,22 @@ export class Game {
       enqueueCommand: (cmd) => this._enqueueCommand(cmd),
       activateAbilityTargeting: (def) => this._activateAbilityTargeting(def),
       activateItemTargeting: (def, slot) => this._activateItemTargeting(def, slot),
-      openShop: () => this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory),
+      openShop: () => {
+        if (this._scoreWindow.visible) this._scoreWindow.close();
+        this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory);
+      },
       closeShop: () => { if (this._shopWindow.visible) this._shopWindow.close(); },
       isPlayerNearShop: () => this._isPlayerNearShop(),
       isShopVisible: () => this._shopWindow.visible,
+      toggleScore: () => {
+        if (this._scoreWindow.visible) {
+          this._scoreWindow.close();
+        } else {
+          if (this._shopWindow.visible) this._shopWindow.close();
+          this._scoreWindow.open(this._state.heroes, this._playerState.id);
+        }
+      },
+      isScoreVisible: () => this._scoreWindow.visible,
       cameraLock: () => { this._cameraLocked = true; },
     };
     bindInput(this._input, this._targeting, inputCb);
@@ -1829,6 +1847,7 @@ export class Game {
       kdDisplay: this._kdDisplay,
       shopWindow: this._shopWindow,
       shopOverlay: this._shopOverlay,
+      scoreWindow: this._scoreWindow,
       camera: this._camera,
       isPlayerNearShop: this._isPlayerNearShop(),
     };

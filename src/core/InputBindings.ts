@@ -28,6 +28,10 @@ export interface InputCallbacks {
   isShopVisible: () => boolean;
   /** Lock camera to hero. */
   cameraLock: () => void;
+  /** Toggle the scoreboard modal. */
+  toggleScore: () => void;
+  /** True when the scoreboard window is currently visible. */
+  isScoreVisible: () => boolean;
 }
 
 /** Register all gameplay keyboard bindings on the given InputManager. */
@@ -83,10 +87,16 @@ export function bindInput(input: InputManager, targeting: TargetingSystem, cb: I
     }
   });
 
-  // Escape — cancel targeting or close shop
+  // Escape — cancel targeting, close scoreboard, or close shop
   input.onKeyDown('Escape', () => {
     if (targeting.isActive) { targeting.cancel(); return; }
+    if (cb.isScoreVisible()) { cb.toggleScore(); return; }
     cb.closeShop();
+  });
+
+  // Tab — toggle scoreboard
+  input.onKeyDown('Tab', () => {
+    cb.toggleScore();
   });
 
   // Space — re-center camera
