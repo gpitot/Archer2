@@ -529,6 +529,7 @@ export class Game {
         () => this._debugAddGold(),
         this._mapName === 'test' ? 'arena' : 'test',
         () => this._swapMap(),
+        () => this._toggleAI(),
       );
     }
 
@@ -1949,6 +1950,17 @@ export class Game {
     const url = new URL(window.location.href);
     url.searchParams.set('map', this._mapName === 'test' ? 'arena' : 'test');
     window.location.href = url.toString();
+  }
+
+  private _toggleAI(): void {
+    if (this._networkMode) return;
+    if (this._ai) {
+      this._ai = null;
+      this._debugPanel?.setAILabel(false);
+    } else {
+      this._ai = new AiController('dummy');
+      this._debugPanel?.setAILabel(true);
+    }
   }
 }
 

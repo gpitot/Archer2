@@ -9,8 +9,8 @@ export class HealthBar {
 
   private _canvas: HTMLCanvasElement;
   private _texture: THREE.CanvasTexture;
-  private _width = 64;
-  private _height = 8;
+  private _width = 128;
+  private _height = 16;
 
   private _maxHP: number;
   private _currentHP: number;
@@ -75,6 +75,15 @@ export class HealthBar {
     }
 
     ctx.fillRect(1, 1, fillWidth, h - 2);
+
+    // Segment dividers — thin dark line every 100 HP
+    const barLeft = 4;
+    const barWidth = w - (barLeft * 2);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    for (let hp = 100; hp < this._maxHP; hp += 100) {
+      const segX = Math.round(barLeft + (hp / this._maxHP) * barWidth);
+      ctx.fillRect(segX, 1, barLeft, h - 2);
+    }
 
     // Border
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
