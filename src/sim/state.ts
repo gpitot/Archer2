@@ -180,6 +180,22 @@ export interface CreepState extends UnitCore {
   slowTimer: number;
 }
 
+/**
+ * Per-camp progression state. A camp climbs one `tier` each time it is fully
+ * cleared and respawns (see `stepCreeps`); `respawnTimer` counts down only
+ * while every member is dead. Sim-internal — never sent over the wire; the
+ * realized creeps (type/level via `creepRespawn` events) carry everything a
+ * client needs to render the current tier.
+ */
+export interface CampState {
+  id: string;
+  /** Base composition (tier 0) — the ladder `campComposition` climbs from. */
+  base: CreepTypeId[];
+  tier: number;
+  /** Seconds until respawn; -1 while any member is still alive. */
+  respawnTimer: number;
+}
+
 export interface MatchState {
   tick: number;
   heroes: HeroState[];
@@ -187,6 +203,7 @@ export interface MatchState {
   wards: WardState[];
   blasts: BlastState[];
   creeps: CreepState[];
+  camps: CampState[];
   runes: RuneState[];
   /** First blood is a one-time global bonus. */
   firstBlood: boolean;
@@ -245,7 +262,7 @@ export type SimEvent =
       x: number;
       z: number;
     }
-  | { type: 'creepRespawn'; creepId: string; level: number }
+  | { type: 'creepRespawn'; creepId: string; creepType: CreepTypeId; level: number }
   | { type: 'runeSpawn'; runeId: string; runeType: RuneTypeId }
   | { type: 'runePickup'; runeId: string; heroId: string; runeType: RuneTypeId; x: number; z: number };
 
@@ -297,6 +314,7 @@ export function createMatchState(): MatchState {
     wards: [],
     blasts: [],
     creeps: [],
+    camps: [],
     runes: [],
     firstBlood: true,
     incomeAccumulator: 0,

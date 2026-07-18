@@ -27,8 +27,8 @@ import { buildTestSimWorld } from '../../src/world/testMap';
 import { Vec2 } from '../../src/sim/math';
 import { ARROW } from '../../src/sim/rules';
 import { CreepState } from '../../src/sim/state';
-import { CREEP, CreepTypeId } from '../../src/sim/creepRules';
-import { createCreep } from '../../src/sim/stepCreeps';
+import { CreepTypeId } from '../../src/sim/creepRules';
+import { buildCamp } from '../../src/sim/stepCreeps';
 import { AiController, AiOptions } from '../../src/sim/ai/AiController';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -162,15 +162,7 @@ export class SimHarness {
    * across camps. Scenarios that never call this keep a creep-free state.
    */
   spawnCamp(campId: string, pos: Vec2, units: CreepTypeId[]): CreepState[] {
-    const created: CreepState[] = [];
-    for (let i = 0; i < units.length; i++) {
-      const offsetX = (i - (units.length - 1) / 2) * CREEP.spawnSpread;
-      const p = findWalkableNear(this.world, pos.x + offsetX, pos.z);
-      const creep = createCreep(`c${this.state.creeps.length + 1}`, campId, units[i], p);
-      this.state.creeps.push(creep);
-      created.push(creep);
-    }
-    return created;
+    return buildCamp(this.state, this.world, campId, units, pos, this.state.creeps.length + 1);
   }
 
   creep(id: string): CreepState {

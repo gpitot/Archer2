@@ -111,7 +111,17 @@ export const MAX_TILES = 128;
 /** Ground layer new maps start on (WC3 convention: layer 2 = height 0). */
 export const BASE_LAYER = 2;
 
-export const CREEP_TYPE_IDS: readonly CreepTypeId[] = ['ghoul', 'dragon'];
+// Authorable base (tier-0) unit types. Camps climb their ladders on respawn
+// (see `campComposition`), so only the entry rungs need to be placeable.
+export const CREEP_TYPE_IDS: readonly CreepTypeId[] = [
+  'ghoul',
+  'cactoro',
+  'orc',
+  'dino',
+  'yeti',
+  'ghost',
+  'dragon',
+];
 
 export function pointsX(src: { tilesX: number }): number {
   return src.tilesX + 1;

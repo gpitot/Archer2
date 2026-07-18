@@ -11,6 +11,9 @@ import {
   CREEP_TYPES,
   CreepTypeDef,
   CreepTypeId,
+  campComposition,
+  campPoolSize,
+  campTierLevel,
   creepDamage,
   creepGold,
   creepMaxHp,
@@ -18,14 +21,21 @@ import {
 } from './creepRules';
 import * as V from './math';
 import { ARROW } from './rules';
-import { CreepState, HeroState, MatchState, ProjectileState, SimEvent } from './state';
+import { CampState, CreepState, HeroState, MatchState, ProjectileState, SimEvent } from './state';
 import { addXp, killHero, dealDamageToHero, dealDamageToCreep } from './damage';
 import { spawnProjectile } from './projectiles';
 import { findReachableNear, findWalkableNear, SimWorld, sphereHitsObstacle } from './world';
 
 // ── Camp construction ─────────────────────────────────────────────────
 
-export function createCreep(id: string, campId: string, type: CreepTypeId, pos: V.Vec2): CreepState {
+export function createCreep(
+  id: string,
+  campId: string,
+  type: CreepTypeId,
+  pos: V.Vec2,
+  opts: { alive?: boolean; level?: number } = {},
+): CreepState {
+  const level = opts.level ?? 1;
   return {
     id,
     campId,
@@ -33,9 +43,9 @@ export function createCreep(id: string, campId: string, type: CreepTypeId, pos: 
     pos: V.clone(pos),
     facing: 0,
     spawnPos: V.clone(pos),
-    hp: creepMaxHp(type, 1),
-    level: 1,
-    alive: true,
+    hp: creepMaxHp(type, level),
+    level,
+    alive: opts.alive ?? true,
     respawnTimer: 0,
     aggroTargetId: null,
     attackCooldown: 0,
@@ -45,13 +55,49 @@ export function createCreep(id: string, campId: string, type: CreepTypeId, pos: 
 }
 
 /**
- * Populate `state.creeps` from camp definitions. By default camps come from
- * `CAMP_DEFS` (centers as fractions of the arena rect, so the same defs work
- * on every built-in map); custom maps pass their authored world-coordinate
- * placements instead. Centers are snapped to the walkable component
- * reachable from the shop so a camp never lands on a cliff top or islet.
- * Ids (`c1`, `c2`, …) follow definition order, so every peer derives the
- * same ids independently.
+ * Build one camp's creeps and its `CampState`, appending both to `state`.
+ * A camp reserves a fixed pool (`campPoolSize` = base + `maxExtraUnits`) so
+ * creep ids stay stable for the whole match even as higher tiers field more
+ * units: the tier-0 (base) slots start alive at their authored positions, the
+ * extra slots start dead and are activated when the camp climbs a tier.
+ * Returns the tier-0 (alive) creeps in slot order.
+ */
+export function buildCamp(
+  state: MatchState,
+  world: SimWorld,
+  campId: string,
+  base: readonly CreepTypeId[],
+  center: V.Vec2,
+  startId: number,
+): CreepState[] {
+  const pool = campPoolSize(base);
+  const level = campTierLevel(0);
+  const tier0 = campComposition(base, 0); // == base (0 upgrade steps, 0 extra)
+  const created: CreepState[] = [];
+  for (let i = 0; i < pool; i++) {
+    // Spread the units along one row, centred on the BASE units so tier-0
+    // positions are unaffected by the reserved extra slots (which trail off to
+    // one side, used only at higher tiers).
+    const offsetX = (i - (base.length - 1) / 2) * CREEP.spawnSpread;
+    const pos = findWalkableNear(world, center.x + offsetX, center.z);
+    const alive = i < tier0.length;
+    const type = alive ? tier0[i] : base[Math.min(i, base.length - 1)];
+    const creep = createCreep(`c${startId + i}`, campId, type, pos, { alive, level });
+    state.creeps.push(creep);
+    if (alive) created.push(creep);
+  }
+  state.camps.push({ id: campId, base: [...base], tier: 0, respawnTimer: -1 });
+  return created;
+}
+
+/**
+ * Populate `state.creeps` and `state.camps` from camp definitions. By default
+ * camps come from `CAMP_DEFS` (centers as fractions of the arena rect, so the
+ * same defs work on every built-in map); custom maps pass their authored
+ * world-coordinate placements instead. Centers are snapped to the walkable
+ * component reachable from the shop so a camp never lands on a cliff top or
+ * islet. Ids (`c1`, `c2`, …) follow definition + pool order, so every peer
+ * derives the same ids independently.
  */
 export function spawnCamps(state: MatchState, world: SimWorld, camps?: readonly CampPlacement[] | null): void {
   const defs: readonly CampPlacement[] = camps ?? CAMP_DEFS.map((def) => ({
@@ -62,17 +108,11 @@ export function spawnCamps(state: MatchState, world: SimWorld, camps?: readonly 
   }));
   let nextId = 1;
   for (const def of defs) {
-    const nx = def.x;
-    const nz = def.z;
     const center =
-      findReachableNear(world, nx, nz, world.shop.pos.x, world.shop.pos.z) ??
-      findWalkableNear(world, nx, nz);
-    for (let i = 0; i < def.units.length; i++) {
-      const offsetX = (i - (def.units.length - 1) / 2) * CREEP.spawnSpread;
-      const offsetZ = i % 2 === 0 ? -CREEP.spawnSpread / 2 : CREEP.spawnSpread / 2;
-      const pos = findWalkableNear(world, center.x + offsetX, center.z + offsetZ);
-      state.creeps.push(createCreep(`c${nextId++}`, def.id, def.units[i], pos));
-    }
+      findReachableNear(world, def.x, def.z, world.shop.pos.x, world.shop.pos.z) ??
+      findWalkableNear(world, def.x, def.z);
+    buildCamp(state, world, def.id, def.units, center, nextId);
+    nextId += campPoolSize(def.units);
   }
 }
 
@@ -88,11 +128,9 @@ export function stepCreeps(
     const creep = state.creeps[i];
     const def = CREEP_TYPES[creep.type];
 
-    if (!creep.alive) {
-      creep.respawnTimer -= dt;
-      if (creep.respawnTimer <= 0) respawnCreep(state, creep, events);
-      continue;
-    }
+    // Dead creeps wait for their whole camp to be cleared; camp-level respawn
+    // (below) brings them all back together, one tier stronger.
+    if (!creep.alive) continue;
 
     if (creep.attackCooldown > 0) {
       creep.attackCooldown = Math.max(0, creep.attackCooldown - dt);
@@ -163,6 +201,28 @@ export function stepCreeps(
       creep.lastActiveTick = state.tick;
     }
   }
+
+  stepCamps(state, dt, world, events);
+}
+
+/**
+ * Per-camp tier progression. A camp with any living member is not respawning;
+ * once every member is dead a `respawnInterval` countdown starts, and on expiry
+ * the camp climbs one tier and its whole roster comes back stronger (see
+ * `respawnCamp`). Keeping the timer at the camp level is what makes "clear the
+ * camp → it returns as a tougher pack" work.
+ */
+function stepCamps(state: MatchState, dt: number, world: SimWorld, events: SimEvent[]): void {
+  for (const camp of state.camps) {
+    const anyAlive = state.creeps.some((c) => c.campId === camp.id && c.alive);
+    if (anyAlive) {
+      camp.respawnTimer = -1;
+      continue;
+    }
+    if (camp.respawnTimer < 0) camp.respawnTimer = CREEP.respawnInterval;
+    camp.respawnTimer -= dt;
+    if (camp.respawnTimer <= 0) respawnCamp(state, camp, events);
+  }
 }
 
 /** Closest alive, non-invulnerable, non-invisible hero within `range`, or null. */
@@ -231,17 +291,37 @@ function fireCreepProjectile(
   });
 }
 
-function respawnCreep(state: MatchState, creep: CreepState, events: SimEvent[]): void {
-  creep.level = Math.min(creep.level + 1, CREEP.maxLevel);
-  creep.hp = creepMaxHp(creep.type, creep.level);
-  creep.alive = true;
-  creep.respawnTimer = 0;
-  creep.pos = V.clone(creep.spawnPos);
-  creep.aggroTargetId = null;
-  creep.attackCooldown = 0;
-  creep.slowTimer = 0;
-  creep.lastActiveTick = state.tick;
-  events.push({ type: 'creepRespawn', creepId: creep.id, level: creep.level });
+/**
+ * Respawn a cleared camp one tier stronger. `campComposition` decides the new
+ * roster (upgraded types, possibly more units); every unit shares
+ * `campTierLevel(tier)`, which raises hp/damage and gold/xp via the `creep*`
+ * curves. The camp's fixed creep pool is reused slot-for-slot — a slot the new
+ * tier doesn't field simply stays dead — so ids remain stable and each
+ * activated slot announces its (possibly changed) type via `creepRespawn`.
+ */
+function respawnCamp(state: MatchState, camp: CampState, events: SimEvent[]): void {
+  camp.tier += 1;
+  camp.respawnTimer = -1;
+  const level = campTierLevel(camp.tier);
+  const comp = campComposition(camp.base, camp.tier);
+  const members = state.creeps.filter((c) => c.campId === camp.id); // slot (id) order
+  for (let i = 0; i < members.length; i++) {
+    if (i >= comp.length) break; // remaining slots stay dead this tier
+    const creep = members[i];
+    creep.type = comp[i];
+    creep.level = level;
+    creep.hp = creepMaxHp(creep.type, level);
+    creep.alive = true;
+    // Extra slots that have never been active still sit at their reserved
+    // spread position; re-snap to it and clear combat state.
+    creep.pos = V.clone(creep.spawnPos);
+    creep.facing = 0;
+    creep.aggroTargetId = null;
+    creep.attackCooldown = 0;
+    creep.slowTimer = 0;
+    creep.lastActiveTick = state.tick;
+    events.push({ type: 'creepRespawn', creepId: creep.id, creepType: creep.type, level });
+  }
 }
 
 // ── Damage ────────────────────────────────────────────────────────────

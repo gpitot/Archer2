@@ -1,10 +1,11 @@
 /**
  * Melee creep lifecycle: a ghoul ignores a distant hero, aggros when the
  * hero comes close, chases and claws, dies to arrows for exact gold/XP,
- * then respawns 60s later at level 2 with level-2 stats.
+ * then the cleared camp respawns 60s later one tier stronger (a level-2
+ * cactoro — the next rung on the melee ladder).
  */
 import { SimHarness, expectEvent, expectTrue } from '../scripts/harness/SimHarness';
-import { CREEP, CREEP_TYPES, creepGold, creepMaxHp, creepXp } from '../src/sim/creepRules';
+import { CREEP, CREEP_TYPES, campComposition, creepGold, creepMaxHp, creepXp } from '../src/sim/creepRules';
 
 export const name = 'creep-melee';
 export const map = 'test';
@@ -60,16 +61,21 @@ export function run(h: SimHarness): void {
   expectTrue(hero.xp === creepXp('ghoul', 1), `hero xp is exactly the creep bounty: ${hero.xp}`);
   expectTrue(!ghoul.alive, 'ghoul dead');
 
-  // 60 seconds later it respawns at level 2 with level-2 max hp.
+  // 60 seconds after the camp is cleared it respawns one tier up: the ghoul
+  // slot returns as a level-2 cactoro (next rung on the melee ladder).
+  const nextType = campComposition(['ghoul'], 1)[0];
   const respawnEvents = h.runUntil(
     (_s, evs) => evs.some((e) => e.type === 'creepRespawn'),
     h.seconds(CREEP.respawnInterval + 1),
-    'creep respawn',
+    'camp respawn',
   );
   const respawn = expectEvent(respawnEvents, 'creepRespawn');
   expectTrue(respawn.type === 'creepRespawn' && respawn.level === 2, 'respawned at level 2');
-  expectTrue(ghoul.alive, 'ghoul alive after respawn');
-  expectTrue(ghoul.hp === creepMaxHp('ghoul', 2), `level-2 hp: ${ghoul.hp}`);
+  expectTrue(respawn.type === 'creepRespawn' && respawn.creepType === nextType, `respawn event carries new type ${nextType}`);
+  expectTrue(respawn.type === 'creepRespawn' && respawn.creepId === ghoul.id, 'same creep slot');
+  expectTrue(ghoul.alive, 'creep alive after respawn');
+  expectTrue(ghoul.type === nextType, `upgraded to ${nextType}: ${ghoul.type}`);
+  expectTrue(ghoul.hp === creepMaxHp(nextType, 2), `level-2 hp: ${ghoul.hp}`);
   expectTrue(
     ghoul.pos.x === ghoul.spawnPos.x && ghoul.pos.z === ghoul.spawnPos.z,
     'respawned at camp',

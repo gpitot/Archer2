@@ -1518,6 +1518,9 @@ export class Game {
         }
         // Hit flash on the target's view
         targetView?.flashHit();
+        // A creep melee swing lands as a 'hit' from a creep source — play its
+        // attack lunge (heroes never share ids with creeps).
+        this._creepViews.get(ev.sourceId)?.playAttack();
         break;
       }
       case 'fire': {
@@ -1525,6 +1528,8 @@ export class Game {
         const shooterView = this._heroViews.get(ev.heroId);
         shooterView?.flashFire();
         shooterView?.playShoot();
+        // Creep fireballs carry the creep id as the owner — play its attack.
+        this._creepViews.get(ev.heroId)?.playAttack();
         break;
       }
       case 'blastExplode': {
@@ -1560,9 +1565,12 @@ export class Game {
         break;
       }
       case 'creepRespawn': {
-        // Event-carried respawn: back to full hp at the camp, one level up.
+        // Event-carried respawn: the camp climbed a tier, so this slot may
+        // return as a stronger monster type. Update type first so max-hp and
+        // the view's model swap (in CreepView.sync) use the new type.
         const creep = this._state.creeps.find((c) => c.id === ev.creepId);
         if (creep) {
+          creep.type = ev.creepType;
           creep.alive = true;
           creep.level = ev.level;
           creep.hp = creepMaxHp(creep.type, ev.level);
@@ -1767,17 +1775,19 @@ export class Game {
   // ── Creep view sync ─────────────────────────────────────────────────
 
   private _syncCreepViews(dt: number): void {
-    syncStableViews(
-      this._creepViews,
-      this._state.creeps,
-      (c) => c.id,
-      (c) => {
-        const cv = new CreepView(c.id, c.type, this._heightAt.bind(this));
+    for (const c of this._state.creeps) {
+      let cv = this._creepViews.get(c.id);
+      if (!cv) {
+        // Don't build a view (which loads a GLB model) for a reserved pool slot
+        // that has never been alive — it may activate later as a different
+        // monster type, or never. Create lazily on first appearance.
+        if (!c.alive) continue;
+        cv = new CreepView(c.id, c.type, this._heightAt.bind(this));
         this._scene.add(cv.mesh);
-        return cv;
-      },
-      (c, cv) => cv.sync(c, dt),
-    );
+        this._creepViews.set(c.id, cv);
+      }
+      cv.sync(c, dt);
+    }
   }
 
   // ── Rune view sync ───────────────────────────────────────────────────
