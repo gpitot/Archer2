@@ -34,7 +34,7 @@ export class DebugPanel {
 
     this._btnFog = this._makeButton('Toggle Fog', () => this._onFogToggle());
     this._btnLevel = this._makeButton('Level Up', () => this._onLevelUp());
-    this._btnGold = this._makeButton('+10 Gold', () => this._onAddGold());
+    this._btnGold = this._makeButton('+100 Gold', () => this._onAddGold());
     this._btnMap = this._makeButton(`Map: ${otherMapName}`, () => this._onSwapMap());
     this._btnAI = this._makeButton('AI: OFF', () => this._onToggleAI());
 

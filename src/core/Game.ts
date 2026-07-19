@@ -717,6 +717,10 @@ export class Game {
       path: [],
       lastActiveTick: 0,
       slowTimer: 0,
+      burnRemaining: 0,
+      burnDps: 0,
+      burnSourceId: null,
+      burnTickAccum: 0,
       leashing: false,
     };
   }
@@ -2021,7 +2025,7 @@ export class Game {
 
   private _debugAddGold(): void {
     if (this._playerState) {
-      this._playerState.gold += 10;
+      this._playerState.gold += 100;
     }
   }
 

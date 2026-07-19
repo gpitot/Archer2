@@ -22,7 +22,7 @@ import {
 import * as V from './math';
 import { ARROW } from './rules';
 import { CampState, CreepState, HeroState, MatchState, ProjectileState, SimEvent } from './state';
-import { addXp, killHero, dealDamageToHero, dealDamageToCreep } from './damage';
+import { addXp, killHero, dealDamageToHero, dealDamageToCreep, stepBurn } from './damage';
 import { spawnProjectile } from './projectiles';
 import { findReachableNear, findWalkableNear, SimWorld } from './world';
 import { followPath, computePath } from './movement';
@@ -53,6 +53,10 @@ export function createCreep(
     path: [],
     lastActiveTick: 0,
     slowTimer: 0,
+    burnRemaining: 0,
+    burnDps: 0,
+    burnSourceId: null,
+    burnTickAccum: 0,
     leashing: false,
   };
 }
@@ -141,6 +145,20 @@ export function stepCreeps(
 
     if (creep.slowTimer > 0) {
       creep.slowTimer = Math.max(0, creep.slowTimer - dt);
+    }
+
+    // Fire Bow burn: damage over time credited to the burning hero. May kill
+    // the creep — bail out of the rest of its step if so.
+    if (creep.burnRemaining > 0) {
+      const src = state.heroes.find((h) => h.id === creep.burnSourceId);
+      if (src) {
+        stepBurn(creep, dt, (dmg) =>
+          dealDamageToCreep(state, creep, { kind: 'hero', hero: src }, dmg, events),
+        );
+      } else {
+        creep.burnRemaining = 0;
+      }
+      if (!creep.alive) continue;
     }
 
     // Acquire aggro. Idle scans are throttled and staggered by creep index so
@@ -342,6 +360,10 @@ function respawnCamp(state: MatchState, camp: CampState, events: SimEvent[]): vo
     creep.aggroTargetId = null;
     creep.attackCooldown = 0;
     creep.slowTimer = 0;
+    creep.burnRemaining = 0;
+    creep.burnDps = 0;
+    creep.burnSourceId = null;
+    creep.burnTickAccum = 0;
     creep.leashing = false;
     creep.path = [];
     creep.lastActiveTick = state.tick;

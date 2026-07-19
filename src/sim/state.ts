@@ -115,6 +115,14 @@ export interface HeroState extends UnitCore {
   hasteTimer: number;
   invisTimer: number;
   slowTimer: number;
+  /** Fire Bow burn: total damage still owed (stacks across hits); 0 = none. Sim-only. */
+  burnRemaining: number;
+  /** Rate the burn pool drains at (damage/sec), re-timed on each stacking hit. */
+  burnDps: number;
+  /** Hero credited with burn damage (kill attribution), or null. */
+  burnSourceId: string | null;
+  /** Accumulates elapsed time toward the next discrete burn damage tick. */
+  burnTickAccum: number;
 }
 
 export interface ProjectileState {
@@ -199,6 +207,14 @@ export interface CreepState extends UnitCore {
   lastActiveTick: number;
   /** Slow debuff timer from Ice Bow (seconds remaining; 0 = inactive). */
   slowTimer: number;
+  /** Fire Bow burn: total damage still owed (stacks across hits); 0 = none. Sim-only. */
+  burnRemaining: number;
+  /** Rate the burn pool drains at (damage/sec), re-timed on each stacking hit. */
+  burnDps: number;
+  /** Hero credited with burn damage (kill attribution), or null. */
+  burnSourceId: string | null;
+  /** Accumulates elapsed time toward the next discrete burn damage tick. */
+  burnTickAccum: number;
   /**
    * True while returning home after crossing the leash — suppresses re-aggro so
    * a creep dragged to its leash edge walks all the way back instead of
@@ -332,6 +348,10 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     hasteTimer: 0,
     invisTimer: 0,
     slowTimer: 0,
+    burnRemaining: 0,
+    burnDps: 0,
+    burnSourceId: null,
+    burnTickAccum: 0,
   };
 }
 

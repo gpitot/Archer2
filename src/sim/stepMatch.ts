@@ -56,7 +56,7 @@ import { findRespawnPosition, SimWorld } from './world';
 import { ICE_BOW_SLOW_FACTOR, SHOP_ITEMS_BY_ID, addItem, removeItem } from './shopItems';
 import { stepRuneBuffs, stepRunes } from './stepRunes';
 import { RUNE } from './runeRules';
-import { rollAbilityDamage, dealDamageToHero, killHero, addXp } from './damage';
+import { rollAbilityDamage, dealDamageToHero, killHero, addXp, stepBurn } from './damage';
 import { advanceProjectile, findHitHero } from './projectiles';
 import { turnToward, followPath, computePath } from './movement';
 
@@ -81,6 +81,7 @@ export function stepMatch(
 
   for (const hero of state.heroes) {
     stepHero(hero, dt);
+    stepHeroBurn(state, hero, dt, events);
     // Resolve any in-progress arrow cast point (spawns the arrow when the
     // wind-up elapses). Runs before stepProjectiles so a just-loosed arrow
     // advances this same tick, like a fireball spawned in stepCreeps.
@@ -277,6 +278,23 @@ function updateFacing(hero: HeroState, dt: number): void {
   hero.facing = turnToward(hero.facing, hero.targetFacing, HERO.turnSpeed, dt);
 }
 
+/**
+ * Tick a hero's Fire Bow burn. Damage is credited to the burn source so a
+ * DoT kill still awards gold/XP, and routes through `dealDamageToHero` so it
+ * emits the same `hit` events (damage numbers + fire impact on the client).
+ */
+function stepHeroBurn(state: MatchState, hero: HeroState, dt: number, events: SimEvent[]): void {
+  if (!hero.alive || hero.burnRemaining <= 0) return;
+  const src = state.heroes.find((h) => h.id === hero.burnSourceId);
+  if (!src) {
+    hero.burnRemaining = 0;
+    return;
+  }
+  stepBurn(hero, dt, (dmg) =>
+    dealDamageToHero(state, hero, { kind: 'hero', hero: src }, dmg, 'burn', events),
+  );
+}
+
 function respawn(hero: HeroState, pos: V.Vec2): void {
   hero.pos = { x: pos.x, z: pos.z };
   hero.hp = heroMaxHp(hero.level, hero.bonusHp);
@@ -291,6 +309,10 @@ function respawn(hero: HeroState, pos: V.Vec2): void {
   hero.hasteTimer = 0;
   hero.invisTimer = 0;
   hero.slowTimer = 0;
+  hero.burnRemaining = 0;
+  hero.burnDps = 0;
+  hero.burnSourceId = null;
+  hero.burnTickAccum = 0;
 }
 
 // ── Projectiles ───────────────────────────────────────────────────────
@@ -341,12 +363,13 @@ function stepProjectiles(
       const r = HERO.bodyRadius + ARROW.collisionRadius;
       if (V.distanceSq(p.pos, hero.pos) >= r * r) continue;
       hitIds.push(hero.id);
-      // On-hit item hooks (ice bow slow, …) in inventory slot order.
+      const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
+      // On-hit item hooks (ice bow slow, fire bow burn, …) in slot order.
+      // Rolled after the damage so a burn can scale off the actual hit.
       for (const slotItemId of source.inventory) {
         if (!slotItemId) continue;
-        SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, hero);
+        SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, hero, damage);
       }
-      const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
       applyDamage(state, hero, source, damage, p.id, events, crit);
     }
 
@@ -356,11 +379,11 @@ function stepProjectiles(
       const r = CREEP_TYPES[creep.type].bodyRadius + ARROW.collisionRadius;
       if (V.distanceSq(p.pos, creep.pos) >= r * r) continue;
       hitIds.push(creep.id);
+      const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
       for (const slotItemId of source.inventory) {
         if (!slotItemId) continue;
-        SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, creep);
+        SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, creep, damage);
       }
-      const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
       applyCreepDamage(state, creep, source, damage, events, crit);
     }
   }

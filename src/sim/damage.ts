@@ -37,6 +37,49 @@ export function rollAbilityDamage(
   return { damage, crit };
 }
 
+// ── Burn damage-over-time (Fire Bow) ─────────────────────────────────
+
+/** Seconds between discrete burn damage applications (keeps events sparse). */
+export const BURN_TICK_INTERVAL = 0.5;
+
+/**
+ * A unit carrying a Fire Bow burn. Both `HeroState` and `CreepState` satisfy
+ * this shape. The burn is a *pool*: `burnRemaining` is total damage still owed,
+ * drained at `burnDps`. Fresh hits add to the pool and stack (see the Fire Bow
+ * `onProjectileHitHero`), so total burn always equals the sum of every hit's
+ * contribution — nothing is lost or double-counted no matter the timing.
+ */
+export interface Burnable {
+  alive: boolean;
+  burnRemaining: number;
+  burnDps: number;
+  burnTickAccum: number;
+}
+
+/**
+ * Advance a unit's burn by `dt`, draining the damage pool in fixed
+ * `BURN_TICK_INTERVAL` chunks via the `deal` callback — which routes through
+ * the caller's damage function so kills, gold, and hit events fire exactly as a
+ * direct hit would. No-op when not burning. Each chunk is clamped to what's
+ * left, so the pool always drains to exactly zero.
+ */
+export function stepBurn(target: Burnable, dt: number, deal: (damage: number) => void): void {
+  if (target.burnRemaining <= 0) return;
+  target.burnTickAccum += dt;
+
+  while (target.burnTickAccum >= BURN_TICK_INTERVAL && target.burnRemaining > 0) {
+    target.burnTickAccum -= BURN_TICK_INTERVAL;
+    const chunk = Math.min(target.burnDps * BURN_TICK_INTERVAL, target.burnRemaining);
+    target.burnRemaining -= chunk;
+    if (target.alive) deal(chunk);
+  }
+  // Pool emptied — reset the cadence so the next stack starts clean.
+  if (target.burnRemaining <= 0) {
+    target.burnRemaining = 0;
+    target.burnTickAccum = 0;
+  }
+}
+
 // ── Unified damage application ───────────────────────────────────────
 
 type DamageSource =

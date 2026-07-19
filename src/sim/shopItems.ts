@@ -35,7 +35,25 @@ export const ICE_BOW_SLOW_DURATION = 2;
 /** Speed multiplier while slowed. */
 export const ICE_BOW_SLOW_FACTOR = 0.8;
 
+/** Fraction of the triggering hit's damage dealt again as a burn (10%). */
+export const FIRE_BOW_BURN_FRACTION = 0.1;
+/** Burn duration (seconds) applied by Fire Bow on arrow hit. */
+export const FIRE_BOW_BURN_DURATION = 3;
+
 // ── Contexts ──────────────────────────────────────────────────────────
+
+/**
+ * The unit an owner's projectile struck — hero or creep. Exposes the debuff
+ * fields an on-hit hook may write (Ice Bow slow, Fire Bow burn). Both
+ * `HeroState` and `CreepState` structurally satisfy this shape.
+ */
+export interface ProjectileHitTarget {
+  slowTimer: number;
+  burnRemaining: number;
+  burnDps: number;
+  burnSourceId: string | null;
+  burnTickAccum: number;
+}
 
 /** Context passed to an item's `use.execute` callback. */
 export interface ItemUseContext {
@@ -81,8 +99,11 @@ export interface ShopItemDef {
     /** The item effect itself — mirrored identically in sim and prediction. */
     execute(ctx: ItemUseContext): void;
   };
-  /** Called when the owner's arrow/projectile hits a hero or creep. */
-  onProjectileHitHero?: (source: HeroState, target: { slowTimer: number }) => void;
+  /**
+   * Called when the owner's arrow/projectile hits a hero or creep, with the
+   * final (post-crit) `damage` of that hit — Fire Bow scales its burn off it.
+   */
+  onProjectileHitHero?: (source: HeroState, target: ProjectileHitTarget, damage: number) => void;
 }
 
 // ── Inventory helpers ─────────────────────────────────────────────────
@@ -262,6 +283,30 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     },
     onProjectileHitHero: (_source, target) => {
       target.slowTimer = ICE_BOW_SLOW_DURATION;
+    },
+  },
+  {
+    id: 'fire_bow',
+    name: 'Fire Bow',
+    icon: '🔥',
+    color: '#FF6633',
+    cost: 900,
+    description: 'Flame-enchanted arrows that set enemies ablaze. Burns stack, each adding damage over time.',
+    stats: [
+      { label: 'Burn Damage', values: [`${Math.round(FIRE_BOW_BURN_FRACTION * 100)}% of hit`] },
+      { label: 'Duration', values: [`${FIRE_BOW_BURN_DURATION}s`] },
+      { label: 'Stacks', values: ['Yes'] },
+    ],
+    apply: (_hero) => {
+      // Burn is applied via the onProjectileHitHero hook.
+    },
+    onProjectileHitHero: (source, target, damage) => {
+      // Stack: add this hit's contribution (`damage * fraction`) to the burn
+      // pool and re-time the drain to the full duration. Total burn always
+      // sums every hit's 10% — nothing is lost or double-counted.
+      target.burnRemaining += damage * FIRE_BOW_BURN_FRACTION;
+      target.burnDps = target.burnRemaining / FIRE_BOW_BURN_DURATION;
+      target.burnSourceId = source.id;
     },
   },
 ];
