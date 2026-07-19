@@ -136,15 +136,16 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     icon: '👁️',
     color: '#C8A050',
     cost: 200,
-    description: 'Deployable wards that grant vision of an area. Press W to place one.',
+    description: 'Deployable wards that grant vision of an area. Maximum 2 wards active per hero.',
     stats: [
-      { label: 'Charges', values: ['5'] },
+      { label: 'Charges', values: ['2'] },
+      { label: 'Max Active', values: ['2'] },
       { label: 'Sight Radius', values: [String(WARD.sightRadius)] },
       { label: 'Duration', values: [`${WARD.duration}s`] },
     ],
     stackable: true,
     apply: (hero) => {
-      hero.wardCharges += 5;
+      hero.wardCharges += 2;
     },
     use: {
       targeting: 'point',
@@ -171,10 +172,28 @@ export const SHOP_ITEMS: ShopItemDef[] = [
 
         hero.wardCharges--;
         if (hero.wardCharges === 0) removeItem(hero, 'sentry_wards');
+
+        // Enforce max 2 wards per hero — remove the oldest (lowest life) if at cap.
+        const myWards = state.wards.filter((w) => w.ownerId === hero.id);
+        if (myWards.length >= 2) {
+          // Oldest = smallest remaining life (placed earliest).
+          let oldestIdx = -1;
+          let lowestLife = Infinity;
+          for (let i = state.wards.length - 1; i >= 0; i--) {
+            const w = state.wards[i];
+            if (w.ownerId === hero.id && w.life < lowestLife) {
+              lowestLife = w.life;
+              oldestIdx = i;
+            }
+          }
+          if (oldestIdx !== -1) state.wards.splice(oldestIdx, 1);
+        }
+
         // Placing a ward breaks invisibility.
         breakInvisibility(hero);
         state.wards.push({
           id: `w${state.nextWardId++}`,
+          ownerId: hero.id,
           team: hero.team,
           pos,
           life: WARD.duration,

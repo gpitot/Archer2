@@ -159,6 +159,7 @@ export interface ProjectileState {
 
 export interface WardState {
   id: string;
+  ownerId: string;
   team: number;
   pos: Vec2;
   life: number;
