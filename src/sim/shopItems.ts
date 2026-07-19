@@ -22,6 +22,8 @@ import { WARD } from './rules';
 
 /** Blink Dagger cooldown in seconds. */
 export const BLINK_COOLDOWN = 10;
+/** Blink Dagger cast delay (seconds) before teleport. */
+export const BLINK_CAST_DELAY = 0.2;
 /** Blink Dagger maximum teleport range. */
 export const BLINK_RANGE = 450;
 
@@ -282,9 +284,10 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     icon: '🗡️',
     color: '#9370DB',
     cost: 1200,
-    description: 'Instantly teleport a short distance to a targeted location.',
+    description: 'Channel briefly then teleport a short distance to a targeted location.',
     stats: [
       { label: 'Cast Range', values: [String(BLINK_RANGE)] },
+      { label: 'Cast Delay', values: [`${BLINK_CAST_DELAY}s`] },
       { label: 'Cooldown', values: [`${BLINK_COOLDOWN}s`] },
     ],
     apply: (_hero) => {
@@ -302,9 +305,10 @@ export const SHOP_ITEMS: ShopItemDef[] = [
         const snapped = findReachableNear(world, ctx.x, ctx.z, hero.pos.x, hero.pos.z);
         if (!snapped) return;
 
-        // Teleport instantly — clear movement state.
+        // Begin cast delay — hero is immobilised, teleports when the timer expires.
         stopMovement(hero);
-        hero.pos = { x: snapped.x, z: snapped.z };
+        hero.blinkCastTimer = BLINK_CAST_DELAY;
+        hero.blinkTarget = { x: snapped.x, z: snapped.z };
         hero.itemCooldowns['blink_dagger'] = BLINK_COOLDOWN;
       },
     },

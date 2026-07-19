@@ -226,6 +226,9 @@ export function killHero(target: HeroState): void {
   target.moving = false;
   target.deaths++;
   target.killStreak = 0;
+  // Cancel any in-progress blink cast.
+  target.blinkCastTimer = 0;
+  target.blinkTarget = undefined;
 }
 
 function awardKillGold(state: MatchState, killer: HeroState, victim: HeroState): number {

@@ -255,13 +255,24 @@ function stepHero(hero: HeroState, dt: number): void {
     if (hero.invulnerableTimer <= 0) hero.invulnerable = false;
   }
 
+  // Blink Dagger cast delay — hero is immobilised until the timer expires.
+  if (hero.blinkCastTimer > 0) {
+    hero.blinkCastTimer -= dt;
+    if (hero.blinkCastTimer <= 0 && hero.blinkTarget) {
+      hero.pos = hero.blinkTarget;
+      hero.blinkTarget = undefined;
+      hero.blinkCastTimer = 0;
+    }
+  }
+
   stepRuneBuffs(hero, dt);
 
   if (hero.slowTimer > 0) {
     hero.slowTimer = Math.max(0, hero.slowTimer - dt);
   }
 
-  if (hero.moving && hero.path.length > 0) {
+  // Don't move while casting Blink Dagger.
+  if (hero.blinkCastTimer <= 0 && hero.moving && hero.path.length > 0) {
     followPath(hero, dt, {
       speed: heroSpeed(hero),
       arriveEpsilon: HERO.arriveEpsilon,
@@ -314,6 +325,8 @@ function respawn(hero: HeroState, pos: V.Vec2): void {
   hero.burnDps = 0;
   hero.burnSourceId = null;
   hero.burnTickAccum = 0;
+  hero.blinkCastTimer = 0;
+  hero.blinkTarget = undefined;
 }
 
 // ── Projectiles ───────────────────────────────────────────────────────

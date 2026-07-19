@@ -62,6 +62,7 @@ import { RuneView } from '../entities/RuneView';
 import { FountainView } from '../entities/FountainView';
 import { ExplosionEffects } from '../rendering/ExplosionEffect';
 import { ImpactEffects, ImpactElement } from '../rendering/ImpactEffect';
+import { PortalEffects } from '../rendering/PortalEffects';
 import { CreepView } from '../entities/CreepView';
 import { syncKeyedViews, syncStableViews } from './ViewSync';
 import { findStraddlingPair, pruneSnapshots, RenderClock, lerpHero, lerpCreep } from './NetSync';
@@ -203,6 +204,9 @@ export class Game {
   private _blastViews = new Map<string, BlastView>();
   private _explosions!: ExplosionEffects;
   private _impacts!: ImpactEffects;
+  private _portalEffects!: PortalEffects;
+  /** Previous blinkCastTimer per hero, to detect cast completion. */
+  private _prevBlinkTimer = new Map<string, number>();
   private _creepViews = new Map<string, CreepView>();
   private _runeViews = new Map<string, RuneView>();
   private _fountainViews = new Map<number, FountainView>();
@@ -557,6 +561,7 @@ export class Game {
     this._moveIndicators = new MoveIndicatorManager(this._scene);
     this._explosions = new ExplosionEffects(this._scene);
     this._impacts = new ImpactEffects(this._scene);
+    this._portalEffects = new PortalEffects(this._scene);
 
     // ── Debug panel (local dev only) ──
     if (!this._networkMode) {
@@ -864,6 +869,7 @@ export class Game {
     dst.team = src.team;
     dst.hp = src.hp;
     dst.alive = src.alive;
+    dst.blinkCastTimer = src.blinkCastTimer ?? 0;
   }
 
   /** Cold fields from a heroMeta message (shallow, safe for plain data). */
@@ -1551,6 +1557,19 @@ export class Game {
     for (const hero of this._state.heroes) {
       const view = this._heroViews.get(hero.id);
       if (view) view.sync(hero, dt);
+      // Blink Dagger portal visuals
+      const prev = this._prevBlinkTimer.get(hero.id) ?? 0;
+      const y = this._heightAt(hero.pos.x, hero.pos.z) + 2;
+      if (hero.blinkCastTimer > 0) {
+        this._portalEffects.showSourceRing(hero.id, hero.pos.x, y, hero.pos.z, hero.blinkCastTimer);
+      } else {
+        this._portalEffects.showSourceRing(hero.id, hero.pos.x, y, hero.pos.z, 0);
+        // Cast just completed — spawn destination burst
+        if (prev > 0 && hero.alive) {
+          this._portalEffects.spawnBurst(hero.pos.x, y, hero.pos.z);
+        }
+      }
+      this._prevBlinkTimer.set(hero.id, hero.blinkCastTimer);
     }
     // Sync projectile views
     this._syncProjectileViews();
@@ -1561,6 +1580,7 @@ export class Game {
     this._syncBlastViews();
     this._explosions.update(dt);
     this._impacts.update(dt);
+    this._portalEffects.update(dt);
     // Sync creep views
     this._syncCreepViews(dt);
     // Sync rune views

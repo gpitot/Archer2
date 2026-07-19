@@ -60,6 +60,8 @@ export interface SnapshotHero {
    * shipping every waypoint each tick isn't worth the bytes.
    */
   dest?: Vec2;
+  /** Blink Dagger cast delay timer (0 = not casting). */
+  blinkCastTimer: number;
 }
 
 /** Low-rate hero fields: progression, economy, and timers. */

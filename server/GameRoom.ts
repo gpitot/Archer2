@@ -381,6 +381,7 @@ export class GameRoom extends DurableObject<Env> {
       hp: q(h.hp),
       alive: h.alive,
       moving: h.moving,
+      blinkCastTimer: q(h.blinkCastTimer),
     };
     if (h.moving && h.path.length > 0) {
       const dest = h.path[h.path.length - 1];

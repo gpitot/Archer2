@@ -123,6 +123,10 @@ export interface HeroState extends UnitCore {
   burnSourceId: string | null;
   /** Accumulates elapsed time toward the next discrete burn damage tick. */
   burnTickAccum: number;
+  /** Blink Dagger cast delay timer (seconds; 0 = not casting). */
+  blinkCastTimer: number;
+  /** Where to teleport when the cast delay expires. */
+  blinkTarget?: Vec2;
 }
 
 export interface ProjectileState {
@@ -352,6 +356,7 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     burnDps: 0,
     burnSourceId: null,
     burnTickAccum: 0,
+    blinkCastTimer: 0,
   };
 }
 
