@@ -64,6 +64,8 @@ export interface ShopItemDef {
   stats?: readonly StatLine[];
   /** Stackable items (e.g. ward charges) can be re-bought while owned. */
   stackable?: boolean;
+  /** Consumed on purchase — never occupies an inventory slot. Stats are applied permanently. */
+  consumable?: boolean;
   /** Passive stat application on purchase. */
   apply: (hero: HeroState) => void;
   /** Active-use behaviour (blink, wards, …). Cooldown goes through hero.itemCooldowns[id]. */
@@ -110,7 +112,7 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     name: 'Boots of Speed',
     icon: '🥾',
     color: '#8B6914',
-    cost: 5,
+    cost: 500,
     description: 'Sturdy boots that quicken your stride across the battlefield.',
     stats: [{ label: 'Movement Speed', values: ['+60'] }],
     apply: (hero) => {
@@ -122,7 +124,7 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     name: 'Sentry Wards',
     icon: '👁️',
     color: '#C8A050',
-    cost: 10,
+    cost: 200,
     description: 'Deployable wards that grant vision of an area. Press W to place one.',
     stats: [
       { label: 'Charges', values: ['5'] },
@@ -174,7 +176,7 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     name: 'Blink Dagger',
     icon: '🗡️',
     color: '#9370DB',
-    cost: 15,
+    cost: 1200,
     description: 'Instantly teleport a short distance to a targeted location.',
     stats: [
       { label: 'Cast Range', values: [String(BLINK_RANGE)] },
@@ -207,7 +209,7 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     name: 'Gem of Critical Strike',
     icon: '💎',
     color: '#FF4444',
-    cost: 20,
+    cost: 900,
     description: 'A gleaming gem that empowers your abilities to occasionally strike for double damage.',
     stats: [
       { label: 'Crit Chance', values: [`${Math.round(CRIT_CHANCE * 100)}%`] },
@@ -218,11 +220,38 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     },
   },
   {
+    id: 'strength_tome',
+    name: 'Tome of Strength',
+    icon: '💪',
+    color: '#44CC44',
+    cost: 200,
+    description: "A mystical tome that permanently increases your body's fortitude.",
+    stats: [{ label: 'Permanent Bonus', values: ['+50 Max HP'] }],
+    consumable: true,
+    apply: (hero) => {
+      hero.bonusHp += 50;
+      hero.hp += 50;
+    },
+  },
+  {
+    id: 'attack_tome',
+    name: 'Tome of Power',
+    icon: '📕',
+    color: '#FF6633',
+    cost: 200,
+    description: 'A mystical tome that permanently sharpens your offensive prowess.',
+    stats: [{ label: 'Permanent Bonus', values: ['+50 Ability Damage'] }],
+    consumable: true,
+    apply: (hero) => {
+      hero.bonusDamage += 50;
+    },
+  },
+  {
     id: 'ice_bow',
     name: 'Ice Bow',
     icon: '❄️',
     color: '#66CCFF',
-    cost: 12,
+    cost: 900,
     description: 'Frost-enchanted arrows that chill enemies on hit, slowing their movement.',
     stats: [
       { label: 'Slow', values: [`${Math.round((1 - ICE_BOW_SLOW_FACTOR) * 100)}%`] },
@@ -252,6 +281,6 @@ export function itemTooltip(def: ShopItemDef, includeCost = false): TooltipConte
     name: def.name,
     description: def.description,
     stats: def.stats,
-    footer: includeCost ? `Cost: ${def.cost}g` : undefined,
+    footer: includeCost ? `Cost: ${def.cost}g${def.consumable ? ' · consumed on use' : ''}` : undefined,
   };
 }

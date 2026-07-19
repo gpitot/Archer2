@@ -13,6 +13,8 @@ export interface ShopItem {
   stats?: readonly StatLine[];
   /** Stackable items (e.g. ward charges) can be re-bought while owned. */
   stackable?: boolean;
+  /** Consumed on purchase — never occupies an inventory slot. */
+  consumable?: boolean;
 }
 
 /**

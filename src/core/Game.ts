@@ -43,9 +43,9 @@ import { SimWorld, sphereHitsObstacle, FountainDef, findWalkableNearOnGrid, find
 import { advanceProjectile } from '../sim/projectiles';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
 import { AiController } from '../sim/ai/AiController';
-import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN, maxHpForLevel } from '../sim/rules';
+import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN, heroMaxHp } from '../sim/rules';
 import { ABILITIES, ABILITY_ORDER, AbilityDef, abilityTooltip, canCast } from '../sim/abilities';
-import { SHOP_ITEMS } from '../sim/shopItems';
+import { SHOP_ITEMS, SHOP_ITEMS_BY_ID } from '../sim/shopItems';
 import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta, CreepMeta, RuneMeta } from '../sim/protocol';
 import { creepMaxHp } from '../sim/creepRules';
 import { Vec2, distance } from '../sim/math';
@@ -852,6 +852,8 @@ export class Game {
     dst.multiKillCount = src.multiKillCount;
     dst.multiKillTimer = src.multiKillTimer;
     dst.speedBonus = src.speedBonus;
+    dst.bonusHp = src.bonusHp;
+    dst.bonusDamage = src.bonusDamage;
     dst.critChance = src.critChance;
     dst.inventory = [...src.inventory];
     dst.wardCharges = src.wardCharges;
@@ -1382,7 +1384,7 @@ export class Game {
   /** If the local hero is within a fountain's heal radius, trigger a sparkle effect. */
   private _updateHealSparkle(_dt: number): void {
     const hero = this._playerState;
-    if (!hero || !hero.alive || hero.hp >= maxHpForLevel(hero.level)) return;
+    if (!hero || !hero.alive || hero.hp >= heroMaxHp(hero.level, hero.bonusHp)) return;
     const view = this._playerView;
     if (!view) return;
     for (const fountain of this._world.fountains) {
@@ -1676,11 +1678,29 @@ export class Game {
         break;
       }
       case 'respawn':
-      case 'purchase':
       case 'levelUp':
         // UI is driven by state inspection each render frame; events are
         // informational for future network/audio hooks.
         break;
+      case 'purchase': {
+        // Tome purchase visual: float the stat gain above the hero.
+        const def = SHOP_ITEMS_BY_ID[ev.itemId];
+        if (def?.consumable) {
+          const buyerView = this._heroViews.get(ev.heroId);
+          if (buyerView) {
+            const pos = buyerView.mesh.position.clone();
+            pos.y += 60;
+            const label = def.id === 'strength_tome' ? '+50 HP' : def.id === 'attack_tome' ? '+50 DMG' : '';
+            if (label) this._floatingText.spawnText(pos, label, def.id === 'strength_tome' ? '#44cc44' : '#ff8844');
+          }
+          // Quick golden flash on the hero mesh.
+          const buyer = this._state.heroes.find((h) => h.id === ev.heroId);
+          if (buyer && buyerView) {
+            buyerView.flashHeal(); // reuse green glow as a quick feedback flash
+          }
+        }
+        break;
+      }
     }
   }
 
