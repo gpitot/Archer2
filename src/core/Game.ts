@@ -61,6 +61,7 @@ import { BlastView } from '../entities/BlastView';
 import { RuneView } from '../entities/RuneView';
 import { FountainView } from '../entities/FountainView';
 import { ExplosionEffects } from '../rendering/ExplosionEffect';
+import { ImpactEffects, ImpactElement } from '../rendering/ImpactEffect';
 import { CreepView } from '../entities/CreepView';
 import { syncKeyedViews, syncStableViews } from './ViewSync';
 import { findStraddlingPair, pruneSnapshots, RenderClock, lerpHero, lerpCreep } from './NetSync';
@@ -201,6 +202,7 @@ export class Game {
   private _wardViews = new Map<string, WardView>();
   private _blastViews = new Map<string, BlastView>();
   private _explosions!: ExplosionEffects;
+  private _impacts!: ImpactEffects;
   private _creepViews = new Map<string, CreepView>();
   private _runeViews = new Map<string, RuneView>();
   private _fountainViews = new Map<number, FountainView>();
@@ -529,6 +531,7 @@ export class Game {
     this._kdDisplay = new KDDisplay();
     this._moveIndicators = new MoveIndicatorManager(this._scene);
     this._explosions = new ExplosionEffects(this._scene);
+    this._impacts = new ImpactEffects(this._scene);
 
     // ── Debug panel (local dev only) ──
     if (!this._networkMode) {
@@ -1499,6 +1502,7 @@ export class Game {
     // Sync blast zone views + transient explosion effects
     this._syncBlastViews();
     this._explosions.update(dt);
+    this._impacts.update(dt);
     // Sync creep views
     this._syncCreepViews(dt);
     // Sync rune views
@@ -1528,6 +1532,26 @@ export class Game {
 
   // ── Event handling ──────────────────────────────────────────────────
 
+  /**
+   * Which elemental arrow a hero shot fired, from the shooter's bow, or null
+   * for a plain arrow / a non-hero source (creep melee & fireballs). Drives the
+   * frost/flame impact burst on the struck enemy. `fire_bow` is wired ahead of
+   * the item itself so the fire look lights up the moment that bow ships.
+   */
+  private _arrowElement(sourceId: string): ImpactElement | null {
+    const src = this._state.heroes.find((h) => h.id === sourceId);
+    if (!src) return null;
+    if (src.inventory.includes('fire_bow')) return 'fire';
+    if (src.inventory.includes('ice_bow')) return 'ice';
+    return null;
+  }
+
+  /** Spawn an elemental impact burst on a struck enemy at its view position. */
+  private _spawnArrowImpact(sourceId: string, targetPos: THREE.Vector3): void {
+    const el = this._arrowElement(sourceId);
+    if (el) this._impacts.spawn(targetPos.x, targetPos.y + 26, targetPos.z, el);
+  }
+
   private _handleEvent(ev: SimEvent, _dt: number): void {
     switch (ev.type) {
       case 'hit': {
@@ -1538,6 +1562,8 @@ export class Game {
         }
         // Hit flash on the target's view
         targetView?.flashHit();
+        // Elemental burst if the shooter carried an ice/fire bow.
+        if (targetView) this._spawnArrowImpact(ev.sourceId, targetView.mesh.position);
         // A creep melee swing lands as a 'hit' from a creep source — play its
         // attack lunge (heroes never share ids with creeps).
         this._creepViews.get(ev.sourceId)?.playAttack();
@@ -1567,6 +1593,8 @@ export class Game {
         if (creepView) {
           this._floatingText.spawn(creepView.mesh.position, ev.damage, undefined, ev.crit);
           creepView.flashHit();
+          // Elemental burst if the shooter carried an ice/fire bow.
+          this._spawnArrowImpact(ev.sourceId, creepView.mesh.position);
         }
         break;
       }
