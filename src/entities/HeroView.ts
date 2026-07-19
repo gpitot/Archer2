@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { HeroState } from '../sim/state';
-import { HERO, maxHpForLevel } from '../sim/rules';
+import { HERO, heroMaxHp } from '../sim/rules';
 import { RUNE_TYPES, RuneTypeId } from '../sim/runeRules';
 import { heroSpeed } from '../sim/stepMatch';
 import { HealthBar } from './HealthBar';
@@ -44,7 +44,7 @@ export class HeroView extends UnitView {
     // space, which is scaled up by MESH_SCALE.
     this.addFootRing(HERO.bodyRadius / MESH_SCALE, color);
 
-    this._healthBar = new HealthBar(maxHpForLevel(1));
+    this._healthBar = new HealthBar(heroMaxHp(1, 0));
     this._healthBar.sprite.position.set(0, 2.5, 0); // above archer's head
     this.mesh.add(this._healthBar.sprite);
 
@@ -108,7 +108,7 @@ export class HeroView extends UnitView {
 
     this.mesh.visible = true;
     this._healthBar.show();
-    this._healthBar.setHP(state.hp, maxHpForLevel(state.level));
+    this._healthBar.setHP(state.hp, heroMaxHp(state.level, state.bonusHp));
 
     const y = this._heightAt(state.pos.x, state.pos.z) + HERO.groundOffset;
     this.mesh.position.set(state.pos.x, y, state.pos.z);

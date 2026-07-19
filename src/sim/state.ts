@@ -98,6 +98,10 @@ export interface HeroState extends UnitCore {
 
   // Items / abilities
   speedBonus: number;
+  /** Permanent bonus HP from consumed tomes (survives death). */
+  bonusHp: number;
+  /** Permanent bonus damage from consumed tomes. */
+  bonusDamage: number;
   /** Chance (0–1) for any ability to deal double damage. */
   critChance: number;
   /** Per-ability rank/cooldown/charge state, keyed in ABILITY_ORDER. */
@@ -314,6 +318,8 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     multiKillCount: 0,
     multiKillTimer: 0,
     speedBonus: 0,
+    bonusHp: 0,
+    bonusDamage: 0,
     critChance: 0,
     // Built in ABILITY_ORDER so key iteration is identical on every peer.
     // The level-1 skill point is auto-spent on Q (it's the basic attack), so

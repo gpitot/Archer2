@@ -25,7 +25,7 @@ import {
   basicRankCap,
   BLAST,
   HERO,
-  maxHpForLevel,
+  heroMaxHp,
   PASSIVE_INCOME,
   ultimateRankCap,
   XP_TABLE,
@@ -158,6 +158,15 @@ function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]
   stopMovement(hero);
   const item = shop.items[index];
   if (hero.gold < item.cost) return;
+
+  // Consumables (tomes): apply stats immediately, no inventory slot.
+  if (item.consumable) {
+    hero.gold -= item.cost;
+    item.apply(hero);
+    events.push({ type: 'purchase', heroId: hero.id, itemId: item.id });
+    return;
+  }
+
   const owned = hero.inventory.includes(item.id);
   if (owned && !item.stackable) return;
   if (!owned && addItem(hero, item.id) === -1) return; // inventory full
@@ -270,7 +279,7 @@ function updateFacing(hero: HeroState, dt: number): void {
 
 function respawn(hero: HeroState, pos: V.Vec2): void {
   hero.pos = { x: pos.x, z: pos.z };
-  hero.hp = maxHpForLevel(hero.level);
+  hero.hp = heroMaxHp(hero.level, hero.bonusHp);
   hero.alive = true;
   hero.invulnerable = true;
   hero.invulnerableTimer = HERO.respawnInvuln;
@@ -427,7 +436,7 @@ function stepBlasts(state: MatchState, dt: number, events: SimEvent[], rng: () =
 function stepFountains(state: MatchState, dt: number, world: SimWorld): void {
   if (world.fountains.length === 0) return;
   for (const hero of state.heroes) {
-    const maxHp = maxHpForLevel(hero.level);
+    const maxHp = heroMaxHp(hero.level, hero.bonusHp);
     if (!hero.alive || hero.hp >= maxHp) continue;
     for (const fountain of world.fountains) {
       if (V.distanceSq(hero.pos, fountain.pos) <= fountain.healRadius * fountain.healRadius) {

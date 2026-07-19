@@ -32,6 +32,11 @@ export function maxHpForLevel(level: number): number {
   return HERO.maxHp + HERO.hpPerLevel * (level - 1);
 }
 
+/** Max HP including permanent bonuses from tomes. */
+export function heroMaxHp(level: number, bonusHp: number): number {
+  return maxHpForLevel(level) + bonusHp;
+}
+
 /** Total XP required to have reached each level (index = level, 1-based). */
 export const XP_TABLE = [
   0, 0, 200, 500, 900, 1400, 2000, 2700, 3500, 4400, 5400,

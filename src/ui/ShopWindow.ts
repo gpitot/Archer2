@@ -77,8 +77,8 @@ export class ShopWindow {
     this._itemEls = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      const owned = inventory.includes(item.id);
-      const canBuy = !owned && heroGold >= item.cost;
+      const owned = !item.consumable && inventory.includes(item.id);
+      const canBuy = (item.consumable || !owned) && heroGold >= item.cost;
 
       const row = document.createElement('div');
       row.style.cssText = `
@@ -180,8 +180,8 @@ export class ShopWindow {
     const items = this._items as ShopItem[];
     for (let i = 0; i < this._itemEls.length; i++) {
       const item = items[i];
-      const owned = inventory.includes(item.id);
-      const canBuy = !owned && heroGold >= item.cost;
+      const owned = !item.consumable && inventory.includes(item.id);
+      const canBuy = (item.consumable || !owned) && heroGold >= item.cost;
       const row = this._itemEls[i];
       // Update background / opacity
       if (owned) {

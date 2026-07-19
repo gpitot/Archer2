@@ -5,7 +5,7 @@
  *   • Top: health (green → yellow → red gradient, current / max HP)
  *   • Bottom: XP toward next level (gold gradient)
  */
-import { HERO, maxHpForLevel } from '../sim/rules';
+import { HERO, heroMaxHp } from '../sim/rules';
 import { xpForLevel } from '../sim/stepMatch';
 
 export class HeroStatusBar {
@@ -112,12 +112,12 @@ export class HeroStatusBar {
   /**
    * Redraw bars and level. Call every frame from `updateHud`.
    */
-  update(hp: number, level: number, xp: number): void {
+  update(hp: number, level: number, xp: number, bonusHp = 0): void {
     // ── Level ──
     this._levelLabel.textContent = String(level);
 
     // ── HP bar ──
-    const maxHp = maxHpForLevel(level);
+    const maxHp = heroMaxHp(level, bonusHp);
     const hpFrac = Math.max(0, Math.min(1, hp / maxHp));
     this._hpFill.style.width = `${(hpFrac * 100).toFixed(1)}%`;
     this._hpFill.style.background = hpFrac > 0.5

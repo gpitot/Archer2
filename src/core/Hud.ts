@@ -146,8 +146,8 @@ export function updateHud(ctx: HudContext): void {
     cdProgress[itemId] = remaining <= 0 || !maxCd ? 1 : 1 - remaining / maxCd;
   }
   ctx.itemBar.update(p.inventory, charges, cdProgress, cdRemaining);
-  ctx.statusBar.update(p.hp, p.level, p.xp);
   ctx.kdDisplay.update(p.kills, p.deaths, p.gold, ctx.gameTime);
+  ctx.statusBar.update(p.hp, p.level, p.xp, p.bonusHp);
 
   // ── Shop ─────────────────────────────────────────────────────────
 

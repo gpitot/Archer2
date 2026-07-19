@@ -225,7 +225,7 @@ export function stepArrowWindup(
     speed: ARROW.speed,
     maxRange: ARROW.rangeByLevel[a.level],
     traveled: 0,
-    damage: ARROW.damageByLevel[a.level],
+    damage: ARROW.damageByLevel[a.level] + hero.bonusDamage,
   });
   a.charges!--;
   a.recoil = ARROW.recoilTime;
@@ -335,7 +335,7 @@ function castBlast(ctx: CastContext): void {
     team: hero.team,
     pos: target,
     timer: BLAST.delay,
-    damage: BLAST.damageByLevel[a.level],
+    damage: BLAST.damageByLevel[a.level] + hero.bonusDamage,
   });
 }
 
