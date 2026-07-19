@@ -495,6 +495,6 @@ export class GameRoom extends DurableObject<Env> {
     }));
 
     this._mapName = mapName;
-    this._world = { navGrid, pathfinder, obstacles, arena, shop, fountains };
+    this._world = { navGrid, pathfinder, obstacles, arena, shops: [shop], fountains };
   }
 }

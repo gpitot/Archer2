@@ -480,6 +480,12 @@ export const NAVDATA = {
 
     /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
     runes: null,
+
+    /** Authored fountain placements (custom maps); null → built-in defaults. */
+    fountains: null,
+
+    /** Authored shop placements (custom maps); null → arena-centre default. */
+    shops: null,
   },
   "test": {
     /** Bit-packed walkable cells, 1 bit per cell, row-major (south-to-north). */
@@ -518,6 +524,56 @@ export const NAVDATA = {
 
     /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
     runes: null,
+
+    /** Authored fountain placements (custom maps); null → built-in defaults. */
+    fountains: null,
+
+    /** Authored shop placements (custom maps); null → arena-centre default. */
+    shops: null,
+  },
+  "1v1": {
+    /** Bit-packed walkable cells, 1 bit per cell, row-major (south-to-north). */
+    navGrid: {
+      width: 64,
+      height: 64,
+      cellSize: 32,
+      originX: -1024,
+      originZ: -1024,
+      /** Base64-encoded Uint8Array of bit-packed walkable booleans. */
+      cellsBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADw//////9/DsD///////8O8P///////wvA////////C8D///////8D8P9//v///wPw/x/+////D/D/lP////8P8P/0//D//w/w////8P//D/D////w//8P8P////D/zw/w//8P8P+/D/D//w/w/78P8P//D/D//w/w//8P8P8/D/D9/wD///8PcP3/AP//Pw9w8/8A////D/D+/wD//38PcPoP8P/wfw/w/g/w//D/D/D/D/D/8H8P8P8P8P/w/w/w/w//D/D/D/D/D/8P8P8P8P8P/w/w/w/w/w//D/D/D/D/AP8P//8P8P8A/w///w/w/wD/D///D/D/AP8P//8P8P/w/w///w/w//D/D///D/D/8P8P//8P8P/w/w///wvw//D/AP//CvD/8P8A/58P8P/w/wD/lw3w//D/AP/XA/D////w/38D8P////D/fw/w////8P//APD////w//8D8P////D//wnw////8P//D/D////w//8P0P////D//wvw//8P8P//D9D//w/w//8L0P//D/D//wvw//8P8P//DED/////HwoM8P////8fyg8Q/////8f/DxD/////9/8PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    },
+
+    /** Full-resolution height grid (Float32Array). */
+    heightGrid: {
+      width: 17,
+      height: 17,
+      /** Base64-encoded Float32Array of world-space elevations. */
+      heightsBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDAAAAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQwAAAEMAAABDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAQwAAAEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDAAAAQwAAAEMAAABDAAAAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAQwAAAEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDAAAAQwAAAEMAAABDAAAAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAQwAAAEMAAABDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQwAAAEMAAABDAAAAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQwAAAEMAAABDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQwAAAEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    },
+
+    /** Solid doodad AABBs (projectile collision). */
+    obstacles: [
+
+    ],
+
+    arena: {"minX":-896,"minZ":-896,"maxX":896,"maxZ":896,"centerX":0,"centerZ":0,"width":1792,"height":1792},
+
+    shopPos: { x: -656.0, z: -656.0 },
+
+    /** Authored creep camps (custom maps); null → arena-fraction CAMP_DEFS. */
+    camps: [{"id":"camp_1","x":-409,"z":736,"units":["ghoul","ghoul","dragon"]},{"id":"camp_2","x":684,"z":-639,"units":["ghoul","ghoul","dragon"]}],
+
+    /** Fixed hero spawns (custom maps); null → random walkable spawns. */
+    spawns: [{"x":-43,"z":-863},{"x":11,"z":832}],
+
+    /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
+    runes: [{"x":-766,"z":-175},{"x":677,"z":727}],
+
+    /** Authored fountain placements (custom maps); null → built-in defaults. */
+    fountains: null,
+
+    /** Authored shop placements (custom maps); null → arena-centre default. */
+    shops: [{"x":-666,"z":-662},{"x":613,"z":231}],
   },
   "glade": {
     /** Bit-packed walkable cells, 1 bit per cell, row-major (south-to-north). */
@@ -557,6 +613,56 @@ export const NAVDATA = {
 
     /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
     runes: null,
+
+    /** Authored fountain placements (custom maps); null → built-in defaults. */
+    fountains: null,
+
+    /** Authored shop placements (custom maps); null → arena-centre default. */
+    shops: null,
+  },
+  "perf": {
+    /** Bit-packed walkable cells, 1 bit per cell, row-major (south-to-north). */
+    navGrid: {
+      width: 64,
+      height: 64,
+      cellSize: 32,
+      originX: -1024,
+      originZ: -1024,
+      /** Base64-encoded Uint8Array of bit-packed walkable booleans. */
+      cellsBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADw////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    },
+
+    /** Full-resolution height grid (Float32Array). */
+    heightGrid: {
+      width: 17,
+      height: 17,
+      /** Base64-encoded Float32Array of world-space elevations. */
+      heightsBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    },
+
+    /** Solid doodad AABBs (projectile collision). */
+    obstacles: [
+
+    ],
+
+    arena: {"minX":-896,"minZ":-896,"maxX":896,"maxZ":896,"centerX":0,"centerZ":0,"width":1792,"height":1792},
+
+    shopPos: { x: 16.0, z: 16.0 },
+
+    /** Authored creep camps (custom maps); null → arena-fraction CAMP_DEFS. */
+    camps: [{"id":"camp_1","x":-658,"z":-400,"units":["ghoul","ghoul"]},{"id":"camp_2","x":-621,"z":-19,"units":["ghoul","ghoul"]},{"id":"camp_3","x":-485,"z":177,"units":["ghoul","ghoul"]},{"id":"camp_4","x":-21,"z":246,"units":["ghoul","ghoul"]},{"id":"camp_5","x":237,"z":54,"units":["ghoul","ghoul"]},{"id":"camp_6","x":205,"z":-412,"units":["ghoul","ghoul"]},{"id":"camp_7","x":49,"z":-549,"units":["ghoul","ghoul"]},{"id":"camp_8","x":-228,"z":-549,"units":["ghoul","ghoul"]}],
+
+    /** Fixed hero spawns (custom maps); null → random walkable spawns. */
+    spawns: [{"x":-471,"z":-282},{"x":-447,"z":-16},{"x":-71,"z":-17},{"x":-76,"z":-336}],
+
+    /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
+    runes: null,
+
+    /** Authored fountain placements (custom maps); null → built-in defaults. */
+    fountains: null,
+
+    /** Authored shop placements (custom maps); null → arena-centre default. */
+    shops: null,
   }
 } as const;
 

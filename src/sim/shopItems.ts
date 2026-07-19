@@ -129,18 +129,6 @@ export function removeItem(hero: HeroState, itemId: string): void {
 
 export const SHOP_ITEMS: ShopItemDef[] = [
   {
-    id: 'boots',
-    name: 'Boots of Speed',
-    icon: '🥾',
-    color: '#8B6914',
-    cost: 500,
-    description: 'Sturdy boots that quicken your stride across the battlefield.',
-    stats: [{ label: 'Movement Speed', values: ['+60'] }],
-    apply: (hero) => {
-      hero.speedBonus += 60;
-    },
-  },
-  {
     id: 'sentry_wards',
     name: 'Sentry Wards',
     icon: '👁️',
@@ -193,54 +181,6 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     },
   },
   {
-    id: 'blink_dagger',
-    name: 'Blink Dagger',
-    icon: '🗡️',
-    color: '#9370DB',
-    cost: 1200,
-    description: 'Instantly teleport a short distance to a targeted location.',
-    stats: [
-      { label: 'Cast Range', values: [String(BLINK_RANGE)] },
-      { label: 'Cooldown', values: [`${BLINK_COOLDOWN}s`] },
-    ],
-    apply: (_hero) => {
-      // Effect is handled via the use.execute callback.
-    },
-    use: {
-      targeting: 'point',
-      range: BLINK_RANGE,
-      cooldown: BLINK_COOLDOWN,
-      execute(ctx) {
-        const { hero, world } = ctx;
-        if (!hero.alive) return;
-        if (ctx.x === undefined || ctx.z === undefined) return;
-        // Snap to nearest walkable, reachable cell.
-        const snapped = findReachableNear(world, ctx.x, ctx.z, hero.pos.x, hero.pos.z);
-        if (!snapped) return;
-
-        // Teleport instantly — clear movement state.
-        stopMovement(hero);
-        hero.pos = { x: snapped.x, z: snapped.z };
-        hero.itemCooldowns['blink_dagger'] = BLINK_COOLDOWN;
-      },
-    },
-  },
-  {
-    id: 'crit_gem',
-    name: 'Gem of Critical Strike',
-    icon: '💎',
-    color: '#FF4444',
-    cost: 900,
-    description: 'A gleaming gem that empowers your abilities to occasionally strike for double damage.',
-    stats: [
-      { label: 'Crit Chance', values: [`${Math.round(CRIT_CHANCE * 100)}%`] },
-      { label: 'Crit Damage', values: [`${CRIT_MULTIPLIER}x`] },
-    ],
-    apply: (hero) => {
-      hero.critChance = Math.min(1, hero.critChance + CRIT_CHANCE);
-    },
-  },
-  {
     id: 'strength_tome',
     name: 'Tome of Strength',
     icon: '💪',
@@ -265,6 +205,33 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     consumable: true,
     apply: (hero) => {
       hero.bonusDamage += 50;
+    },
+  },
+  {
+    id: 'boots',
+    name: 'Boots of Speed',
+    icon: '🥾',
+    color: '#8B6914',
+    cost: 500,
+    description: 'Sturdy boots that quicken your stride across the battlefield.',
+    stats: [{ label: 'Movement Speed', values: ['+60'] }],
+    apply: (hero) => {
+      hero.speedBonus += 60;
+    },
+  },
+  {
+    id: 'crit_gem',
+    name: 'Gem of Critical Strike',
+    icon: '💎',
+    color: '#FF4444',
+    cost: 900,
+    description: 'A gleaming gem that empowers your abilities to occasionally strike for double damage.',
+    stats: [
+      { label: 'Crit Chance', values: [`${Math.round(CRIT_CHANCE * 100)}%`] },
+      { label: 'Crit Damage', values: [`${CRIT_MULTIPLIER}x`] },
+    ],
+    apply: (hero) => {
+      hero.critChance = Math.min(1, hero.critChance + CRIT_CHANCE);
     },
   },
   {
@@ -307,6 +274,39 @@ export const SHOP_ITEMS: ShopItemDef[] = [
       target.burnRemaining += damage * FIRE_BOW_BURN_FRACTION;
       target.burnDps = target.burnRemaining / FIRE_BOW_BURN_DURATION;
       target.burnSourceId = source.id;
+    },
+  },
+  {
+    id: 'blink_dagger',
+    name: 'Blink Dagger',
+    icon: '🗡️',
+    color: '#9370DB',
+    cost: 1200,
+    description: 'Instantly teleport a short distance to a targeted location.',
+    stats: [
+      { label: 'Cast Range', values: [String(BLINK_RANGE)] },
+      { label: 'Cooldown', values: [`${BLINK_COOLDOWN}s`] },
+    ],
+    apply: (_hero) => {
+      // Effect is handled via the use.execute callback.
+    },
+    use: {
+      targeting: 'point',
+      range: BLINK_RANGE,
+      cooldown: BLINK_COOLDOWN,
+      execute(ctx) {
+        const { hero, world } = ctx;
+        if (!hero.alive) return;
+        if (ctx.x === undefined || ctx.z === undefined) return;
+        // Snap to nearest walkable, reachable cell.
+        const snapped = findReachableNear(world, ctx.x, ctx.z, hero.pos.x, hero.pos.z);
+        if (!snapped) return;
+
+        // Teleport instantly — clear movement state.
+        stopMovement(hero);
+        hero.pos = { x: snapped.x, z: snapped.z };
+        hero.itemCooldowns['blink_dagger'] = BLINK_COOLDOWN;
+      },
     },
   },
 ];

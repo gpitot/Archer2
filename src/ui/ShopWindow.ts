@@ -1,6 +1,6 @@
 import { ShopItem } from '../world/Shop';
-import { renderStatRows } from './Tooltip';
-import { SHOP_ITEMS_BY_ID } from '../sim/shopItems';
+import { Tooltip } from './Tooltip';
+import { SHOP_ITEMS_BY_ID, itemTooltip } from '../sim/shopItems';
 
 interface ShopCallback {
   onBuy: (shopIndex: number, itemIndex: number) => void;
@@ -9,7 +9,8 @@ interface ShopCallback {
 
 /**
  * Modal shop window — opens when left-clicking a shop.
- * Shows all items with name, description, cost. Click or press 1–6 to buy.
+ * Shows all items with icon, name, cost. Hover for description + stats.
+ * Click or press 1–6 to buy.
  * When out of range, items are disabled but the window stays open.
  */
 export class ShopWindow {
@@ -150,18 +151,19 @@ export class ShopWindow {
       `;
       row.appendChild(key);
 
-      // Name + desc + stats
+      // Name only — description + stats shown on hover via tooltip
       const info = document.createElement('div');
       info.style.cssText = 'flex: 1;';
-      const stats = item.stats && item.stats.length > 0
-        ? `<div style="margin-top:4px;max-width:220px;">${renderStatRows(item.stats)}</div>`
-        : '';
       info.innerHTML = `
         <div style="color:#fff;font-size:13px;font-weight:bold;">${item.name}</div>
-        <div style="color:#999;font-size:10px;line-height:1.3;">${item.description || ''}</div>
-        ${stats}
       `;
       row.appendChild(info);
+
+      // Hover tooltip (like inventory / spell bar)
+      Tooltip.shared().attach(row, () => {
+        const def = SHOP_ITEMS_BY_ID[item.id];
+        return def ? itemTooltip(def, true) : null;
+      });
 
       // Cost / Owned
       const cost = document.createElement('span');
