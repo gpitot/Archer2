@@ -61,13 +61,14 @@ export function buildSimWorld(
   // Shop position — find walkable near arena centre
   const shopPos = findWalkableNearOnGrid(navGrid, arena.centerX, arena.centerZ);
 
-  const shop: Shop = {
+  const shops: Shop[] = [{
     pos: shopPos,
-    interactRadius: 180,
+    interactRadius: 85,
+    buyRadius: 400,
     items: SHOP_ITEMS,
-  };
+  }];
 
-  return { navGrid, pathfinder, obstacles, arena, shop, fountains: [] };
+  return { navGrid, pathfinder, obstacles, arena, shops, fountains: [] };
 }
 
 /** Build a SimWorld from precomputed navdata.json (server path). */
@@ -92,11 +93,14 @@ export function buildSimWorldFromNavdata(navdata: {
 
   const obstacles: ObstacleAABB[] = navdata.obstacles.map((o) => ({ ...o }));
 
-  const shop: Shop = {
-    pos: { x: navdata.shopPos.x, z: navdata.shopPos.z },
-    interactRadius: 180,
+  // Shops: support both legacy single shopPos and new shopPositions array
+  const shopPts = ((navdata as any).shopPositions as { x: number; z: number }[] | undefined) ?? [navdata.shopPos];
+  const shops: Shop[] = shopPts.map((sp) => ({
+    pos: { x: sp.x, z: sp.z },
+    interactRadius: 85,
+    buyRadius: 400,
     items: SHOP_ITEMS,
-  };
+  }));
 
   // Fountains: use authored positions or default to empty.
   const fountains: import('./world').FountainDef[] = (navdata.fountains ?? []).map((f) => ({
@@ -110,7 +114,7 @@ export function buildSimWorldFromNavdata(navdata: {
     pathfinder,
     obstacles,
     arena: { ...navdata.arenas.terrain1 },
-    shop,
+    shops,
     fountains,
   };
 }

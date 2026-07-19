@@ -36,7 +36,10 @@ export { type ShopItemDef };
 
 export interface Shop {
   pos: Vec2;
+  /** Radius for clicking to open the shop UI (should match the mesh size). */
   interactRadius: number;
+  /** Radius for being in range to buy items. */
+  buyRadius: number;
   items: ShopItemDef[];
 }
 
@@ -52,7 +55,7 @@ export interface SimWorld {
   pathfinder: Pathfinder;
   obstacles: ObstacleAABB[];
   arena: Rect;
-  shop: Shop;
+  shops: Shop[];
   /** Static healing fountains placed on the map. */
   fountains: FountainDef[];
 }
@@ -76,12 +79,13 @@ export function sphereHitsObstacle(world: { obstacles: ObstacleAABB[] }, pos: Ve
  * cliff tops or islets). Falls back to the arena center.
  */
 export function findRespawnPosition(world: SimWorld, rng: () => number = Math.random): Vec2 {
-  const { navGrid, pathfinder, arena, shop } = world;
+  const { navGrid, pathfinder, arena, shops } = world;
+  const anchor = shops.length > 0 ? shops[0].pos : { x: arena.centerX, z: arena.centerZ };
   for (let attempt = 0; attempt < 500; attempt++) {
     const wx = arena.minX + rng() * arena.width;
     const wz = arena.minZ + rng() * arena.height;
     const { gx, gz } = navGrid.worldToGrid(wx, wz);
-    if (navGrid.isWalkable(gx, gz) && pathfinder.isReachable(wx, wz, shop.pos.x, shop.pos.z)) {
+    if (navGrid.isWalkable(gx, gz) && pathfinder.isReachable(wx, wz, anchor.x, anchor.z)) {
       const { wx: cx, wz: cz } = navGrid.gridToWorld(gx, gz);
       return { x: cx, z: cz };
     }

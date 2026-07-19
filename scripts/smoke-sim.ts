@@ -20,7 +20,7 @@ const navdataPath = path.resolve(__dirname, '..', 'assets', 'navdata.json');
 const navdata = JSON.parse(fs.readFileSync(navdataPath, 'utf-8'));
 const world = buildSimWorldFromNavdata(navdata);
 
-const shopPos = world.shop.pos;
+const shopPos = world.shops[0].pos;
 
 // Seeded RNG for deterministic respawn positions in tests.
 let seed = 42;

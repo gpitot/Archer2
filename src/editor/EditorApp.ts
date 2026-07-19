@@ -27,6 +27,7 @@ import {
 import { TILE_SIZE } from '../world/wc3/W3EParser';
 import { worldToTile } from '../world/wc3/MapData';
 import { RUNE } from '../sim/runeRules';
+import { SHOP_ITEMS } from '../sim/shopItems';
 import { Overlays, disposeObject } from './overlays';
 import { EditorUI } from './ui';
 import { ToolId, TOOL_BY_KEY, CAMP_PRESETS, DECO_KINDS, TEXTURES } from './tools';
@@ -257,8 +258,13 @@ export class EditorApp {
 
     // Override shop positions from map source
     if (this._src.shops.length > 0) {
-      const firstShop = this._src.shops[0];
-      this._world.shop.pos = { x: firstShop.x, z: firstShop.z };
+      // Sync sim world shops array
+      this._world.shops = this._src.shops.map((s) => ({
+        pos: { x: s.x, z: s.z },
+        interactRadius: 85,
+        buyRadius: 400,
+        items: SHOP_ITEMS,
+      }));
     }
 
     this._overlays.refresh(this._src, this._custom, this._world.navGrid, heightAt);

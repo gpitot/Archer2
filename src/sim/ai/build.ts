@@ -44,7 +44,7 @@ export const SHOP_BUILD_ORDER: readonly string[] = [
 
 export interface ShopPick {
   id: string;
-  /** Index into `world.shop.items` (== SHOP_ITEMS) for the `buy` command. */
+  /** Index into shop's items array for the `buy` command. */
   index: number;
   cost: number;
 }

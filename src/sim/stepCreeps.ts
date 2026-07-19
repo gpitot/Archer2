@@ -116,7 +116,7 @@ export function spawnCamps(state: MatchState, world: SimWorld, camps?: readonly 
   let nextId = 1;
   for (const def of defs) {
     const center =
-      findReachableNear(world, def.x, def.z, world.shop.pos.x, world.shop.pos.z) ??
+      findReachableNear(world, def.x, def.z, world.shops[0].pos.x, world.shops[0].pos.z) ??
       findWalkableNear(world, def.x, def.z);
     buildCamp(state, world, def.id, def.units, center, nextId);
     nextId += campPoolSize(def.units);

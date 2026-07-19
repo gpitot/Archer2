@@ -100,7 +100,7 @@ export class SimHarness {
   };
 
   get shopPos(): Vec2 {
-    return this.world.shop.pos;
+    return this.world.shops[0].pos;
   }
 
   get ticks(): number {

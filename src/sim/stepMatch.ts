@@ -130,7 +130,7 @@ function applyCommand(
       ABILITIES[cmd.ability]?.cast({ state, hero, world, events, x: cmd.x, z: cmd.z });
       break;
     case 'buy':
-      buy(hero, cmd.itemIndex, world, events);
+      buy(hero, cmd.shopIndex, cmd.itemIndex, world, events);
       break;
     case 'useItem':
       useItem(hero, cmd.slot, state, world, events, cmd.x, cmd.z);
@@ -150,14 +150,15 @@ function setDestination(hero: HeroState, x: number, z: number, world: SimWorld):
   hero.moving = hero.path.length > 0;
 }
 
-function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]): void {
-  const shop = world.shop;
-  if (index < 0 || index >= shop.items.length) return;
-  if (V.distance(shop.pos, hero.pos) > shop.interactRadius) return;
+function buy(hero: HeroState, shopIndex: number, itemIndex: number, world: SimWorld, events: SimEvent[]): void {
+  if (shopIndex < 0 || shopIndex >= world.shops.length) return;
+  const shop = world.shops[shopIndex];
+  if (itemIndex < 0 || itemIndex >= shop.items.length) return;
+  if (V.distance(shop.pos, hero.pos) > shop.buyRadius) return;
 
   // Buying an item interrupts movement (WC3: issuing any order stops the current one).
   stopMovement(hero);
-  const item = shop.items[index];
+  const item = shop.items[itemIndex];
   if (hero.gold < item.cost) return;
 
   // Consumables (tomes): apply stats immediately, no inventory slot.

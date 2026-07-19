@@ -26,6 +26,8 @@ export interface InputCallbacks {
   isPlayerNearShop: () => boolean;
   /** True when the shop window is currently visible. */
   isShopVisible: () => boolean;
+  /** The shop index of the currently open shop window. */
+  getShopIndex: () => number;
   /** Lock camera to hero. */
   cameraLock: () => void;
   /** Toggle the scoreboard modal. */
@@ -106,7 +108,7 @@ export function bindInput(input: InputManager, targeting: TargetingSystem, cb: I
   for (let i = 1; i <= 6; i++) {
     input.onKeyDown(`Digit${i}`, () => {
       if (cb.isShopVisible()) {
-        cb.enqueueCommand({ type: 'buy', itemIndex: i - 1 });
+        cb.enqueueCommand({ type: 'buy', shopIndex: cb.getShopIndex(), itemIndex: i - 1 });
         cb.closeShop();
         return;
       }
