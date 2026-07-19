@@ -6,6 +6,7 @@
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 import { resolve } from 'path';
+import { withAuto } from './autoUrl';
 
 const ROOT = resolve(import.meta.dirname, '..');
 
@@ -23,7 +24,7 @@ async function main() {
   page.on('pageerror', (err) => errors.push(err.message));
   page.on('console', (msg) => { if (msg.type() === 'error') errors.push('[console] ' + msg.text()); });
 
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.goto(withAuto(url), { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('canvas', { timeout: 15000 });
   await sleep(2000);
 

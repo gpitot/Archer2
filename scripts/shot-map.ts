@@ -9,6 +9,7 @@ import { chromium } from 'playwright';
 import { createServer } from 'vite';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
+import { withAuto } from './autoUrl';
 
 const FALLBACK_CHROMIUM = '/opt/pw-browsers/chromium';
 const ROOT = resolve(import.meta.dirname, '..');
@@ -36,7 +37,7 @@ async function main() {
   page.on('console', (msg) => logs.push(`[${msg.type()}] ${msg.text()}`));
   page.on('pageerror', (err) => errors.push(err.message));
 
-  await page.goto(`${url}?map=${MAP}`, { waitUntil: 'domcontentloaded' });
+  await page.goto(withAuto(`${url}?map=${MAP}`), { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('canvas', { timeout: 15000 });
   await page.waitForTimeout(2500);
 

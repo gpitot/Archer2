@@ -21,6 +21,7 @@ import { createServer } from 'vite';
 import { spawn, ChildProcess } from 'child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
+import { withAuto } from './autoUrl';
 
 const FALLBACK_CHROMIUM = '/opt/pw-browsers/chromium';
 const ROOT = resolve(import.meta.dirname, '..');
@@ -81,7 +82,7 @@ async function openClient(browser: Browser, room: string, label: string, errors:
     if (msg.type() === 'error') errors.push(`[${label}] ${msg.text()}`);
   });
   const url = `http://localhost:${VITE_PORT}/?room=${room}&debug=1`;
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.goto(withAuto(url), { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => (window as any).__game?.debugReady, undefined, { timeout: 30_000 });
   console.log(`[drive] ${label} ready`);
   return page;

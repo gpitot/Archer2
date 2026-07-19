@@ -5,6 +5,12 @@
  * `InputMessage` reuses the `Command` union from `state.ts` so the same types
  * drive both local prediction and network commands.
  *
+ * A room starts in a lobby: `join` gets you a `welcome` with the roster but no
+ * world, `roster` tracks who's present and ready, and `matchStart` delivers the
+ * world once someone starts the game. Joining a room that's already playing
+ * skips the lobby — the `welcome` carries the same `MatchInit` payload that
+ * `matchStart` would have.
+ *
  * v2: heroes are split across two messages so per-tick snapshots stay small.
  *  - `snapshot` (every SNAPSHOT_EVERY-th tick): the "hot" fields —
  *    pos/facing/hp/alive/moving — plus wards and any sim events since the
@@ -41,7 +47,41 @@ export interface InputMessage {
   cmd: Command;
 }
 
-export type ClientMessage = JoinMessage | InputMessage;
+/** Change display name (lobby or mid-match); server re-sanitizes. */
+export interface SetNameMessage {
+  type: 'setName';
+  name: string;
+}
+
+/** Toggle lobby ready state. Ignored once the match is running. */
+export interface SetReadyMessage {
+  type: 'setReady';
+  ready: boolean;
+}
+
+/** Any player may start the match once everyone in the lobby is ready. */
+export interface StartGameMessage {
+  type: 'startGame';
+}
+
+export type ClientMessage =
+  | JoinMessage
+  | InputMessage
+  | SetNameMessage
+  | SetReadyMessage
+  | StartGameMessage;
+
+// ── Lobby ────────────────────────────────────────────────────────────
+
+export type RoomPhase = 'lobby' | 'playing';
+
+/** One row of the lobby roster. Also the client's source of display names. */
+export interface LobbyPlayer {
+  playerId: string;
+  name: string;
+  ready: boolean;
+  team: number;
+}
 
 // ── Wire hero representations ────────────────────────────────────────
 
@@ -144,6 +184,25 @@ export interface RuneMeta {
 
 // ── Server → Client ──────────────────────────────────────────────────
 
+/**
+ * Everything needed to bootstrap rendering a live match. Sent inside
+ * `matchStart` when a lobby starts, and inside `welcome` when a player joins
+ * a match already in progress — identical either way, so the client has one
+ * code path for both.
+ */
+export interface MatchInit {
+  /** Map this room is running. */
+  map: string;
+  /** Initial full state so the client can start rendering immediately. */
+  snapshot: Snapshot;
+  /** Cold fields for every hero in the snapshot. */
+  meta: HeroMeta[];
+  /** Cold registry for every creep in the match. */
+  creepMeta: CreepMeta[];
+  /** Registry for every rune spot in the match. */
+  runeMeta: RuneMeta[];
+}
+
 export interface WelcomeMessage {
   type: 'welcome';
   playerId: string;
@@ -153,14 +212,32 @@ export interface WelcomeMessage {
   snapshotRate: number;
   /** Map this room is running. */
   map?: string;
-  /** Initial full state so the client can start rendering immediately. */
-  snapshot: Snapshot;
-  /** Cold fields for every hero in the snapshot. */
-  meta: HeroMeta[];
-  /** Cold registry for every creep in the match. */
-  creepMeta: CreepMeta[];
-  /** Registry for every rune spot in the match. */
-  runeMeta: RuneMeta[];
+  /** Which phase the room is in at the moment we joined. */
+  phase: RoomPhase;
+  /** Everyone currently in the room, including us. */
+  roster: LobbyPlayer[];
+  /**
+   * Present iff `phase === 'playing'` — we joined a match in progress and
+   * skip the lobby entirely. Absent while the room is still in its lobby;
+   * the match state arrives later in `matchStart`.
+   */
+  init?: MatchInit;
+}
+
+/**
+ * Roster changed — someone joined, left, renamed, or readied up. Broadcast in
+ * both phases, so mid-match joins and renames reach every client's nameplates.
+ */
+export interface RosterMessage {
+  type: 'roster';
+  phase: RoomPhase;
+  players: LobbyPlayer[];
+}
+
+/** The lobby started the match. Carries the same payload a late joiner gets. */
+export interface MatchStartMessage {
+  type: 'matchStart';
+  init: MatchInit;
 }
 
 export interface SnapshotMessage {
@@ -181,23 +258,12 @@ export interface HeroMetaMessage {
   heroes: HeroMeta[];
 }
 
-export interface PeerJoinedMessage {
-  type: 'peerJoined';
-  playerId: string;
-  name: string;
-}
-
-export interface PeerLeftMessage {
-  type: 'peerLeft';
-  playerId: string;
-}
-
 export type ServerMessage =
   | WelcomeMessage
+  | RosterMessage
+  | MatchStartMessage
   | SnapshotMessage
-  | HeroMetaMessage
-  | PeerJoinedMessage
-  | PeerLeftMessage;
+  | HeroMetaMessage;
 
 // ── Snapshot (full hot state at a tick — welcome handshake only) ─────
 

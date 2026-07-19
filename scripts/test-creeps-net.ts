@@ -7,6 +7,7 @@ import { chromium, Browser, Page } from 'playwright';
 import { createServer } from 'vite';
 import { spawn, ChildProcess } from 'child_process';
 import { resolve } from 'path';
+import { withAuto } from './autoUrl';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const WRANGLER_PORT = 8787;
@@ -45,7 +46,7 @@ async function main() {
   const open = async (label: string): Promise<Page> => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
     page.on('pageerror', (e) => errors.push(`[${label}] ${e.message}`));
-    await page.goto(`${base}?map=test&room=${room}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(withAuto(`${base}?map=test&room=${room}`), { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('canvas', { timeout: 20000 });
     await page.waitForFunction(() => (window as any).__game?._playerState, undefined, { timeout: 20000 });
     return page;

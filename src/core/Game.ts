@@ -28,6 +28,8 @@ import { DebugPanel } from '../ui/DebugPanel';
 import { HeroStatusBar } from '../ui/HeroStatusBar';
 import { SpellBar } from '../ui/SpellBar';
 import { ScoreWindow } from '../ui/ScoreWindow';
+import { playerColor } from '../ui/colors';
+import { DEFAULT_NAME, loadPlayerName } from './playerPrefs';
 
 // ── Audio ──
 import { SoundManager, STREAK_SOUNDS, MULTI_KILL_SOUNDS } from '../audio/SoundManager';
@@ -46,7 +48,7 @@ import { AiController } from '../sim/ai/AiController';
 import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN, heroMaxHp } from '../sim/rules';
 import { ABILITIES, ABILITY_ORDER, AbilityDef, abilityTooltip, canCast } from '../sim/abilities';
 import { SHOP_ITEMS, SHOP_ITEMS_BY_ID } from '../sim/shopItems';
-import { SnapshotMessage, WelcomeMessage, PeerJoinedMessage, PeerLeftMessage, Snapshot, SnapshotHero, HeroMeta, CreepMeta, RuneMeta } from '../sim/protocol';
+import { SnapshotMessage, MatchInit, Snapshot, SnapshotHero, HeroMeta, CreepMeta, RuneMeta } from '../sim/protocol';
 import { creepMaxHp } from '../sim/creepRules';
 import { Vec2, distance } from '../sim/math';
 
@@ -105,6 +107,7 @@ export class Game {
   private _mapShops: { x: number; z: number }[] | null = null;
   private _terrain!: GroundProvider;
   private _water!: Water;
+  private _doodads!: Doodads;
 
   // ── Shared world data ──
   private _navGrid!: NavGrid;
@@ -115,6 +118,8 @@ export class Game {
   private _world!: SimWorld;
   private _state!: MatchState;
   private _playerId!: string;
+  /** playerId → display name, for nameplates and the scoreboard. */
+  private _names = new Map<string, string>();
   private _pendingCommands: Command[] = [];
 
   /** Offline AI opponent driving the enemy hero (null in network mode). */
@@ -264,12 +269,22 @@ export class Game {
     this._loop.renderCb = this._render.bind(this);
   }
 
-  async init(): Promise<void> {
+  /** Map this session will load, resolved from `?map=`. */
+  get mapName(): string { return this._mapName; }
+
+  /**
+   * Build everything that doesn't depend on who's playing: renderer, scene,
+   * terrain, navigation, doodads, fog, sim world, shops.
+   *
+   * Split out from the match setup so the start screen and lobby can be on
+   * screen while this runs — it's the slow part of startup, and `Wc3Terrain`
+   * blocks the main thread while it builds. Callers follow this with exactly
+   * one of `startNetworkMatch` / `startOfflineMatch`, then `finish()`.
+   */
+  async preload(): Promise<void> {
     (window as any).__game = this;
 
-    // ── Detect network mode from URL (?room=XXXX) ──
     const urlParams = new URLSearchParams(window.location.search);
-    this._roomCode = urlParams.get('room');
     if (urlParams.get('debug')) this._trace = new ClientTrace();
     if (urlParams.get('perf')) {
       // Defer enable until renderer is ready (set in the renderer block below).
@@ -277,10 +292,6 @@ export class Game {
         try { return this._renderer?.info ?? null; } catch { return null; }
       };
       perf.enable();
-    }
-    if (this._roomCode) {
-      this._networkMode = true;
-      this._network = new NetworkClient();
     }
 
     // ── Map data (terrain, pathing, doodads) — ?map= selects the map ──
@@ -339,8 +350,11 @@ export class Game {
     this._pathfinder = new Pathfinder(this._navGrid);
 
     // ── Doodads ──
+    // Held as a field because `finish()` applies the fog layer to its group,
+    // and that now runs in a separate call from this one.
     this._obstacleRegistry = new ObstacleRegistry();
     const doodads = new Doodads(this._map, heightAt, this._obstacleRegistry);
+    this._doodads = doodads;
     this._scene.add(doodads.group);
 
     // ── Fog of war (WC3 rules: discrete cliff layers + tree blockers) ──
@@ -412,48 +426,92 @@ export class Game {
 
     // ── Match state ──
     this._state = createMatchState();
+  }
 
-    if (this._networkMode && this._network) {
-      // ── Network mode: connect to server, wait for welcome ──
-      await this._initNetwork();
-    } else {
-      // ── Offline mode: jungle creep camps, simulated by the local stepMatch ──
-      spawnCamps(this._state, this._world, this._mapCamps);
+  /**
+   * Adopt a match handed over by the server. `init` comes from `matchStart`
+   * (lobby started) or from the `welcome` of a match already in progress —
+   * identical payloads, so this is the only network entry point.
+   */
+  startNetworkMatch(net: NetworkClient, init: MatchInit, names: Map<string, string>): void {
+    this._networkMode = true;
+    this._network = net;
+    this._names = names;
 
-      // ── Offline mode: power-up rune spots ──
-      spawnRunes(this._state, this._world, this._mapRunes);
-
-      // ── Offline mode: create local heroes ──
-      // Maps with fixed spawns (test map) place the heroes deterministically.
-      const heroSpawn = this._mapSpawns
-        ? this._findWalkableNear(this._mapSpawns[0].x, this._mapSpawns[0].z)
-        : this._findRespawnPosition();
-      const playerState = createHeroState('player', 0, { x: heroSpawn.x, z: heroSpawn.z });
-      this._state.heroes.push(playerState);
-      this._playerId = 'player';
-      this._playerState = playerState;
-
-      const dummySpawn = this._mapSpawns && this._mapSpawns.length > 1
-        ? this._findWalkableNear(this._mapSpawns[1].x, this._mapSpawns[1].z)
-        : this._findWalkableNear(heroSpawn.x + 400, heroSpawn.z + 200);
-      const dummyState = createHeroState('dummy', 1, { x: dummySpawn.x, z: dummySpawn.z });
-      this._state.heroes.push(dummyState);
-
-
-      // Create hero views
-      for (const hs of this._state.heroes) {
-        const color = hs.team === 0 ? 0x55aaff : 0xff5555;
-        const view = new HeroView(hs.id, color, heightAt);
-        view.sync(hs, 0);
-        this._heroViews.set(hs.id, view);
-        this._scene.add(view.mesh);
-        const vSrc = this._createHeroVisionSource(hs, view);
-        this._heroVisionAdapters.set(hs.id, vSrc);
-        this._fog.addSource(vSrc);
-      }
-      this._playerView = this._heroViews.get('player')!;
-      this._fog.recomputeNow();
+    const welcome = net.welcome!;
+    if (init.map && init.map !== this._mapName) {
+      throw new Error(`room is on map '${init.map}' — reload with ?map=${init.map}`);
     }
+
+    // All snapshot-timeline math derives from the server's tick rate; the
+    // interpolation delay derives from the (lower) snapshot broadcast rate.
+    this._tickDt = 1 / welcome.tickRate;
+    const snapshotDt = 1 / (welcome.snapshotRate ?? welcome.tickRate);
+    this._interpDelay = Math.max(0.05, 3 * snapshotDt);
+    this._clock = new RenderClock(this._tickDt, this._interpDelay);
+
+    // Apply the initial snapshot to initialise our state and views.
+    this._playerId = welcome.playerId;
+    this._applySnapshot(init.snapshot, init.meta, init.creepMeta ?? [], init.runeMeta ?? []);
+
+    // Confirm our hero made it into the snapshot (`_applySnapshot` set
+    // `_playerState` from it).
+    const ourHero = this._state.heroes.find((h) => h.id === welcome.playerId);
+    if (!ourHero) throw new Error('match did not include our hero');
+
+    this._playerView = this._heroViews.get(welcome.playerId)!;
+    this._fog.recomputeNow();
+
+    // Later roster changes (joins, renames) refresh the nameplates in place.
+    net.onRoster = (players) => {
+      this._names = new Map(players.map((p) => [p.playerId, p.name]));
+      this._refreshNameplates();
+    };
+
+    console.log(`[Game] network mode ready, playerId=${welcome.playerId}, team=${this._playerState.team}, heroes=${this._state.heroes.length}, pos=${this._playerState.pos.x.toFixed(0)},${this._playerState.pos.z.toFixed(0)}`);
+  }
+
+  /** Offline practice: local sim, one player plus a dummy bot. */
+  startOfflineMatch(playerName: string): void {
+    this._names = new Map([['player', playerName], ['dummy', 'Bot']]);
+
+    // ── Offline mode: jungle creep camps, simulated by the local stepMatch ──
+    spawnCamps(this._state, this._world, this._mapCamps);
+
+    // ── Offline mode: power-up rune spots ──
+    spawnRunes(this._state, this._world, this._mapRunes);
+
+    // ── Offline mode: create local heroes ──
+    // Maps with fixed spawns (test map) place the heroes deterministically.
+    const heroSpawn = this._mapSpawns
+      ? this._findWalkableNear(this._mapSpawns[0].x, this._mapSpawns[0].z)
+      : this._findRespawnPosition();
+    const playerState = createHeroState('player', 0, { x: heroSpawn.x, z: heroSpawn.z });
+    this._state.heroes.push(playerState);
+    this._playerId = 'player';
+    this._playerState = playerState;
+
+    const dummySpawn = this._mapSpawns && this._mapSpawns.length > 1
+      ? this._findWalkableNear(this._mapSpawns[1].x, this._mapSpawns[1].z)
+      : this._findWalkableNear(heroSpawn.x + 400, heroSpawn.z + 200);
+    const dummyState = createHeroState('dummy', 1, { x: dummySpawn.x, z: dummySpawn.z });
+    this._state.heroes.push(dummyState);
+
+    this._syncHeroViews(this._state.heroes);
+    this._playerView = this._heroViews.get('player')!;
+    this._fog.recomputeNow();
+  }
+
+  /**
+   * Wire up everything that needs a live match: fog layer, camera, input,
+   * HUD, minimap — then start the loop. Call after one of the `start*Match`
+   * methods.
+   */
+  finish(): void {
+    if (!this._playerState) {
+      throw new Error('finish() called before startNetworkMatch/startOfflineMatch');
+    }
+    const doodads = this._doodads;
 
     // ── Fog render layer (needs the player's team, set above) ──
     this._fogLayer = new FogLayer(this._fog, this._playerState.team);
@@ -539,7 +597,7 @@ export class Game {
           this._scoreWindow.close();
         } else {
           if (this._shopWindow.visible) this._shopWindow.close();
-          this._scoreWindow.open(this._state.heroes, this._playerState.id);
+          this._scoreWindow.open(this._state.heroes, this._playerState.id, this._names);
         }
       },
       isScoreVisible: () => this._scoreWindow.visible,
@@ -603,6 +661,33 @@ export class Game {
     this._debugReady = true;
   }
 
+  /**
+   * Straight-to-game startup with no start screen or lobby, for the automated
+   * harnesses (`scripts/drive.ts` and friends) that drive the page with
+   * `?auto=1`. In a room it joins, readies up, and starts immediately.
+   */
+  async init(): Promise<void> {
+    await this.preload();
+
+    const roomCode = new URLSearchParams(window.location.search).get('room');
+    const name = loadPlayerName() ?? DEFAULT_NAME;
+
+    if (roomCode) {
+      this._roomCode = roomCode;
+      const net = new NetworkClient();
+      await net.connect(roomCode, name, this._mapName);
+      net.setReady(true);
+      net.startGame();
+      const init = await net.waitForMatchStart();
+      const names = new Map(net.roster.map((p) => [p.playerId, p.name]));
+      this.startNetworkMatch(net, init, names);
+    } else {
+      this.startOfflineMatch(name);
+    }
+
+    this.finish();
+  }
+
   get heroState(): HeroState { return this._playerState; }
 
   // ── Input queue ─────────────────────────────────────────────────────
@@ -617,37 +702,16 @@ export class Game {
     this._pendingCommands.push(cmd);
   }
 
-  // ── Network init ────────────────────────────────────────────────────
-
-  private async _initNetwork(): Promise<void> {
-    const welcome = await this._network!.connect(this._roomCode!, 'Player', this._mapName);
-    if (welcome.map && welcome.map !== this._mapName) {
-      throw new Error(`room is on map '${welcome.map}' — reload with ?map=${welcome.map}`);
-    }
-
-    // All snapshot-timeline math derives from the server's tick rate; the
-    // interpolation delay derives from the (lower) snapshot broadcast rate.
-    this._tickDt = 1 / welcome.tickRate;
-    const snapshotDt = 1 / (welcome.snapshotRate ?? welcome.tickRate);
-    this._interpDelay = Math.max(0.05, 3 * snapshotDt);
-    this._clock = new RenderClock(this._tickDt, this._interpDelay);
-
-    // Apply the welcome snapshot to initialise our state and views.
-    this._playerId = welcome.playerId;
-    this._applySnapshot(welcome.snapshot, welcome.meta, welcome.creepMeta ?? [], welcome.runeMeta ?? []);
-
-    // Confirm our hero made it into the snapshot (`_applySnapshot` set
-    // `_playerState` from it).
-    const ourHero = this._state.heroes.find((h) => h.id === welcome.playerId);
-    if (!ourHero) throw new Error('welcome did not include our hero');
-
-    this._playerView = this._heroViews.get(welcome.playerId)!;
-    this._fog.recomputeNow();
-
-    console.log(`[Game] network mode ready, playerId=${welcome.playerId}, team=${this._playerState.team}, heroes=${this._state.heroes.length}, pos=${this._playerState.pos.x.toFixed(0)},${this._playerState.pos.z.toFixed(0)}`);
-  }
-
   // ── Helpers ─────────────────────────────────────────────────────────
+
+  /** Re-label existing hero views after a roster change (join, rename). */
+  private _refreshNameplates(): void {
+    for (const [id, view] of this._heroViews) {
+      const hero = this._state.heroes.find((h) => h.id === id);
+      if (!hero) continue;
+      view.setName(this._names.get(id) ?? id, playerColor(hero.team));
+    }
+  }
 
   /**
    * Spawn HeroViews (and fog vision sources) for heroes that appeared and
@@ -671,8 +735,9 @@ export class Game {
     const heightAt = this._heightAt.bind(this);
     for (const hs of heroes) {
       if (this._heroViews.has(hs.id)) continue;
-      const color = hs.id === this._playerId ? 0x55aaff : 0xff5555;
+      const color = playerColor(hs.team);
       const view = new HeroView(hs.id, color, heightAt);
+      view.setName(this._names.get(hs.id) ?? hs.id, color);
       view.sync(hs, 0);
       this._heroViews.set(hs.id, view);
       this._scene.add(view.mesh);

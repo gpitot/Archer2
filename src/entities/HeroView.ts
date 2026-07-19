@@ -5,6 +5,7 @@ import { RUNE_TYPES, RuneTypeId } from '../sim/runeRules';
 import { heroSpeed } from '../sim/stepMatch';
 import { HealthBar } from './HealthBar';
 import { createHeroRig, HeroRig, MESH_SCALE } from './HeroRig';
+import { makeTextSprite, TextSprite } from './TextSprite';
 import { UnitView } from './UnitView';
 
 /**
@@ -28,6 +29,8 @@ export class HeroView extends UnitView {
   private _buffTime = 0;
   /** Healing sparkle particle pool. */
   private _healSparkles: { sprite: THREE.Sprite; vy: number; life: number }[] = [];
+  /** Display-name plate above the head; null until `setName` is called. */
+  private _namePlate: TextSprite | null = null;
 
   constructor(
     heroId: string,
@@ -63,6 +66,24 @@ export class HeroView extends UnitView {
       this.mesh.add(sprite);
       this._buffSprites.set(type, sprite);
     }
+  }
+
+  /**
+   * Show the player's display name above the head. Safe to call repeatedly —
+   * a rename disposes the old plate and builds a new one.
+   *
+   * Heights are in the group's local space, which MESH_SCALE blows up: the
+   * health bar sits at 2.5 and the buff badges bob around 3.1, so the plate
+   * clears both.
+   */
+  setName(name: string, color: number): void {
+    this._namePlate?.dispose();
+    this._namePlate = null;
+    if (!name) return;
+    const plate = makeTextSprite(name, { color });
+    plate.sprite.position.set(0, 3.6, 0);
+    this.mesh.add(plate.sprite);
+    this._namePlate = plate;
   }
 
   /** Pulse the red hit flash (driven by a sim `hit` event). */
@@ -165,6 +186,8 @@ export class HeroView extends UnitView {
 
   dispose(): void {
     this._rig.dispose?.();
+    this._namePlate?.dispose();
+    this._namePlate = null;
     for (const sprite of this._buffSprites.values()) {
       sprite.material.map?.dispose();
       sprite.material.dispose();

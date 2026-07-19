@@ -16,6 +16,7 @@ import { createServer } from 'vite';
 import { resolve } from 'path';
 import { HERO, WARD } from '../src/sim/rules';
 import { FLAG_RAMP, TILE_SIZE } from '../src/world/wc3/W3EParser';
+import { withAuto } from './autoUrl';
 
 const ROOT = resolve(import.meta.dirname, '..');
 
@@ -42,7 +43,7 @@ async function main() {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   page.on('pageerror', (e) => console.log('[PAGE ERROR]', e.message));
   await page.addInitScript('window.__name = (fn) => fn;');
-  await page.goto(addr, { waitUntil: 'domcontentloaded' });
+  await page.goto(withAuto(addr), { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('canvas', { timeout: 10000 });
   await page.waitForFunction('window.__game && window.__game.debugReady', { timeout: 15000 });
 

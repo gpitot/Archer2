@@ -12,6 +12,7 @@ import { xpForLevel } from '../sim/stepMatch';
 import type { HeroState, MatchState, WardState, CreepState, RuneState } from '../sim/state';
 import type { SimWorld } from '../sim/world';
 import type { Minimap } from '../rendering/Minimap';
+import { playerColorCss } from '../ui/colors';
 import type { SpellBar, SpellSlotInfo } from '../ui/SpellBar';
 import type { ItemBar } from '../ui/ItemBar';
 import type { KDDisplay } from '../ui/KDDisplay';
@@ -59,8 +60,10 @@ export function updateHud(ctx: HudContext): void {
     if (!visible) continue;
     markers.push({
       x: h.pos.x, z: h.pos.z,
-      color: h.team === playerTeam ? '#44aaff' : '#ff4444',
-      radius: h.id === p.id ? 4 : 3,
+      color: playerColorCss(h.team),
+      // Your own dot is drawn larger — with per-player colours it's no longer
+      // the only blue one, so size is what makes it findable at a glance.
+      radius: h.id === p.id ? 5 : 3,
     });
   }
 

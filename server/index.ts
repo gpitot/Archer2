@@ -2,13 +2,15 @@
  * Worker entry point — routes WebSocket upgrades to the GameRoom DO and
  * serves static assets for everything else.
  */
-import { DurableObjectNamespace } from 'cloudflare:workers';
+// `DurableObjectNamespace`, `Request`, and `Response` are Worker runtime
+// globals (see server/worker-configuration.d.ts) — not module exports.
+import type { GameRoom as GameRoomClass } from './GameRoom';
 
 // Re-export the DO class so Wrangler can bind it.
 export { GameRoom } from './GameRoom';
 
 interface Env {
-  GAME_ROOM: DurableObjectNamespace;
+  GAME_ROOM: DurableObjectNamespace<GameRoomClass>;
   ASSETS: { fetch: (request: Request) => Promise<Response> };
 }
 

@@ -1,14 +1,16 @@
 import { SHOP_ITEMS_BY_ID } from '../sim/shopItems';
 import type { HeroState } from '../sim/state';
+import { playerColorCss } from './colors';
 
-/** Hero colour matching the 3D mesh: team 0 → blue, team 1 → red. */
-function heroColor(team: number): string {
-  return team === 0 ? '#55aaff' : '#ff5555';
-}
-
-/** Human-readable hero label from id + index. */
-function heroLabel(id: string, index: number): string {
-  if (id === 'player') return 'Player (you)';
+/**
+ * Display name for a hero. `names` comes from the room roster, so it's
+ * populated for every real player; the fallbacks cover offline heroes and any
+ * id that outlives its roster entry.
+ */
+function heroLabel(id: string, index: number, names?: ReadonlyMap<string, string>): string {
+  const known = names?.get(id);
+  if (known) return known;
+  if (id === 'player') return 'Player';
   if (id === 'dummy') return 'Bot';
   if (id.length <= 12) return id;
   return `Player ${index + 1}`;
@@ -91,7 +93,7 @@ export class ScoreWindow {
   }
 
   /** Build the full modal. Call once when first opened. */
-  open(heroes: readonly HeroState[], playerId?: string): void {
+  open(heroes: readonly HeroState[], playerId?: string, names?: ReadonlyMap<string, string>): void {
     // Sort: most kills descending, then deaths ascending (tie-breaker).
     const sorted = [...heroes].sort((a, b) => {
       if (b.kills !== a.kills) return b.kills - a.kills;
@@ -141,8 +143,8 @@ export class ScoreWindow {
     // Rows
     for (let i = 0; i < sorted.length; i++) {
       const h = sorted[i];
-      // Colour matches the 3D mesh (team-based).
-      const color = heroColor(h.team);
+      // Colour matches the 3D mesh and minimap dot.
+      const color = playerColorCss(h.team);
       const isSelf = playerId !== undefined && h.id === playerId;
 
       const row = document.createElement('div');
@@ -168,7 +170,8 @@ export class ScoreWindow {
 
       // Name
       const nameEl = document.createElement('span');
-      nameEl.textContent = heroLabel(h.id, heroes.indexOf(h));
+      const label = heroLabel(h.id, heroes.indexOf(h), names);
+      nameEl.textContent = isSelf ? `${label} (you)` : label;
       nameEl.style.cssText = `
         flex: 1;
         color: ${color};

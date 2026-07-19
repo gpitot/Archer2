@@ -6,6 +6,38 @@
  *   const byte = cellsBase64[i >> 3];
  *   const walkable = (byte >> (i & 7)) & 1;
  */
+import type { CampPlacement } from '../src/sim/creepRules';
+import type { RunePlacement } from '../src/sim/runeRules';
+
+/** A point in world space. */
+export interface NavdataPoint { x: number; z: number }
+
+/**
+ * One map's baked data. Declared explicitly (rather than inferred from the
+ * literal) so optional-in-practice fields keep their declared type: with
+ * `as const` alone, a field that happens to be `null` for every map infers as
+ * `null`, and `data.fountains ?? []` becomes `never[]`.
+ */
+export interface NavdataMap {
+  navGrid: {
+    width: number; height: number; cellSize: number;
+    originX: number; originZ: number; cellsBase64: string;
+  };
+  heightGrid: { width: number; height: number; heightsBase64: string };
+  obstacles: readonly { minX: number; minZ: number; maxX: number; maxZ: number }[];
+  arena: {
+    minX: number; minZ: number; maxX: number; maxZ: number;
+    centerX: number; centerZ: number; width: number; height: number;
+  };
+  shopPos: NavdataPoint;
+  /** Authored placements from custom maps; null → built-in defaults. */
+  camps: readonly CampPlacement[] | null;
+  spawns: readonly NavdataPoint[] | null;
+  runes: readonly RunePlacement[] | null;
+  fountains: readonly NavdataPoint[] | null;
+  shops: readonly NavdataPoint[] | null;
+}
+
 export const NAVDATA = {
   "arena": {
     /** Bit-packed walkable cells, 1 bit per cell, row-major (south-to-north). */
@@ -664,6 +696,6 @@ export const NAVDATA = {
     /** Authored shop placements (custom maps); null → arena-centre default. */
     shops: null,
   }
-} as const;
+} as const satisfies Record<string, NavdataMap>;
 
 export type NavdataMapName = keyof typeof NAVDATA;

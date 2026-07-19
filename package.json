@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "dev:server": "wrangler dev",
-    "build": "tsc && vite build",
+    "build": "tsc && tsc -p tsconfig.server.json && vite build",
+    "typecheck": "tsc && tsc -p tsconfig.server.json",
+    "build:types": "wrangler types server/worker-configuration.d.ts",
     "preview": "vite preview",
     "shot": "pnpm tsx scripts/screenshot.ts",
     "sim": "pnpm tsx scripts/sim.ts",

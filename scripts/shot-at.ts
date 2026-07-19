@@ -1,6 +1,7 @@
 /** Screenshot the game with the camera parked at given world coords. */
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import { withAuto } from './autoUrl';
 
 const [, , xArg, zArg, outArg, distArg] = process.argv;
 const X = Number(xArg ?? 816);
@@ -18,7 +19,7 @@ async function main() {
   const errors: string[] = [];
   page.on('pageerror', (err) => errors.push(err.message));
 
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.goto(withAuto(url), { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('canvas', { timeout: 10000 });
   await page.waitForTimeout(1500);
 

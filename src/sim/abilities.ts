@@ -13,7 +13,7 @@ import * as V from './math';
 import { ARROW, BLAST, DODGE, SCOUT } from './rules';
 import type { AbilityRuntime, HeroState, MatchState, SimEvent } from './state';
 import type { SimWorld } from './world';
-import type { StatLine, TooltipContent } from '../ui/Tooltip';
+import type { StatLine, TooltipContent } from '../ui/TooltipContent';
 import { spawnProjectile } from './projectiles';
 import { breakInvisibility } from './stepRunes';
 

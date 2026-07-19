@@ -8,6 +8,7 @@
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 import { existsSync } from 'fs';
+import { withAuto } from './autoUrl';
 
 const FALLBACK_CHROMIUM = '/opt/pw-browsers/chromium';
 
@@ -28,7 +29,7 @@ async function main() {
   const pageErrors: string[] = [];
   page.on('pageerror', (err) => pageErrors.push(err.message));
 
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.goto(withAuto(url), { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('canvas', { timeout: 10000 });
   await page.waitForTimeout(2500);
 

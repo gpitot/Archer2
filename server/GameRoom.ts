@@ -12,14 +12,17 @@
  * (economy, progression, inventory) go out as a separate `heroMeta` message
  * at a low rate, and immediately when an event changes them.
  */
-import { DurableObject, WebSocket } from 'cloudflare:workers';
+// `WebSocket`, `WebSocketPair`, `Request`, and `Response` are Worker runtime
+// globals (see server/worker-configuration.d.ts) — only DurableObject is a
+// module export.
+import { DurableObject } from 'cloudflare:workers';
 import { MatchState, HeroInput, HeroState, SimEvent, ProjectileState, WardState, BlastState, AbilityRuntime, createMatchState, createHeroState } from '../src/sim/state';
 import { ABILITY_ORDER, AbilityId } from '../src/sim/abilities';
 import { stepMatch } from '../src/sim/stepMatch';
 import { spawnCamps } from '../src/sim/stepCreeps';
 import { spawnRunes } from '../src/sim/stepRunes';
 import { CREEP } from '../src/sim/creepRules';
-import { SimWorld, ObstacleAABB, Rect, Shop, FountainDef, findRespawnPosition, findWalkableNear } from '../src/sim/world';
+import { SimWorld, ObstacleAABB, Rect, Shop, FountainDef, findRespawnPosition, findWalkableNear, findWalkableNearOnGrid } from '../src/sim/world';
 import { SHOP_ITEMS } from '../src/sim/shopItems';
 import { NavGrid } from '../src/navigation/NavGrid';
 import { Pathfinder } from '../src/navigation/Pathfinder';
@@ -27,21 +30,28 @@ import { HERO } from '../src/sim/rules';
 import {
   ClientMessage, ServerMessage, WelcomeMessage, SnapshotMessage,
   HeroMetaMessage, SnapshotHero, HeroMeta, SnapshotCreep, CreepMeta, RuneMeta, Snapshot,
-  PeerJoinedMessage, PeerLeftMessage,
+  RosterMessage, MatchStartMessage, MatchInit, LobbyPlayer, RoomPhase,
 } from '../src/sim/protocol';
+import { sanitizeName } from '../src/sim/names';
 
 // ── Compact navdata (auto-generated) ─────────────────────────────────
-import { NAVDATA, NavdataMapName } from './navdata';
+import { NAVDATA, NavdataMap, NavdataMapName } from './navdata';
 
 // ── Env interface for the DO ─────────────────────────────────────────
+// The namespace is parameterised by the DO's *instance* type, not the class
+// constructor — that's what carries the stub's RPC surface.
 export interface Env {
-  GAME_ROOM: DurableObjectNamespace<typeof import('./GameRoom').GameRoom>;
+  GAME_ROOM: DurableObjectNamespace<GameRoom>;
 }
 
 // ── Per-socket attachment ────────────────────────────────────────────
+// Mirrored into `ws.serializeAttachment` on every mutation so the room can
+// rebuild `_players` if the DO is evicted while a lobby sits idle.
 interface PlayerInfo {
   playerId: string;
   name: string;
+  ready: boolean;
+  team: number;
 }
 
 const TICK_RATE = 60;
@@ -54,6 +64,10 @@ const SNAPSHOT_EVERY = 3;
 const SNAPSHOT_RATE = TICK_RATE / SNAPSHOT_EVERY;
 const META_EVERY = 15; // cold hero fields every Nth tick (4 Hz)
 const MAX_PLAYERS = 8;
+// A lobby has no tick loop, so nothing would keep the DO resident and an idle
+// lobby could be hibernated out from under its players. This timer is the
+// cheapest way to pin the room for as long as someone is waiting in it.
+const LOBBY_KEEPALIVE_MS = 1000;
 
 /** Events whose effects live in the cold fields — flush meta immediately. */
 const META_EVENTS = new Set(['kill', 'respawn', 'purchase', 'levelUp', 'creepKill', 'runePickup']);
@@ -79,6 +93,13 @@ export class GameRoom extends DurableObject<Env> {
    *  heroes whose cold fields haven't changed. */
   private _lastMetaJson = new Map<string, string>();
   private _nextPlayerId = 1;
+  /**
+   * Rooms open in a lobby and flip to 'playing' when someone starts the match.
+   * Deliberately in-memory only: `_state` can't survive hibernation either, so
+   * a persisted 'playing' would be a lie. A woken room returns to its lobby.
+   */
+  private _phase: RoomPhase = 'lobby';
+  private _lobbyTimer: ReturnType<typeof setInterval> | null = null;
 
   /**
    * Called once when the DO is first created or woken from hibernation.
@@ -117,6 +138,8 @@ export class GameRoom extends DurableObject<Env> {
   // ── WebSocket lifecycle (hibernation API) ─────────────────────────
 
   async webSocketMessage(ws: WebSocket, raw: string): Promise<void> {
+    this._rehydrate();
+
     let msg: ClientMessage;
     try {
       msg = JSON.parse(raw);
@@ -126,6 +149,7 @@ export class GameRoom extends DurableObject<Env> {
 
     switch (msg.type) {
       case 'join': {
+        if (this._players.has(ws)) return; // duplicate join on one socket
         if (this._players.size >= MAX_PLAYERS) {
           ws.close(1013, 'room full');
           return;
@@ -134,7 +158,7 @@ export class GameRoom extends DurableObject<Env> {
         // Any map baked into navdata is joinable ('arena', 'test', customs).
         const requestedMap: NavdataMapName =
           msg.map && msg.map in NAVDATA ? (msg.map as NavdataMapName) : 'arena';
-        if (this._players.size === 0) {
+        if (this._phase === 'lobby' && this._players.size === 0) {
           if (requestedMap !== this._mapName) {
             this._buildWorld(requestedMap);
             this._resetMatch();
@@ -143,46 +167,64 @@ export class GameRoom extends DurableObject<Env> {
           ws.close(1013, `room is on map '${this._mapName}'`);
           return;
         }
-        const playerId = `p${this._nextPlayerId++}`;
-        const info: PlayerInfo = { playerId, name: msg.name };
-        this._players.set(ws, info);
-        this._playerSockets.set(playerId, ws);
 
         // Assign the lowest free team id (FFA = one team per player) so a
-        // leave-then-join never hands a newcomer a team that's still in use
-        // by an existing player. Maps with authored spawns place heroes
-        // there (by team, wrapping); otherwise spawn on random walkable.
-        const used = new Set(this._state.heroes.map((h) => h.team));
+        // leave-then-join never hands a newcomer a team that's still in use.
+        // Read it off `_players`, not `_state.heroes` — in a lobby no heroes
+        // exist yet.
+        const used = new Set([...this._players.values()].map((p) => p.team));
         let team = 0;
         while (used.has(team)) team++;
-        const fixed = NAVDATA[this._mapName].spawns;
-        const spawn = fixed
-          ? findWalkableNear(this._world, fixed[team % fixed.length].x, fixed[team % fixed.length].z)
-          : findRespawnPosition(this._world);
-        const hero = createHeroState(playerId, team, spawn);
-        this._state.heroes.push(hero);
 
-        // Start the tick loop if this is the first player.
+        const playerId = `p${this._nextPlayerId++}`;
+        const info: PlayerInfo = {
+          playerId,
+          // Names are untrusted input that lands in other players' DOM.
+          name: sanitizeName(msg.name),
+          // Someone dropping into a running match is implicitly "ready", so
+          // the roster reads sanely and a later lobby isn't blocked by them.
+          ready: this._phase === 'playing',
+          team,
+        };
+        this._setPlayer(ws, info);
+
+        if (this._phase === 'lobby') {
+          // No hero and no tick loop until the match actually starts — just
+          // park them in the lobby and keep the room resident.
+          this._startLobbyKeepalive();
+          const welcome: WelcomeMessage = {
+            type: 'welcome',
+            playerId,
+            tickRate: TICK_RATE,
+            snapshotRate: SNAPSHOT_RATE,
+            map: this._mapName,
+            phase: 'lobby',
+            roster: this._roster(),
+          };
+          ws.send(JSON.stringify(welcome));
+          this._broadcastRoster();
+          break;
+        }
+
+        // Match in progress — spawn straight in, skipping the lobby.
+        this._state.heroes.push(createHeroState(playerId, team, this._spawnPosFor(team)));
         if (!this._tickTimer) this._startTick();
 
-        // Send welcome with initial snapshot + cold fields.
         const welcome: WelcomeMessage = {
           type: 'welcome',
           playerId,
           tickRate: TICK_RATE,
           snapshotRate: SNAPSHOT_RATE,
           map: this._mapName,
-          snapshot: this._currentSnapshot(),
-          meta: this._heroMetas(),
-          creepMeta: this._creepMetas(),
-          runeMeta: this._runeMetas(),
+          phase: 'playing',
+          roster: this._roster(),
+          init: this._matchInit(),
         };
         ws.send(JSON.stringify(welcome));
 
         // Notify others, and flush cold fields so everyone has the new
         // hero's meta without waiting for the next scheduled heroMeta.
-        const peerMsg: PeerJoinedMessage = { type: 'peerJoined', playerId, name: msg.name };
-        this._broadcast(peerMsg, ws);
+        this._broadcastRoster(ws);
         this._broadcastHeroMeta(false, ws);
         break;
       }
@@ -194,13 +236,136 @@ export class GameRoom extends DurableObject<Env> {
         break;
       }
 
+      case 'setName': {
+        const info = this._players.get(ws);
+        if (!info) return;
+        this._setPlayer(ws, { ...info, name: sanitizeName(msg.name) });
+        this._broadcastRoster();
+        break;
+      }
+
+      case 'setReady': {
+        const info = this._players.get(ws);
+        if (!info || this._phase !== 'lobby') return;
+        this._setPlayer(ws, { ...info, ready: !!msg.ready });
+        this._broadcastRoster();
+        break;
+      }
+
+      case 'startGame': {
+        // Re-validated here because the client's disabled-button state is
+        // only advisory: a player can un-ready in the gap before this lands,
+        // and two clients can press Start at the same instant (the second
+        // finds the phase already flipped and no-ops).
+        if (!this._players.has(ws)) return;
+        if (this._phase !== 'lobby') return;
+        if (this._players.size === 0) return;
+        if (![...this._players.values()].every((p) => p.ready)) return;
+        this._startMatch();
+        break;
+      }
+
       default:
         // Unknown message type — ignore
         break;
     }
   }
 
+  /** Store player info and mirror it into the socket attachment. */
+  private _setPlayer(ws: WebSocket, info: PlayerInfo): void {
+    this._players.set(ws, info);
+    this._playerSockets.set(info.playerId, ws);
+    ws.serializeAttachment(info);
+  }
+
+  /**
+   * Rebuild `_players` from socket attachments after a hibernation wake.
+   * The keepalive timer makes this rare, but a dropped room would otherwise
+   * silently ignore every message from its still-connected players.
+   */
+  private _rehydrate(): void {
+    const sockets = this.ctx.getWebSockets();
+    if (this._players.size === sockets.length) return;
+    for (const ws of sockets) {
+      if (this._players.has(ws)) continue;
+      const info = ws.deserializeAttachment() as PlayerInfo | null;
+      if (!info) continue;
+      this._players.set(ws, info);
+      this._playerSockets.set(info.playerId, ws);
+      const n = Number(info.playerId.slice(1));
+      if (Number.isFinite(n)) this._nextPlayerId = Math.max(this._nextPlayerId, n + 1);
+    }
+    if (this._phase === 'lobby' && this._players.size > 0) this._startLobbyKeepalive();
+  }
+
+  // ── Lobby ─────────────────────────────────────────────────────────
+
+  private _roster(): LobbyPlayer[] {
+    return [...this._players.values()]
+      .map((p) => ({ playerId: p.playerId, name: p.name, ready: p.ready, team: p.team }))
+      .sort((a, b) => a.playerId.localeCompare(b.playerId, undefined, { numeric: true }));
+  }
+
+  private _broadcastRoster(exclude?: WebSocket): void {
+    const msg: RosterMessage = { type: 'roster', phase: this._phase, players: this._roster() };
+    this._broadcast(msg, exclude);
+  }
+
+  private _startLobbyKeepalive(): void {
+    if (this._lobbyTimer) return;
+    this._lobbyTimer = setInterval(() => { /* pin the DO while players wait */ }, LOBBY_KEEPALIVE_MS);
+  }
+
+  private _stopLobbyKeepalive(): void {
+    if (!this._lobbyTimer) return;
+    clearInterval(this._lobbyTimer);
+    this._lobbyTimer = null;
+  }
+
+  /** Everyone readied up — build the match and hand it to every client. */
+  private _startMatch(): void {
+    this._phase = 'playing';
+    this._resetMatch();
+
+    for (const info of this._roster()) {
+      this._state.heroes.push(
+        createHeroState(info.playerId, info.team, this._spawnPosFor(info.team)),
+      );
+    }
+
+    this._stopLobbyKeepalive();
+    this._startTick();
+
+    const msg: MatchStartMessage = { type: 'matchStart', init: this._matchInit() };
+    this._broadcast(msg);
+    this._broadcastHeroMeta(false);
+  }
+
+  /**
+   * Maps with authored spawns place heroes there (by team, wrapping);
+   * otherwise spawn on random walkable ground.
+   */
+  private _spawnPosFor(team: number): { x: number; z: number } {
+    const fixed = NAVDATA[this._mapName].spawns;
+    if (!fixed) return findRespawnPosition(this._world);
+    const spot = fixed[team % fixed.length];
+    return findWalkableNear(this._world, spot.x, spot.z);
+  }
+
+  /** Bootstrap payload for a starting match or a mid-match joiner. */
+  private _matchInit(): MatchInit {
+    return {
+      map: this._mapName,
+      snapshot: this._currentSnapshot(),
+      meta: this._heroMetas(),
+      creepMeta: this._creepMetas(),
+      runeMeta: this._runeMetas(),
+    };
+  }
+
   async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): Promise<void> {
+    this._rehydrate();
+
     const info = this._players.get(ws);
     if (!info) return;
 
@@ -208,15 +373,25 @@ export class GameRoom extends DurableObject<Env> {
     this._playerSockets.delete(info.playerId);
     this._lastMetaJson.delete(info.playerId);
 
-    // Mark hero as dead / despawned (removed from state).
+    // Mark hero as dead / despawned (removed from state). A no-op in a lobby,
+    // where no heroes exist yet.
     this._state.heroes = this._state.heroes.filter((h) => h.id !== info.playerId);
 
-    // Notify remaining players.
-    const peerMsg: PeerLeftMessage = { type: 'peerLeft', playerId: info.playerId };
-    this._broadcast(peerMsg);
+    // Notify remaining players — a departure can also unblock Start, since
+    // the leaver's ready flag no longer counts.
+    this._broadcastRoster();
 
-    // Stop tick if room is empty.
-    if (this._players.size === 0) this._stopTick();
+    // Last one out resets the room. The DO id is derived from the room code
+    // and therefore permanent, so without this a code could never host a
+    // second match.
+    if (this._players.size === 0) {
+      this._stopTick();
+      this._stopLobbyKeepalive();
+      this._phase = 'lobby';
+      this._nextPlayerId = 1;
+      this._lastMetaJson.clear();
+      this._resetMatch();
+    }
   }
 
   async webSocketError(_ws: WebSocket, err: Error): Promise<void> {
@@ -456,7 +631,10 @@ export class GameRoom extends DurableObject<Env> {
   // ── World construction (compact navdata) ──────────────────────────
 
   private _buildWorld(mapName: NavdataMapName): void {
-    const data = NAVDATA[mapName];
+    // Annotated rather than inferred: NAVDATA is `as const`, so a field that
+    // is null for every currently-baked map would narrow to `null` and make
+    // `data.fountains ?? []` a `never[]`.
+    const data: NavdataMap = NAVDATA[mapName];
     const ng = data.navGrid;
 
     // Decode bit-packed walkable cells.
@@ -481,12 +659,21 @@ export class GameRoom extends DurableObject<Env> {
     // Arena.
     const arena: Rect = { ...data.arena };
 
-    // Shop.
-    const shop: Shop = {
-      pos: { x: data.shopPos.x, z: data.shopPos.z },
-      interactRadius: 120,
-      items: SHOP_ITEMS,
-    };
+    // Shops. Custom maps author a list; built-in maps get the single baked
+    // spot. Radii and walkable-snapping must match the client's own shop
+    // construction (Game.preload) or buy-range checks disagree.
+    const shopSpots = data.shops && data.shops.length > 0
+      ? data.shops
+      : [data.shopPos];
+    const shops: Shop[] = shopSpots.map((s) => {
+      const pos = findWalkableNearOnGrid(navGrid, s.x, s.z);
+      return {
+        pos: { x: pos.x, z: pos.z },
+        interactRadius: 85,
+        buyRadius: 400,
+        items: SHOP_ITEMS,
+      };
+    });
 
     // Fountains: use authored positions or built-in defaults (empty).
     const fountains: FountainDef[] = (data.fountains ?? []).map((f) => ({
@@ -496,6 +683,6 @@ export class GameRoom extends DurableObject<Env> {
     }));
 
     this._mapName = mapName;
-    this._world = { navGrid, pathfinder, obstacles, arena, shops: [shop], fountains };
+    this._world = { navGrid, pathfinder, obstacles, arena, shops, fountains };
   }
 }

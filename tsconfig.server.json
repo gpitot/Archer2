@@ -1,0 +1,15 @@
+{
+  // The Worker is typechecked as its own program: its runtime globals
+  // (Response, WebSocket, WebSocketPair…) differ from the DOM's, and putting
+  // both in one program lets the wrong one win — which is how the shops
+  // regression in GameRoom._buildWorld went unnoticed.
+  //
+  // `include` pulls in the sim/navigation modules the server shares with the
+  // client, so those get checked under worker types as well as DOM types.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["server", "src/sim", "src/navigation"]
+}

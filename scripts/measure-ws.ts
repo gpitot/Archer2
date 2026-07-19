@@ -24,15 +24,18 @@ interface Bot {
   messages: number;
   byType: Map<string, { count: number; bytes: number }>;
   ready: Promise<any>;
+  matchStart: Promise<any>;
 }
 
 function connect(name: string): Bot {
   const ws = new WebSocket(`${BASE}/${ROOM}`);
   let resolveReady: (v: any) => void;
+  let resolveMatch: (v: any) => void;
   const bot: Bot = {
     ws, name, seq: 0, bytes: 0, messages: 0,
     byType: new Map(),
     ready: new Promise((r) => { resolveReady = r; }),
+    matchStart: new Promise((r) => { resolveMatch = r; }),
   };
 
   ws.onmessage = (event) => {
@@ -45,7 +48,11 @@ function connect(name: string): Bot {
     rec.count++;
     rec.bytes += raw.length;
     bot.byType.set(msg.type, rec);
-    if (msg.type === 'welcome') resolveReady(msg);
+    if (msg.type === 'welcome') {
+      resolveReady(msg);
+      if (msg.init) resolveMatch(msg.init); // joined a match in progress
+    }
+    if (msg.type === 'matchStart') resolveMatch(msg.init);
   };
 
   ws.onopen = () => ws.send(JSON.stringify({ type: 'join', name }));
@@ -69,6 +76,13 @@ async function main() {
     await bot.ready;
   }
   console.log(`[measure] all connected`);
+
+  // Everyone is in the lobby — ready up and start, then wait for the world.
+  for (const bot of bots) bot.ws.send(JSON.stringify({ type: 'setReady', ready: true }));
+  await sleep(200);
+  bots[0].ws.send(JSON.stringify({ type: 'startGame' }));
+  await Promise.all(bots.map((b) => b.matchStart));
+  console.log(`[measure] match started`);
 
   // Spend the starting skill point on the arrow so bots can fire.
   for (const bot of bots) send(bot, { type: 'levelAbility', ability: 'arrow' });

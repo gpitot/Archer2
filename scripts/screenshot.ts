@@ -9,6 +9,7 @@ import { chromium } from 'playwright';
 import { createServer } from 'vite';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
+import { withAuto } from './autoUrl';
 
 // Use a system-provided Chromium when the Playwright-managed one is absent
 // (e.g. sandboxed CI/remote environments with a pre-installed browser).
@@ -57,7 +58,7 @@ async function main() {
   try {
     // 3. Navigate and wait for canvas
     console.log('[shot] Navigating to game...');
-    await page.goto(address, { waitUntil: 'domcontentloaded' });
+    await page.goto(withAuto(address), { waitUntil: 'domcontentloaded' });
 
     await page.waitForSelector('canvas', { timeout: 10000 });
     console.log('[shot] Canvas found.');

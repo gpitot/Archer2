@@ -10,7 +10,7 @@
  */
 import type { HeroState, CreepState, MatchState, SimEvent } from './state';
 import type { SimWorld } from './world';
-import type { StatLine, TooltipContent } from '../ui/Tooltip';
+import type { StatLine, TooltipContent } from '../ui/TooltipContent';
 import { findReachableNear, sphereHitsObstacle } from './world';
 import { Vec2 } from './math';
 import * as V from './math';

@@ -12,6 +12,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { resolve } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import { parseMapJson } from '../src/world/custom/mapSource';
+import { withAuto } from './autoUrl';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const FALLBACK_CHROMIUM = '/opt/pw-browsers/chromium';
@@ -69,7 +70,7 @@ async function main() {
   const open = async (label: string): Promise<Page> => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
     page.on('pageerror', (e) => errors.push(`[${label}] ${e.message}`));
-    await page.goto(`${base}?map=${MAP}&room=${room}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(withAuto(`${base}?map=${MAP}&room=${room}`), { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('canvas', { timeout: 20000 });
     await page.waitForFunction(() => (window as any).__game?._playerState, undefined, { timeout: 20000 });
     return page;
