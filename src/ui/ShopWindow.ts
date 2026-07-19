@@ -257,6 +257,7 @@ export class ShopWindow {
 
   close(): void {
     if (!this._visible) return;
+    Tooltip.shared().hide();
     this._overlay.style.display = 'none';
     this.el.style.display = 'none';
     this.el.innerHTML = '';
