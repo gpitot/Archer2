@@ -23,7 +23,7 @@ export class Shop {
   readonly mesh: THREE.Group;
   readonly position: THREE.Vector3;
   readonly items: ShopItem[];
-  readonly interactRadius = 180;
+  readonly interactRadius = 85;
 
   constructor(position: THREE.Vector3, items: ShopItem[]) {
     this.position = position.clone();

@@ -480,10 +480,12 @@ export class Game {
     // Click to move: left-click walks the hero (right-click cancels targeting).
     this._input.onClick((pos) => {
       const shopWPt = this._world.shop.pos;
-      const heroDist = Math.hypot(this._playerState.pos.x - shopWPt.x, this._playerState.pos.z - shopWPt.z);
       const clickDist = Math.hypot(pos.x - shopWPt.x, pos.z - shopWPt.z);
-      if (clickDist < this._world.shop.interactRadius && heroDist <= this._world.shop.interactRadius) {
-        this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory);
+      if (clickDist < this._world.shop.interactRadius) {
+        const inRange = this._isPlayerNearShop();
+        const heroDist = Math.hypot(this._playerState.pos.x - shopWPt.x, this._playerState.pos.z - shopWPt.z);
+        console.log(`[shop-click] clickDist=${clickDist.toFixed(0)} heroDist=${heroDist.toFixed(0)} clickRadius=${this._world.shop.interactRadius} buyRadius=${this._world.shop.buyRadius} inRange=${inRange}`);
+        this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory, inRange);
         return;
       }
       this._enqueueCommand({ type: 'moveTo', x: pos.x, z: pos.z });
@@ -498,7 +500,7 @@ export class Game {
       activateItemTargeting: (def, slot) => this._activateItemTargeting(def, slot),
       openShop: () => {
         if (this._scoreWindow.visible) this._scoreWindow.close();
-        this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory);
+        this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory, this._isPlayerNearShop());
       },
       closeShop: () => { if (this._shopWindow.visible) this._shopWindow.close(); },
       isPlayerNearShop: () => this._isPlayerNearShop(),
@@ -1144,10 +1146,21 @@ export class Game {
     }
   }
 
+  private _shopRangePrev: boolean | null = null;
   private _isPlayerNearShop(): boolean {
     const s = this._world.shop.pos;
-    const p = this._playerState.pos;
-    return Math.hypot(s.x - p.x, s.z - p.z) <= this._world.shop.interactRadius;
+    const p = this._playerState?.pos;
+    if (!s || !p) {
+      console.log('[shop] missing shop or player pos');
+      return false;
+    }
+    const dist = Math.hypot(s.x - p.x, s.z - p.z);
+    const result = dist <= this._world.shop.buyRadius;
+    if (result !== this._shopRangePrev) {
+      console.log(`[shop] inRange changed to ${result}, dist=${dist.toFixed(0)} (buyRadius=${this._world.shop.buyRadius}), player=(${p.x.toFixed(0)},${p.z.toFixed(0)}), shop=(${s.x.toFixed(0)},${s.z.toFixed(0)})`);
+      this._shopRangePrev = result;
+    }
+    return result;
   }
 
   private _heightAt(x: number, z: number): number {

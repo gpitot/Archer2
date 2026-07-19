@@ -36,7 +36,10 @@ export { type ShopItemDef };
 
 export interface Shop {
   pos: Vec2;
+  /** Radius for clicking to open the shop UI (should match the mesh size). */
   interactRadius: number;
+  /** Radius for being in range to buy items. */
+  buyRadius: number;
   items: ShopItemDef[];
 }
 

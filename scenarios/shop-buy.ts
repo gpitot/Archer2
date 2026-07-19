@@ -16,7 +16,7 @@ export function run(h: SimHarness): void {
 
   // Hero should NOT be near the shop initially (spawns are ~500+ units away)
   const distToShop = Math.hypot(hero.pos.x - shopPos.x, hero.pos.z - shopPos.z);
-  expectTrue(distToShop > h.world.shop.interactRadius, 'hero starts far from shop');
+  expectTrue(distToShop > h.world.shop.buyRadius, 'hero starts far from shop');
 
   // Give gold for testing
   hero.gold = 20;
@@ -27,12 +27,12 @@ export function run(h: SimHarness): void {
   // Run until hero stops moving (arrived near shop)
   h.runUntil(() => {
     const d = Math.hypot(hero.pos.x - shopPos.x, hero.pos.z - shopPos.z);
-    return d <= h.world.shop.interactRadius;
+    return d <= h.world.shop.buyRadius;
   }, h.seconds(15), 'hero arrives at shop');
 
   // Verify near shop
   const distAfter = Math.hypot(hero.pos.x - shopPos.x, hero.pos.z - shopPos.z);
-  expectNear(distAfter, 0, h.world.shop.interactRadius, 'hero near shop');
+  expectNear(distAfter, 0, h.world.shop.buyRadius, 'hero near shop');
 
   // Try to buy without enough gold
   hero.gold = 2;

@@ -353,7 +353,7 @@ export class AiController {
     const pick = nextShopItem(hero);
     if (!pick || hero.gold < pick.cost) return;
     const shop = world.shop;
-    if (V.distance(hero.pos, shop.pos) <= shop.interactRadius) {
+    if (V.distance(hero.pos, shop.pos) <= shop.buyRadius) {
       out.push({ type: 'buy', itemIndex: pick.index });
     } else if (!threat.skipMove) {
       const near = findWalkableNear(world, shop.pos.x, shop.pos.z);

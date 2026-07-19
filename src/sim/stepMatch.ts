@@ -134,7 +134,7 @@ function setDestination(hero: HeroState, x: number, z: number, world: SimWorld):
 function buy(hero: HeroState, index: number, world: SimWorld, events: SimEvent[]): void {
   const shop = world.shop;
   if (index < 0 || index >= shop.items.length) return;
-  if (V.distance(shop.pos, hero.pos) > shop.interactRadius) return;
+  if (V.distance(shop.pos, hero.pos) > shop.buyRadius) return;
 
   // Buying an item interrupts movement (WC3: issuing any order stops the current one).
   stopMovement(hero);

@@ -10,6 +10,7 @@ interface ShopCallback {
 /**
  * Modal shop window — opens when left-clicking a shop.
  * Shows all items with name, description, cost. Click or press 1–6 to buy.
+ * When out of range, items are disabled but the window stays open.
  */
 export class ShopWindow {
   readonly el: HTMLDivElement;
@@ -18,6 +19,7 @@ export class ShopWindow {
   private _items: ShopItem[] = [];
   private _cb: ShopCallback;
   private _visible = false;
+  private _inRange = true;
 
   constructor(cb: ShopCallback) {
     this._cb = cb;
@@ -47,9 +49,11 @@ export class ShopWindow {
     document.body.appendChild(this.el);
   }
 
-  /** Open with shop items. */
-  open(items: ShopItem[], heroGold: number, inventory: readonly (string | null)[]): void {
+  /** Open with shop items. Pass inRange=false to show all items disabled. */
+  open(items: ShopItem[], heroGold: number, inventory: readonly (string | null)[], inRange: boolean): void {
+    console.log(`[ShopWindow] open called, inRange=${inRange}, gold=${heroGold}`);
     this._items = items;
+    this._inRange = inRange;
     // Build panel content
     this.el.innerHTML = '';
 
@@ -73,12 +77,26 @@ export class ShopWindow {
     `;
     panel.appendChild(title);
 
+    // Out of range warning (always create, show/hide in refresh)
+    const warning = document.createElement('div');
+    warning.className = 'shop-range-warning';
+    warning.textContent = '⚠ Out of range — move closer to buy';
+    warning.style.cssText = `
+      color: #ff8844; font-size: 13px; font-weight: bold;
+      text-align: center; margin-bottom: 12px;
+      padding: 6px; border-radius: 4px;
+      background: rgba(255,80,20,0.1);
+      border: 1px solid rgba(255,100,40,0.3);
+      display: ${inRange ? 'none' : 'block'};
+    `;
+    panel.appendChild(warning);
+
     // Items
     this._itemEls = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       const owned = inventory.includes(item.id);
-      const canBuy = !owned && heroGold >= item.cost;
+      const canBuy = inRange && !owned && heroGold >= item.cost;
 
       const row = document.createElement('div');
       row.style.cssText = `
@@ -174,14 +192,21 @@ export class ShopWindow {
     this._visible = true;
   }
 
-  /** Update gold/inventory state without rebuilding the entire panel. */
-  refresh(heroGold: number, inventory: readonly (string | null)[]): void {
+  /** Update gold/inventory/range state without rebuilding the entire panel. */
+  refresh(heroGold: number, inventory: readonly (string | null)[], inRange: boolean): void {
     if (!this._visible) return;
+    console.log(`[ShopWindow] refresh called, inRange=${inRange}, gold=${heroGold}`);
+    this._inRange = inRange;
+
+    // Update range warning banner
+    const warning = this.el.querySelector('.shop-range-warning') as HTMLElement | null;
+    if (warning) warning.style.display = inRange ? 'none' : 'block';
+
     const items = this._items as ShopItem[];
     for (let i = 0; i < this._itemEls.length; i++) {
       const item = items[i];
       const owned = inventory.includes(item.id);
-      const canBuy = !owned && heroGold >= item.cost;
+      const canBuy = inRange && !owned && heroGold >= item.cost;
       const row = this._itemEls[i];
       // Update background / opacity
       if (owned) {

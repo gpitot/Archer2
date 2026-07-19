@@ -63,7 +63,8 @@ export function buildSimWorld(
 
   const shop: Shop = {
     pos: shopPos,
-    interactRadius: 180,
+    interactRadius: 85,
+    buyRadius: 400,
     items: SHOP_ITEMS,
   };
 
@@ -94,7 +95,8 @@ export function buildSimWorldFromNavdata(navdata: {
 
   const shop: Shop = {
     pos: { x: navdata.shopPos.x, z: navdata.shopPos.z },
-    interactRadius: 180,
+    interactRadius: 85,
+    buyRadius: 400,
     items: SHOP_ITEMS,
   };
 

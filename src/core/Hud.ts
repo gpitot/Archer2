@@ -155,10 +155,9 @@ export function updateHud(ctx: HudContext): void {
     ctx.shopOverlay.show();
   } else {
     ctx.shopOverlay.hide();
-    if (ctx.shopWindow.visible) ctx.shopWindow.close();
   }
   if (ctx.shopWindow.visible) {
-    ctx.shopWindow.refresh(p.gold, p.inventory);
+    ctx.shopWindow.refresh(p.gold, p.inventory, isPlayerNearShop);
   }
 
   // ── Scoreboard ───────────────────────────────────────────────────
