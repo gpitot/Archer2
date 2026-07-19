@@ -37,7 +37,7 @@ export function spawnRunes(
   }));
   defs.forEach((def, idx) => {
     const pos =
-      findReachableNear(world, def.x, def.z, world.shop.pos.x, world.shop.pos.z) ??
+      findReachableNear(world, def.x, def.z, world.shops[0].pos.x, world.shops[0].pos.z) ??
       findWalkableNear(world, def.x, def.z);
     state.runes.push({
       id: `r${idx + 1}`,

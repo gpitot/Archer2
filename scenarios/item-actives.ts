@@ -19,7 +19,7 @@ export function run(h: SimHarness): void {
     hero.pos = { x: h.shopPos.x, z: h.shopPos.z };
     hero.gold = SHOP_ITEMS.find((i) => i.id === 'blink_dagger')!.cost;
     const blinkIdx = SHOP_ITEMS.findIndex((i) => i.id === 'blink_dagger');
-    h.issue('b1', { type: 'buy', itemIndex: blinkIdx });
+    h.issue('b1', { type: 'buy', shopIndex: 0, itemIndex: blinkIdx });
     const buyEvents = h.tick();
     expectTrue(buyEvents.some((e) => e.type === 'purchase'), 'blink dagger purchased');
     const slot = hero.inventory.indexOf('blink_dagger');
@@ -58,7 +58,7 @@ export function run(h: SimHarness): void {
     hero.pos = { x: h.shopPos.x, z: h.shopPos.z };
     hero.gold = SHOP_ITEMS.find((i) => i.id === 'sentry_wards')!.cost;
     const wardIdx = SHOP_ITEMS.findIndex((i) => i.id === 'sentry_wards');
-    h.issue('w1', { type: 'buy', itemIndex: wardIdx });
+    h.issue('w1', { type: 'buy', shopIndex: 0, itemIndex: wardIdx });
     h.tick();
     expectTrue(hero.wardCharges === 5, 'ward charges after buy');
 
@@ -79,7 +79,7 @@ export function run(h: SimHarness): void {
     shooter.pos = { x: h.shopPos.x, z: h.shopPos.z };
     shooter.gold = SHOP_ITEMS.find((i) => i.id === 'ice_bow')!.cost;
     const iceIdx = SHOP_ITEMS.findIndex((i) => i.id === 'ice_bow');
-    h.issue(shooter.id, { type: 'buy', itemIndex: iceIdx });
+    h.issue(shooter.id, { type: 'buy', shopIndex: 0, itemIndex: iceIdx });
     h.tick();
     expectTrue(shooter.inventory.includes('ice_bow'), 'ice bow bought');
 

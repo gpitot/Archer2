@@ -226,7 +226,7 @@ export type Command =
   | { type: 'moveTo'; x: number; z: number }
   /** Cast any registered ability; (x, z) is the aim/target point when the ability takes one. */
   | { type: 'cast'; ability: AbilityId; x?: number; z?: number }
-  | { type: 'buy'; itemIndex: number }
+  | { type: 'buy'; shopIndex: number; itemIndex: number }
   /** Use the item in the given inventory slot. For point-targeted items (blink, wards),
    *  (x, z) is the ground target; omit to self-cast (wards at hero position). */
   | { type: 'useItem'; slot: number; x?: number; z?: number }

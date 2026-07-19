@@ -94,8 +94,9 @@ export function updateHud(ctx: HudContext): void {
     });
   }
 
-  const sp = world.shop.pos;
-  markers.push({ x: sp.x, z: sp.z, color: '#ffcc44', radius: 4 });
+  for (const shop of world.shops) {
+    markers.push({ x: shop.pos.x, z: shop.pos.z, color: '#ffcc44', radius: 4 });
+  }
 
   for (const fountain of world.fountains) {
     const visible = fog.isVisible(playerTeam, fountain.pos.x, fountain.pos.z);
@@ -151,7 +152,15 @@ export function updateHud(ctx: HudContext): void {
 
   // ── Shop ─────────────────────────────────────────────────────────
 
-  if (isPlayerNearShop) {
+  // Overlay: show when near any shop
+  let nearAny = false;
+  for (const shop of world.shops) {
+    if (Math.hypot(shop.pos.x - p.pos.x, shop.pos.z - p.pos.z) <= shop.buyRadius) {
+      nearAny = true;
+      break;
+    }
+  }
+  if (nearAny) {
     ctx.shopOverlay.show();
   } else {
     ctx.shopOverlay.hide();

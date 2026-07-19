@@ -16,7 +16,7 @@ export function run(h: SimHarness): void {
 
   // Hero should NOT be near the shop initially (spawns are ~500+ units away)
   const distToShop = Math.hypot(hero.pos.x - shopPos.x, hero.pos.z - shopPos.z);
-  expectTrue(distToShop > h.world.shop.buyRadius, 'hero starts far from shop');
+  expectTrue(distToShop > h.world.shops[0].buyRadius, 'hero starts far from shop');
 
   // Give gold for testing
   hero.gold = 20;
@@ -27,22 +27,22 @@ export function run(h: SimHarness): void {
   // Run until hero stops moving (arrived near shop)
   h.runUntil(() => {
     const d = Math.hypot(hero.pos.x - shopPos.x, hero.pos.z - shopPos.z);
-    return d <= h.world.shop.buyRadius;
+    return d <= h.world.shops[0].buyRadius;
   }, h.seconds(15), 'hero arrives at shop');
 
   // Verify near shop
   const distAfter = Math.hypot(hero.pos.x - shopPos.x, hero.pos.z - shopPos.z);
-  expectNear(distAfter, 0, h.world.shop.buyRadius, 'hero near shop');
+  expectNear(distAfter, 0, h.world.shops[0].buyRadius, 'hero near shop');
 
   // Try to buy without enough gold
   hero.gold = 2;
-  h.issue('p1', { type: 'buy', itemIndex: 0 });
+  h.issue('p1', { type: 'buy', shopIndex: 0, itemIndex: 0 });
   let events = h.tick();
   expectTrue(events.length === 0, 'cannot buy with insufficient gold');
 
   // Give enough gold and buy
   hero.gold = 20;
-  h.issue('p1', { type: 'buy', itemIndex: 0 });
+  h.issue('p1', { type: 'buy', shopIndex: 0, itemIndex: 0 });
   events = h.tick();
   expectEvent(events, 'purchase', 'bought boots');
   expectTrue(hero.inventory[0] === 'boots', 'boots in slot 0');
@@ -50,7 +50,7 @@ export function run(h: SimHarness): void {
   expectTrue(hero.gold === 15, 'gold deducted');
 
   // Buy wards
-  h.issue('p1', { type: 'buy', itemIndex: 1 });
+  h.issue('p1', { type: 'buy', shopIndex: 0, itemIndex: 1 });
   events = h.tick();
   expectEvent(events, 'purchase', 'bought wards');
   expectTrue(hero.inventory[1] === 'sentry_wards', 'wards in slot 1');

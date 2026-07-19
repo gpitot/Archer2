@@ -240,7 +240,7 @@ export class Game {
   private _statusBar!: HeroStatusBar;
   private _itemBar!: ItemBar;
   private _kdDisplay!: KDDisplay;
-  private _shop!: Shop;
+  private _shops: Shop[] = [];
   private _shopOverlay!: ShopOverlay;
   private _shopWindow!: ShopWindow;
   private _scoreWindow!: ScoreWindow;
@@ -369,22 +369,34 @@ export class Game {
       this._world.fountains = buildDefaultFountains(this._arena, this._navGrid);
     }
 
-    // Shop position: use authored map spot if available, else arena centre.
-    const shopSrc = this._mapShops && this._mapShops.length > 0
-      ? this._findWalkableNear(this._mapShops[0].x, this._mapShops[0].z)
-      : this._findWalkableNear(this._arena.centerX, this._arena.centerZ);
-    this._world.shop.pos = { x: shopSrc.x, z: shopSrc.z };
+    // Shop positions: use authored map spots if available, else arena centre.
+    const shopSources: THREE.Vector3[] = this._mapShops && this._mapShops.length > 0
+      ? this._mapShops.map((s) => this._findWalkableNear(s.x, s.z))
+      : [this._findWalkableNear(this._arena.centerX, this._arena.centerZ)];
 
-    // ── Shop (3D mesh only; buy logic is in the sim) ──
-    this._shop = new Shop(
-      new THREE.Vector3(shopSrc.x, heightAt(shopSrc.x, shopSrc.z), shopSrc.z),
-      SHOP_ITEMS as ShopItem[],
-    );
-    this._scene.add(this._shop.mesh);
+    // Sync sim world shop positions to match
+    this._world.shops = shopSources.map((src, i) => {
+      if (i < this._world.shops.length) {
+        this._world.shops[i].pos = { x: src.x, z: src.z };
+        return this._world.shops[i];
+      }
+      return { pos: { x: src.x, z: src.z }, interactRadius: 85, buyRadius: 400, items: SHOP_ITEMS };
+    });
+    this._world.shops.length = shopSources.length;
+
+    // ── Shop (3D meshes only; buy logic is in the sim) ──
+    this._shops = shopSources.map((src) => {
+      const s = new Shop(
+        new THREE.Vector3(src.x, heightAt(src.x, src.z), src.z),
+        SHOP_ITEMS as ShopItem[],
+      );
+      this._scene.add(s.mesh);
+      return s;
+    });
 
     this._shopOverlay = new ShopOverlay();
     this._shopWindow = new ShopWindow({
-      onBuy: (idx) => this._enqueueCommand({ type: 'buy', itemIndex: idx }),
+      onBuy: (shopIdx, itemIdx) => this._enqueueCommand({ type: 'buy', shopIndex: shopIdx, itemIndex: itemIdx }),
       onClose: () => {},
     });
 
@@ -442,7 +454,7 @@ export class Game {
     this._fogLayer.applyTo(this._terrain.mesh);
     this._fogLayer.applyTo(this._water.group);
     this._fogLayer.applyTo(doodads.group);
-    this._fogLayer.applyTo(this._shop.mesh);
+    for (const s of this._shops) this._fogLayer.applyTo(s.mesh);
 
     // ── Fountain views (static map objects) ──
     for (let i = 0; i < this._world.fountains.length; i++) {
@@ -479,14 +491,17 @@ export class Game {
 
     // Click to move: left-click walks the hero (right-click cancels targeting).
     this._input.onClick((pos) => {
-      const shopWPt = this._world.shop.pos;
-      const clickDist = Math.hypot(pos.x - shopWPt.x, pos.z - shopWPt.z);
-      if (clickDist < this._world.shop.interactRadius) {
-        const inRange = this._isPlayerNearShop();
-        const heroDist = Math.hypot(this._playerState.pos.x - shopWPt.x, this._playerState.pos.z - shopWPt.z);
-        console.log(`[shop-click] clickDist=${clickDist.toFixed(0)} heroDist=${heroDist.toFixed(0)} clickRadius=${this._world.shop.interactRadius} buyRadius=${this._world.shop.buyRadius} inRange=${inRange}`);
-        this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory, inRange);
-        return;
+      // Check if click is on any shop
+      for (let si = 0; si < this._world.shops.length; si++) {
+        const shop = this._world.shops[si];
+        const clickDist = Math.hypot(pos.x - shop.pos.x, pos.z - shop.pos.z);
+        if (clickDist < shop.interactRadius) {
+          const inRange = this._isPlayerNearShop(si);
+          const heroDist = Math.hypot(this._playerState.pos.x - shop.pos.x, this._playerState.pos.z - shop.pos.z);
+          console.log(`[shop-click] shop=${si} clickDist=${clickDist.toFixed(0)} heroDist=${heroDist.toFixed(0)} clickRadius=${shop.interactRadius} buyRadius=${shop.buyRadius} inRange=${inRange}`);
+          this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory, inRange, si);
+          return;
+        }
       }
       this._enqueueCommand({ type: 'moveTo', x: pos.x, z: pos.z });
       this._moveIndicators.spawn(pos);
@@ -500,11 +515,19 @@ export class Game {
       activateItemTargeting: (def, slot) => this._activateItemTargeting(def, slot),
       openShop: () => {
         if (this._scoreWindow.visible) this._scoreWindow.close();
-        this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory, this._isPlayerNearShop());
+        const nearest = this._getNearestShop();
+        if (nearest) {
+          this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory,
+            this._isPlayerNearShop(nearest.index), nearest.index);
+        }
       },
       closeShop: () => { if (this._shopWindow.visible) this._shopWindow.close(); },
-      isPlayerNearShop: () => this._isPlayerNearShop(),
+      isPlayerNearShop: () => {
+        const nearest = this._getNearestShop();
+        return nearest ? this._isPlayerNearShop(nearest.index) : false;
+      },
       isShopVisible: () => this._shopWindow.visible,
+      getShopIndex: () => this._shopWindow.shopIndex,
       toggleScore: () => {
         if (this._scoreWindow.visible) {
           this._scoreWindow.close();
@@ -1147,20 +1170,36 @@ export class Game {
   }
 
   private _shopRangePrev: boolean | null = null;
-  private _isPlayerNearShop(): boolean {
-    const s = this._world.shop.pos;
+  private _isPlayerNearShop(shopIndex?: number): boolean {
+    const idx = shopIndex ?? this._shopWindow.shopIndex;
+    if (idx < 0 || idx >= this._world.shops.length) return false;
+    const s = this._world.shops[idx].pos;
     const p = this._playerState?.pos;
     if (!s || !p) {
       console.log('[shop] missing shop or player pos');
       return false;
     }
     const dist = Math.hypot(s.x - p.x, s.z - p.z);
-    const result = dist <= this._world.shop.buyRadius;
+    const result = dist <= this._world.shops[idx].buyRadius;
     if (result !== this._shopRangePrev) {
-      console.log(`[shop] inRange changed to ${result}, dist=${dist.toFixed(0)} (buyRadius=${this._world.shop.buyRadius}), player=(${p.x.toFixed(0)},${p.z.toFixed(0)}), shop=(${s.x.toFixed(0)},${s.z.toFixed(0)})`);
+      console.log(`[shop] inRange changed to ${result}, shop=${idx} dist=${dist.toFixed(0)} (buyRadius=${this._world.shops[idx].buyRadius}), player=(${p.x.toFixed(0)},${p.z.toFixed(0)}), shopPos=(${s.x.toFixed(0)},${s.z.toFixed(0)})`);
       this._shopRangePrev = result;
     }
     return result;
+  }
+
+  /** Find the nearest shop to the player, or null if no shops exist. */
+  private _getNearestShop(): { index: number; pos: Vec2 } | null {
+    if (this._world.shops.length === 0) return null;
+    const p = this._playerState?.pos;
+    if (!p) return null;
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < this._world.shops.length; i++) {
+      const d = Math.hypot(this._world.shops[i].pos.x - p.x, this._world.shops[i].pos.z - p.z);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    return { index: bestIdx, pos: this._world.shops[bestIdx].pos };
   }
 
   private _heightAt(x: number, z: number): number {
@@ -1354,7 +1393,7 @@ export class Game {
     return {
       tick: this._state.tick,
       playerId: this._playerId,
-      shop: { ...this._world.shop.pos },
+      shop: { ...this._world.shops[0].pos },
       heroes: this._state.heroes.map((h) => ({
         id: h.id, x: h.pos.x, z: h.pos.z, hp: h.hp, alive: h.alive,
         abilityLevel: h.abilities.arrow.level, abilityCooldown: h.abilities.arrow.cooldown,
@@ -1935,7 +1974,7 @@ export class Game {
 
   private _findRespawnPosition(): THREE.Vector3 {
     const arena = this._arena;
-    const anchor = this._world.shop.pos;
+    const anchor = this._world.shops[0].pos;
     for (let attempt = 0; attempt < 500; attempt++) {
       const wx = arena.minX + Math.random() * arena.width;
       const wz = arena.minZ + Math.random() * arena.height;

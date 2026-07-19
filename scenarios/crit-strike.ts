@@ -22,7 +22,7 @@ export function run(h: SimHarness): void {
 
   shooter.pos = { x: h.shopPos.x, z: h.shopPos.z };
   shooter.gold = SHOP_ITEMS[gemIndex].cost;
-  h.issue('p1', { type: 'buy', itemIndex: gemIndex });
+  h.issue('p1', { type: 'buy', shopIndex: 0, itemIndex: gemIndex });
   h.tick();
   expectTrue(shooter.inventory.includes('crit_gem'), 'gem sits in inventory');
   expectTrue(shooter.gold === 0, 'gold was spent');
@@ -30,7 +30,7 @@ export function run(h: SimHarness): void {
 
   // Non-stackable: a second copy is refused.
   shooter.gold = SHOP_ITEMS[gemIndex].cost;
-  h.issue('p1', { type: 'buy', itemIndex: gemIndex });
+  h.issue('p1', { type: 'buy', shopIndex: 0, itemIndex: gemIndex });
   h.tick();
   expectTrue(shooter.critChance === CRIT_CHANCE, 'second gem refused — chance stays 20%');
   expectTrue(shooter.gold === SHOP_ITEMS[gemIndex].cost, 'second purchase not charged');

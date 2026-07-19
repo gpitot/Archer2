@@ -3,7 +3,7 @@ import { renderStatRows } from './Tooltip';
 import { SHOP_ITEMS_BY_ID } from '../sim/shopItems';
 
 interface ShopCallback {
-  onBuy: (index: number) => void;
+  onBuy: (shopIndex: number, itemIndex: number) => void;
   onClose: () => void;
 }
 
@@ -20,6 +20,7 @@ export class ShopWindow {
   private _cb: ShopCallback;
   private _visible = false;
   private _inRange = true;
+  private _shopIndex = 0;
 
   constructor(cb: ShopCallback) {
     this._cb = cb;
@@ -49,11 +50,15 @@ export class ShopWindow {
     document.body.appendChild(this.el);
   }
 
+  /** Currently open shop index (or the last opened). */
+  get shopIndex(): number { return this._shopIndex; }
+
   /** Open with shop items. Pass inRange=false to show all items disabled. */
-  open(items: ShopItem[], heroGold: number, inventory: readonly (string | null)[], inRange: boolean): void {
-    console.log(`[ShopWindow] open called, inRange=${inRange}, gold=${heroGold}`);
+  open(items: ShopItem[], heroGold: number, inventory: readonly (string | null)[], inRange: boolean, shopIndex: number): void {
+    console.log(`[ShopWindow] open called, shop=${shopIndex} inRange=${inRange}, gold=${heroGold}`);
     this._items = items;
     this._inRange = inRange;
+    this._shopIndex = shopIndex;
     // Build panel content
     this.el.innerHTML = '';
 
@@ -112,7 +117,7 @@ export class ShopWindow {
       if (canBuy) {
         row.addEventListener('mouseenter', () => { row.style.background = 'rgba(60,45,15,0.7)'; });
         row.addEventListener('mouseleave', () => { row.style.background = 'rgba(40,30,10,0.6)'; });
-        row.addEventListener('click', (e) => { e.stopPropagation(); this._cb.onBuy(i); this.close(); });
+        row.addEventListener('click', (e) => { e.stopPropagation(); this._cb.onBuy(this._shopIndex, i); this.close(); });
       }
 
       // Item icon (from source-of-truth item def or ShopItem fields)
@@ -222,7 +227,7 @@ export class ShopWindow {
         row.style.border = '1px solid rgba(255,200,60,0.3)';
         row.style.opacity = '1';
         row.style.cursor = 'pointer';
-        row.onclick = (e) => { e.stopPropagation(); this._cb.onBuy(i); this.close(); };
+        row.onclick = (e) => { e.stopPropagation(); this._cb.onBuy(this._shopIndex, i); this.close(); };
         row.onmouseenter = () => { row.style.background = 'rgba(60,45,15,0.7)'; };
         row.onmouseleave = () => { row.style.background = 'rgba(40,30,10,0.6)'; };
       } else {

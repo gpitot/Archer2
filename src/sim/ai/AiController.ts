@@ -352,9 +352,17 @@ export class AiController {
   ): void {
     const pick = nextShopItem(hero);
     if (!pick || hero.gold < pick.cost) return;
-    const shop = world.shop;
-    if (V.distance(hero.pos, shop.pos) <= shop.buyRadius) {
-      out.push({ type: 'buy', itemIndex: pick.index });
+    // Find nearest shop
+    let bestShopIdx = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < world.shops.length; i++) {
+      const d = V.distance(hero.pos, world.shops[i].pos);
+      if (d < bestDist) { bestDist = d; bestShopIdx = i; }
+    }
+    if (bestShopIdx < 0) return;
+    const shop = world.shops[bestShopIdx];
+    if (bestDist <= shop.buyRadius) {
+      out.push({ type: 'buy', shopIndex: bestShopIdx, itemIndex: pick.index });
     } else if (!threat.skipMove) {
       const near = findWalkableNear(world, shop.pos.x, shop.pos.z);
       this._moveTo(world, hero, near, out, false);
