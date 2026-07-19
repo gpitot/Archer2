@@ -4,7 +4,7 @@
  * shop, and targeting keys.
  */
 import { ABILITIES, ABILITY_ORDER, AbilityDef, canCast } from '../sim/abilities';
-import { SHOP_ITEMS_BY_ID } from '../sim/shopItems';
+import { SHOP_ITEMS, SHOP_ITEMS_BY_ID } from '../sim/shopItems';
 import type { InputManager } from '../input/InputManager';
 import type { TargetingSystem } from '../input/TargetingSystem';
 import type { Command, HeroState } from '../sim/state';
@@ -104,8 +104,10 @@ export function bindInput(input: InputManager, targeting: TargetingSystem, cb: I
   // Space — re-center camera
   input.onKeyDown('Space', () => { cb.cameraLock(); });
 
-  // Number keys 1–6: buy from shop when open, or use item
-  for (let i = 1; i <= 6; i++) {
+  // Number keys: buy from shop when open, or use item from inventory slot.
+  // Covers all shop items (up to 8) + 6 inventory slots.
+  const numKeys = Math.max(6, SHOP_ITEMS.length);
+  for (let i = 1; i <= numKeys; i++) {
     input.onKeyDown(`Digit${i}`, () => {
       if (cb.isShopVisible()) {
         cb.enqueueCommand({ type: 'buy', shopIndex: cb.getShopIndex(), itemIndex: i - 1 });
@@ -114,6 +116,7 @@ export function bindInput(input: InputManager, targeting: TargetingSystem, cb: I
       }
       const slot = i - 1;
       const p = cb.getPlayerState();
+      if (slot >= p.inventory.length) return;
       const itemId = p.inventory[slot];
       const def = itemId ? SHOP_ITEMS_BY_ID[itemId] : undefined;
 
