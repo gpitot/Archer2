@@ -44,7 +44,7 @@ import { RUNE_TYPES, RunePlacement } from '../sim/runeRules';
 import { SimWorld, sphereHitsObstacle, FountainDef, findWalkableNearOnGrid, findWalkableCellNear } from '../sim/world';
 import { advanceProjectile } from '../sim/projectiles';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
-import { AiController } from '../sim/ai/AiController';
+import { AiController, AI_DIFFICULTY_PRESETS, type AiDifficulty } from '../sim/ai/AiController';
 import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN, heroMaxHp } from '../sim/rules';
 import { ABILITIES, ABILITY_ORDER, AbilityDef, abilityTooltip, canCast } from '../sim/abilities';
 import { SHOP_ITEMS, SHOP_ITEMS_BY_ID } from '../sim/shopItems';
@@ -124,6 +124,8 @@ export class Game {
 
   /** Offline AI opponent driving the enemy hero (null in network mode). */
   private _ai: AiController | null = null;
+  /** Selected difficulty for the offline AI; defaults to max strength. */
+  private _aiDifficulty: AiDifficulty = 'hard';
 
   // ── Networking ──
   private _network: NetworkClient | null = null;
@@ -630,6 +632,7 @@ export class Game {
         this._mapName === 'test' ? 'arena' : 'test',
         () => this._swapMap(),
         () => this._toggleAI(),
+        () => this._cycleDifficulty(),
       );
     }
 
@@ -2179,9 +2182,19 @@ export class Game {
       this._ai = null;
       this._debugPanel?.setAILabel(false);
     } else {
-      this._ai = new AiController('dummy');
+      this._ai = new AiController('dummy', AI_DIFFICULTY_PRESETS[this._aiDifficulty]);
       this._debugPanel?.setAILabel(true);
     }
+  }
+
+  /** Cycle the AI difficulty and, if the AI is active, rebuild it immediately. */
+  private _cycleDifficulty(): void {
+    if (this._networkMode) return;
+    const order: AiDifficulty[] = ['easy', 'medium', 'hard'];
+    const next = order[(order.indexOf(this._aiDifficulty) + 1) % order.length];
+    this._aiDifficulty = next;
+    this._debugPanel?.setDifficultyLabel(next);
+    if (this._ai) this._ai = new AiController('dummy', AI_DIFFICULTY_PRESETS[next]);
   }
 }
 
