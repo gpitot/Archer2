@@ -350,15 +350,10 @@ class SpellSlot {
     this._refreshPointer();
   }
 
-  /** Enable pointer events and cursor only when the slot is clickable. */
+  /** Set cursor to pointer when the slot is clickable; pointer events stay on for tooltip hover. */
   private _refreshPointer(): void {
-    if (this._canLevel && this._onLevel) {
-      this.el.style.pointerEvents = 'auto';
-      this.el.style.cursor = 'pointer';
-    } else {
-      this.el.style.pointerEvents = 'none';
-      this.el.style.cursor = '';
-    }
+    this.el.style.pointerEvents = 'auto';
+    this.el.style.cursor = (this._canLevel && this._onLevel) ? 'pointer' : '';
   }
 
   /** Border/glow priority: can-level glow > locked > on-cooldown > ready. */

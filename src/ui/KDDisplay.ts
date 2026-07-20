@@ -36,9 +36,12 @@ function makeDivider(): HTMLDivElement {
 export class KDDisplay {
   readonly el: HTMLDivElement;
   private _timeLabel: HTMLDivElement;
+  private _fpsLabel: HTMLDivElement;
   private _killsLabel: HTMLSpanElement;
   private _deathsLabel: HTMLSpanElement;
   private _goldLabel: HTMLSpanElement;
+  private _lastFrameTime = 0;
+  private _fpsSmoothed = 60;
 
   constructor() {
     // ── Panel wrapper ──
@@ -157,6 +160,24 @@ export class KDDisplay {
     timeGroup.appendChild(this._timeLabel);
     this.el.appendChild(timeGroup);
 
+    this.el.appendChild(makeDivider());
+
+    // ── Section 4: FPS ──
+    const fpsGroup = document.createElement('div');
+    fpsGroup.style.cssText = 'display: flex; align-items: center; gap: 4px;';
+
+    this._fpsLabel = document.createElement('div');
+    this._fpsLabel.style.cssText = `
+      font-size: 12px;
+      font-weight: 700;
+      color: #88cc88;
+      letter-spacing: 0.5px;
+      font-variant-numeric: tabular-nums;
+    `;
+    this._fpsLabel.textContent = '60';
+    fpsGroup.appendChild(this._fpsLabel);
+    this.el.appendChild(fpsGroup);
+
     document.body.appendChild(this.el);
   }
 
@@ -165,5 +186,14 @@ export class KDDisplay {
     this._deathsLabel.textContent = String(deaths);
     this._goldLabel.textContent = String(Math.floor(gold));
     this._timeLabel.textContent = formatGameTime(gameTimeSeconds);
+
+    // Rolling-average FPS
+    const now = performance.now();
+    if (this._lastFrameTime > 0) {
+      const instant = 1000 / (now - this._lastFrameTime);
+      this._fpsSmoothed += (instant - this._fpsSmoothed) * 0.1;
+    }
+    this._lastFrameTime = now;
+    this._fpsLabel.textContent = String(Math.round(this._fpsSmoothed));
   }
 }

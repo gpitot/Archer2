@@ -260,6 +260,11 @@ export class Game {
   private _moveIndicators!: MoveIndicatorManager;
   private _debugPanel: DebugPanel | null = null;
 
+  // ── Death overlay ──
+  private _deathOverlay: HTMLDivElement | null = null;
+  private _deathCountdown: HTMLSpanElement | null = null;
+  private _wasPlayerAlive = true;
+
   // ── Audio ──
   private _sound = new SoundManager();
   /** Lazy-init flag: set true on first user interaction (unlocks AudioContext). */
@@ -635,6 +640,9 @@ export class Game {
         () => this._cycleDifficulty(),
       );
     }
+
+    // ── Death overlay (desaturate + respawn countdown) ──
+    this._createDeathOverlay();
 
     this._minimap = new Minimap(this._map, this._arena, 200, 8);
     this._minimap.setFog(this._fog, this._playerState.team);
@@ -1607,6 +1615,7 @@ export class Game {
 
   /** Tail shared by offline and network update paths (fog, views, misc). */
   private _updateCommon(dt: number, events: SimEvent[], snapTicks: number[]): void {
+    this._updateDeathOverlay();
     this._updateHealSparkle(dt);
     this._syncAllViews(dt);
     this._fog.update(dt);
@@ -2034,6 +2043,92 @@ export class Game {
       }
       fv.sync(fountain.pos, dt, this._heightAt.bind(this));
     }
+  }
+
+  // ── Death overlay ─────────────────────────────────────────────────
+
+  /** Create the full-screen death overlay (hidden initial). */
+  private _createDeathOverlay(): void {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 500;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.35);
+      backdrop-filter: grayscale(1) blur(0px);
+      -webkit-backdrop-filter: grayscale(1) blur(0px);
+      transition: opacity 0.4s;
+    `;
+
+    // Respawn label
+    const label = document.createElement('div');
+    label.textContent = 'Respawn in';
+    label.style.cssText = `
+      font-family: sans-serif;
+      font-size: 18px;
+      color: rgba(255,255,255,0.6);
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+      margin-bottom: 4px;
+    `;
+    overlay.appendChild(label);
+
+    // Countdown number
+    const countdown = document.createElement('span');
+    countdown.style.cssText = `
+      font-family: monospace;
+      font-size: 64px;
+      font-weight: bold;
+      color: #ff4444;
+      text-shadow: 0 4px 16px rgba(0,0,0,0.9);
+    `;
+    countdown.textContent = '0.0';
+    this._deathCountdown = countdown;
+    overlay.appendChild(countdown);
+
+    document.body.appendChild(overlay);
+    this._deathOverlay = overlay;
+  }
+
+  /** Tick the death overlay: show/hide, update countdown. */
+  private _updateDeathOverlay(): void {
+    if (!this._deathOverlay || !this._deathCountdown) return;
+    const player = this._playerState;
+    const nowDead = player && !player.alive;
+
+    if (!this._wasPlayerAlive && nowDead) {
+      // Still dead — update the countdown.
+      const t = Math.max(0, player.respawnTimer);
+      this._deathCountdown.textContent = t.toFixed(1);
+      // Pulse red when < 1s
+      if (t < 1) {
+        this._deathCountdown.style.color = t % 0.3 < 0.15 ? '#ff4444' : '#ffffff';
+      } else {
+        this._deathCountdown.style.color = '#ff4444';
+      }
+    } else if (this._wasPlayerAlive && nowDead) {
+      // Just died — show the overlay.
+      this._deathOverlay.style.display = 'flex';
+      this._deathOverlay.style.opacity = '1';
+      this._deathCountdown.textContent = player.respawnTimer.toFixed(1);
+      this._deathCountdown.style.color = '#ff4444';
+    } else if (!this._wasPlayerAlive && !nowDead) {
+      // Just respawned — hide the overlay and re-center camera on hero.
+      this._deathOverlay.style.display = 'none';
+      this._deathOverlay.style.opacity = '0';
+      this._cameraLocked = true;
+      this._camera.setTarget(new THREE.Vector3(
+        player.pos.x,
+        this._smoothHeightAt(player.pos.x, player.pos.z),
+        player.pos.z,
+      ));
+    }
+
+    this._wasPlayerAlive = !nowDead;
   }
 
   // ── Render ──────────────────────────────────────────────────────────

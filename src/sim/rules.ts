@@ -67,19 +67,19 @@ export function ultimateRankCap(level: number): number {
 /** Passive gold/second: ~1/s baseline, small catch-up ceiling when far behind. */
 export const PASSIVE_INCOME = { min: 1, max: 5 } as const;
 
-/** Kill-spree bonus gold, indexed by kill streak. */
-export const SPREE_BONUS = [0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 7];
+/** Kill-spree bonus gold, indexed by kill streak. (Disabled — all zero.) */
+export const SPREE_BONUS = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 /** Bounty gold for ending a victim's streak, indexed by that streak length. */
-export const BOUNTY_TABLE = [0, 0, 0, 0, 1, 3, 6, 10, 15, 21, 28];
+export const BOUNTY_TABLE = [0, 0, 100, 150, 200, 350, 500, 650, 800, 900, 1000];
 
-export const KILL_GOLD = { base: 5, firstBlood: 5, doubleKill: 15, tripleKill: 30 } as const;
+export const KILL_GOLD = { base: 200, firstBlood: 150, doubleKill: 200, tripleKill: 400 } as const;
 /** Seconds within which consecutive kills chain into a multi-kill. */
 export const MULTI_KILL_WINDOW = 7;
 
 // ── Shoot Arrow ability (Q) ───────────────────────────────────────────
 export const ARROW = {
   /** Damage per ability level (index 0 = unlearned). */
-  damageByLevel: [0, 200, 266, 333, 400, 466],
+  damageByLevel: [0, 200, 300, 400, 500, 600],
   /**
    * Per-charge recharge time per ability level (seconds). Halved from the
    * original per-shot cooldown [2.25, 2.0, 1.75, 1.5, 1.25]: the original

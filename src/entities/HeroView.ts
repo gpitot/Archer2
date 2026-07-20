@@ -74,14 +74,14 @@ export class HeroView extends UnitView {
    *
    * Heights are in the group's local space, which MESH_SCALE blows up: the
    * health bar sits at 2.5 and the buff badges bob around 3.1, so the plate
-   * clears both.
+   * sits just above the health bar.
    */
   setName(name: string, color: number): void {
     this._namePlate?.dispose();
     this._namePlate = null;
     if (!name) return;
     const plate = makeTextSprite(name, { color });
-    plate.sprite.position.set(0, 3.6, 0);
+    plate.sprite.position.set(0, 3.0, 0);
     this.mesh.add(plate.sprite);
     this._namePlate = plate;
   }
