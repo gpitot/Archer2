@@ -16,12 +16,24 @@ import { CreepTypeId, creepMaxHp, CREEP_TYPES } from '../sim/creepRules';
 import { HERO } from '../sim/rules';
 import { HealthBar } from './HealthBar';
 import { UnitView } from './UnitView';
-import { createMonsterInstance, pickClip, MonsterModelConfig } from './MonsterModel';
+import { makeTextSprite, TextSprite } from './TextSprite';
+import { createMonsterInstance, pickClip, MonsterModelConfig, MONSTER_MODELS } from './MonsterModel';
 
 const FADE = 0.15;
 const ATTACK_DURATION = 0.5;
 /** Amber ground ring — creeps are neutral-hostile, distinct from hero team colors. */
 const CREEP_RING_COLOR = 0xffaa33;
+
+/** Human-readable label for each creep archetype. */
+const CREEP_NAMES: Record<CreepTypeId, string> = {
+  ghoul: 'Ghoul',
+  cactoro: 'Cactoro',
+  orc: 'Orc',
+  dino: 'Dino',
+  yeti: 'Yeti',
+  ghost: 'Ghost',
+  dragon: 'Dragon',
+};
 
 export class CreepView extends UnitView {
   readonly creepId: string;
@@ -43,6 +55,13 @@ export class CreepView extends UnitView {
   private _lastX = 0;
   private _lastZ = 0;
 
+  /** Nameplate above the head: "Level N TypeName". */
+  private _namePlate: TextSprite | null = null;
+  private _lastLevel = 0;
+  private _lastLabelType: CreepTypeId | null = null;
+  /** Model's target world height; used to position the nameplate before and after model load. */
+  private _worldHeight = 80;
+
   constructor(
     creepId: string,
     type: CreepTypeId,
@@ -52,19 +71,24 @@ export class CreepView extends UnitView {
     this.creepId = creepId;
     this._type = type;
 
+    this._worldHeight = MONSTER_MODELS[type]?.worldHeight ?? 80;
+
     // Amber foot ring in raw world units (the creep group isn't scaled).
     this.addFootRing(CREEP_TYPES[type].bodyRadius, CREEP_RING_COLOR, { tube: 3, y: 2, opacity: 0.3 });
 
     this._healthBar = new HealthBar(creepMaxHp(type, 1));
-    this._healthBar.sprite.position.set(0, 80, 0);
+    this._healthBar.sprite.position.set(0, this._worldHeight + 16, 0);
     this._healthBar.sprite.scale.set(60, 8, 1);
     this.mesh.add(this._healthBar.sprite);
+
+    this._buildNamePlate(type, 1);
 
     this._load(type);
   }
 
   private _load(type: CreepTypeId): void {
     const token = ++this._loadToken;
+    this._worldHeight = MONSTER_MODELS[type]?.worldHeight ?? 80;
     createMonsterInstance(type).then((inst) => {
       if (token !== this._loadToken) return; // superseded by a later type-swap
       this._model = inst.scene;
@@ -72,6 +96,8 @@ export class CreepView extends UnitView {
       this._materials = inst.materials;
       this.mesh.add(inst.scene);
       this._healthBar.sprite.position.y = inst.config.worldHeight + 16;
+      this._worldHeight = inst.config.worldHeight;
+      if (this._namePlate) this._namePlate.sprite.position.y = inst.config.worldHeight + 32;
 
       this._mixer = new THREE.AnimationMixer(inst.scene);
       this._idle = this._action(inst.clips, inst.config.clips.idle);
@@ -132,10 +158,19 @@ export class CreepView extends UnitView {
 
     if (!state.alive) {
       this.mesh.visible = false;
+      if (this._namePlate) this._namePlate.sprite.visible = false;
       return;
     }
     this.mesh.visible = true;
+    if (this._namePlate) this._namePlate.sprite.visible = true;
     this._healthBar.setHP(state.hp, creepMaxHp(state.type, state.level));
+
+    // Rebuild nameplate when level or type changes.
+    if (state.level !== this._lastLevel || state.type !== this._lastLabelType) {
+      this._lastLevel = state.level;
+      this._lastLabelType = state.type;
+      this._buildNamePlate(state.type, state.level);
+    }
 
     const hover = this._config?.hover ?? 0;
     const y = this._heightAt(state.pos.x, state.pos.z) + HERO.groundOffset + hover;
@@ -192,6 +227,20 @@ export class CreepView extends UnitView {
 
   dispose(): void {
     this._loadToken++; // cancel any in-flight load
+    this._namePlate?.dispose();
+    this._namePlate = null;
     this.mesh.removeFromParent();
+  }
+
+  // ── Nameplate ────────────────────────────────────────────────────
+
+  private _buildNamePlate(type: CreepTypeId, level: number): void {
+    this._namePlate?.dispose();
+    this._namePlate = null;
+    const label = `Level ${level} ${CREEP_NAMES[type] ?? type}`;
+    const plate = makeTextSprite(label, { color: 0xffaa33, height: 15 });
+    plate.sprite.position.set(0, this._worldHeight + 32, 0);
+    this.mesh.add(plate.sprite);
+    this._namePlate = plate;
   }
 }

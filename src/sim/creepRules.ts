@@ -185,8 +185,8 @@ export const CREEP = {
   respawnInterval: 15,
   /** Distance from spawnPos beyond which aggro drops and the creep leashes. */
   leashRange: 1200,
-  /** Cap on the per-unit level a camp tier reaches (rewards/stats plateau). */
-  maxLevel: 10,
+  /** No hard cap — camps loop their ladder and keep climbing in level forever. */
+  maxLevel: 999,
   /** Idle creeps scan for aggro every Nth tick, staggered by creep index. */
   aggroScanEvery: 6,
   /** Within this distance of spawnPos a leashing creep snaps home. */
@@ -241,7 +241,8 @@ function upgradeType(type: CreepTypeId, steps: number): CreepTypeId {
   const ladder = RANGED_LADDER.includes(type) ? RANGED_LADDER : MELEE_LADDER;
   const idx = ladder.indexOf(type);
   if (idx < 0) return type;
-  return ladder[Math.min(idx + steps, ladder.length - 1)];
+  // Loop the ladder so camps keep cycling ghoul→…→yeti→ghoul→… forever.
+  return ladder[(idx + steps) % ladder.length];
 }
 
 /**
@@ -259,9 +260,9 @@ export function campComposition(base: readonly CreepTypeId[], tier: number): Cre
   return units;
 }
 
-/** Every unit in a tier shares this level; climbs with the tier, capped. */
+/** Every unit in a tier shares this level; climbs with the tier, no cap. */
 export function campTierLevel(tier: number): number {
-  return Math.min(tier + 1, CREEP.maxLevel);
+  return tier + 1;
 }
 
 /**

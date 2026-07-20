@@ -119,7 +119,7 @@ export class ShopWindow {
       if (canBuy) {
         row.onmouseenter = () => { row.style.background = 'rgba(60,45,15,0.7)'; };
         row.onmouseleave = () => { row.style.background = 'rgba(40,30,10,0.6)'; };
-        row.onclick = (e) => { e.stopPropagation(); this._cb.onBuy(this._shopIndex, i); this.close(); };
+        row.onclick = (e) => { e.stopPropagation(); this._cb.onBuy(this._shopIndex, i); };
       }
 
       // Item icon (from source-of-truth item def or ShopItem fields)
@@ -231,7 +231,7 @@ export class ShopWindow {
         row.style.border = '1px solid rgba(255,200,60,0.3)';
         row.style.opacity = '1';
         row.style.cursor = 'pointer';
-        row.onclick = (e) => { e.stopPropagation(); this._cb.onBuy(this._shopIndex, i); this.close(); };
+        row.onclick = (e) => { e.stopPropagation(); this._cb.onBuy(this._shopIndex, i); };
         row.onmouseenter = () => { row.style.background = 'rgba(60,45,15,0.7)'; };
         row.onmouseleave = () => { row.style.background = 'rgba(40,30,10,0.6)'; };
       } else {

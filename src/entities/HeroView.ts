@@ -31,6 +31,9 @@ export class HeroView extends UnitView {
   private _healSparkles: { sprite: THREE.Sprite; vy: number; life: number }[] = [];
   /** Display-name plate above the head; null until `setName` is called. */
   private _namePlate: TextSprite | null = null;
+  private _playerName = '';
+  private _nameColor = 0xffffff;
+  private _lastLevel = 0;
 
   constructor(
     heroId: string,
@@ -77,10 +80,17 @@ export class HeroView extends UnitView {
    * sits just above the health bar.
    */
   setName(name: string, color: number): void {
+    this._playerName = name;
+    this._nameColor = color;
+    this._rebuildNamePlate();
+  }
+
+  private _rebuildNamePlate(): void {
     this._namePlate?.dispose();
     this._namePlate = null;
-    if (!name) return;
-    const plate = makeTextSprite(name, { color });
+    if (!this._playerName) return;
+    const text = this._lastLevel > 0 ? `Level ${this._lastLevel} — ${this._playerName}` : this._playerName;
+    const plate = makeTextSprite(text, { color: this._nameColor });
     plate.sprite.position.set(0, 3.0, 0);
     this.mesh.add(plate.sprite);
     this._namePlate = plate;
@@ -137,6 +147,12 @@ export class HeroView extends UnitView {
     // Animation cadence follows the sim's authoritative speed formula so new
     // speed modifiers can never silently desync the run animation.
     this._rig.update(dt, state.moving, heroSpeed(state));
+
+    // Update nameplate when level changes.
+    if (state.level !== this._lastLevel) {
+      this._lastLevel = state.level;
+      this._rebuildNamePlate();
+    }
 
     // Invulnerability flicker (mirrors the sim's invulnerable timer).
     if (state.invulnerable) {

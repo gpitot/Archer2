@@ -28,6 +28,7 @@ import { DebugPanel } from '../ui/DebugPanel';
 import { HeroStatusBar } from '../ui/HeroStatusBar';
 import { SpellBar } from '../ui/SpellBar';
 import { ScoreWindow } from '../ui/ScoreWindow';
+import { KillFeed } from '../ui/KillFeed';
 import { playerColor } from '../ui/colors';
 import { DEFAULT_NAME, loadPlayerName } from './playerPrefs';
 
@@ -65,6 +66,8 @@ import { FountainView } from '../entities/FountainView';
 import { ExplosionEffects } from '../rendering/ExplosionEffect';
 import { ImpactEffects, ImpactElement } from '../rendering/ImpactEffect';
 import { PortalEffects } from '../rendering/PortalEffects';
+import { LevelUpEffect } from '../rendering/LevelUpEffect';
+import { DeathEffect } from '../rendering/DeathEffect';
 import { CreepView } from '../entities/CreepView';
 import { syncKeyedViews, syncStableViews } from './ViewSync';
 import { findStraddlingPair, pruneSnapshots, RenderClock, lerpHero, lerpCreep } from './NetSync';
@@ -212,6 +215,8 @@ export class Game {
   private _explosions!: ExplosionEffects;
   private _impacts!: ImpactEffects;
   private _portalEffects!: PortalEffects;
+  private _levelUpEffect!: LevelUpEffect;
+  private _deathEffect!: DeathEffect;
   /** Previous blinkCastTimer per hero, to detect cast completion. */
   private _prevBlinkTimer = new Map<string, number>();
   private _creepViews = new Map<string, CreepView>();
@@ -247,7 +252,7 @@ export class Game {
 
   // ── UI ──
   private _floatingText = new FloatingTextManager();
-  private _cameraLocked = true;
+
   private _minimap!: Minimap;
   private _spellBar!: SpellBar;
   private _statusBar!: HeroStatusBar;
@@ -259,6 +264,7 @@ export class Game {
   private _scoreWindow!: ScoreWindow;
   private _moveIndicators!: MoveIndicatorManager;
   private _debugPanel: DebugPanel | null = null;
+  private _killFeed!: KillFeed;
 
   // ── Death overlay ──
   private _deathOverlay: HTMLDivElement | null = null;
@@ -608,7 +614,15 @@ export class Game {
         }
       },
       isScoreVisible: () => this._scoreWindow.visible,
-      cameraLock: () => { this._cameraLocked = true; },
+      centerOnHero: () => {
+        if (this._playerState) {
+          this._camera.setTarget(new THREE.Vector3(
+            this._playerState.pos.x,
+            this._smoothHeightAt(this._playerState.pos.x, this._playerState.pos.z),
+            this._playerState.pos.z,
+          ));
+        }
+      },
     };
     bindInput(this._input, this._targeting, inputCb);
 
@@ -627,6 +641,9 @@ export class Game {
     this._explosions = new ExplosionEffects(this._scene);
     this._impacts = new ImpactEffects(this._scene);
     this._portalEffects = new PortalEffects(this._scene);
+    this._levelUpEffect = new LevelUpEffect(this._scene);
+    this._deathEffect = new DeathEffect(this._scene);
+    this._killFeed = new KillFeed();
 
     // ── Debug panel (local dev only) ──
     if (!this._networkMode) {
@@ -647,11 +664,9 @@ export class Game {
     this._minimap = new Minimap(this._map, this._arena, 200, 8);
     this._minimap.setFog(this._fog, this._playerState.team);
     this._minimap.onClick = (wx, wz) => {
-      this._cameraLocked = false;
       this._camera.setTarget(new THREE.Vector3(wx, this._smoothHeightAt(wx, wz), wz));
     };
     this._minimap.onDrag = (wx, wz) => {
-      this._cameraLocked = false;
       this._camera.setTarget(new THREE.Vector3(wx, this._smoothHeightAt(wx, wz), wz));
     };
 
@@ -1599,15 +1614,8 @@ export class Game {
   private _updateCamera(dt: number): void {
     const pan = this._input.edgePan;
     if (pan.length() > 0) {
-      this._cameraLocked = false;
       const speed = 1200 * dt;
       this._camera.panScreen(pan.x * speed, pan.z * speed);
-    } else if (this._cameraLocked && this._playerState) {
-      this._camera.follow(new THREE.Vector3(
-        this._playerState.pos.x,
-        this._smoothHeightAt(this._playerState.pos.x, this._playerState.pos.z),
-        this._playerState.pos.z,
-      ));
     }
     const focus = this._camera.focus;
     this._camera.setFocusY(this._smoothHeightAt(focus.x, focus.z));
@@ -1622,6 +1630,7 @@ export class Game {
     this._fogLayer.update(dt);
     this._applyFogVisibility();
     this._floatingText.update(dt, this._camera.camera);
+    this._killFeed.update(dt);
     this._water.update(dt);
     this._moveIndicators.update(dt);
     this._recordTraceFrame(snapTicks, events);
@@ -1658,6 +1667,8 @@ export class Game {
     this._explosions.update(dt);
     this._impacts.update(dt);
     this._portalEffects.update(dt);
+    this._levelUpEffect.update(dt);
+    this._deathEffect.update(dt);
     // Sync creep views
     this._syncCreepViews(dt);
     // Sync rune views
@@ -1782,6 +1793,34 @@ export class Game {
         break;
       }
       case 'kill': {
+        // ── Kill feed announcements ──
+        const victimName = this._names.get(ev.victimId) ?? ev.victimId;
+        const victim = this._state.heroes.find((h) => h.id === ev.victimId);
+        const vTeam = victim?.team ?? 0;
+        const isCreepKill = !this._state.heroes.some((h) => h.id === ev.sourceId);
+
+        if (isCreepKill) {
+          if (ev.firstBlood) {
+            this._killFeed.announce('First Blood!', '#ff4444');
+          }
+          this._killFeed.creepKill(victimName, vTeam);
+        } else {
+          const killerName = this._names.get(ev.sourceId) ?? ev.sourceId;
+          const killer = this._state.heroes.find((h) => h.id === ev.sourceId);
+          const kTeam = killer?.team ?? 0;
+
+          if (ev.firstBlood) {
+            this._killFeed.announce('First Blood!', '#ff4444');
+          }
+          this._killFeed.kill(killerName, kTeam, victimName, vTeam);
+          if (ev.streak) {
+            this._killFeed.streak(killerName, kTeam, ev.streak);
+          }
+          if (ev.multiKill) {
+            this._killFeed.multiKill(killerName, kTeam, ev.multiKill);
+          }
+        }
+
         // ── Sound announcements (WC3-style global callouts) ──
         if (ev.firstBlood) {
           this._sound.play('firstBlood');
@@ -1795,9 +1834,14 @@ export class Game {
           if (snd) this._sound.play(snd);
         }
 
+        // Death burst: red particles + ring at the victim's position.
+        const victimView = this._heroViews.get(ev.victimId);
+        if (victimView) {
+          const vpos = victimView.mesh.position;
+          this._deathEffect.spawn(vpos.x, vpos.y + 8, vpos.z);
+        }
         // Gold bounty indicator for the local killer, LoL-style coin + amount.
         if (ev.sourceId === this._playerId && ev.gold) {
-          const victimView = this._heroViews.get(ev.victimId);
           if (victimView) {
             const pos = victimView.mesh.position.clone();
             pos.y += 60;
@@ -1831,10 +1875,26 @@ export class Game {
         break;
       }
       case 'respawn':
-      case 'levelUp':
-        // UI is driven by state inspection each render frame; events are
-        // informational for future network/audio hooks.
         break;
+      case 'levelUp': {
+        // Golden swirl animation at the hero's position — WC3 tome-style.
+        const heroView = this._heroViews.get(ev.heroId);
+        if (heroView) {
+          const pos = heroView.mesh.position;
+          this._levelUpEffect.spawn(pos.x, pos.y + 10, pos.z);
+        }
+        // Float a "LEVEL UP!" banner above the hero.
+        const heroState = this._state.heroes.find((h) => h.id === ev.heroId);
+        if (heroState) {
+          const y = this._heightAt(heroState.pos.x, heroState.pos.z);
+          this._floatingText.spawnText(
+            new THREE.Vector3(heroState.pos.x, y + 100, heroState.pos.z),
+            `LEVEL ${ev.level}!`,
+            '#ffd700',
+          );
+        }
+        break;
+      }
       case 'purchase': {
         // Tome purchase visual: float the stat gain above the hero.
         const def = SHOP_ITEMS_BY_ID[ev.itemId];
@@ -2117,10 +2177,9 @@ export class Game {
       this._deathCountdown.textContent = player.respawnTimer.toFixed(1);
       this._deathCountdown.style.color = '#ff4444';
     } else if (!this._wasPlayerAlive && !nowDead) {
-      // Just respawned — hide the overlay and re-center camera on hero.
+      // Just respawned — hide the overlay and snap camera to hero.
       this._deathOverlay.style.display = 'none';
       this._deathOverlay.style.opacity = '0';
-      this._cameraLocked = true;
       this._camera.setTarget(new THREE.Vector3(
         player.pos.x,
         this._smoothHeightAt(player.pos.x, player.pos.z),

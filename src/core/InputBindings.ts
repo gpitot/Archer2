@@ -28,8 +28,8 @@ export interface InputCallbacks {
   isShopVisible: () => boolean;
   /** The shop index of the currently open shop window. */
   getShopIndex: () => number;
-  /** Lock camera to hero. */
-  cameraLock: () => void;
+  /** Snap camera to hero position (one-shot). */
+  centerOnHero: () => void;
   /** Toggle the scoreboard modal. */
   toggleScore: () => void;
   /** True when the scoreboard window is currently visible. */
@@ -101,8 +101,8 @@ export function bindInput(input: InputManager, targeting: TargetingSystem, cb: I
     cb.toggleScore();
   });
 
-  // Space — re-center camera
-  input.onKeyDown('Space', () => { cb.cameraLock(); });
+  // Space — snap camera to hero (one-shot, no follow)
+  input.onKeyDown('Space', () => { cb.centerOnHero(); });
 
   // Number keys: buy from shop when open, or use item from inventory slot.
   // Covers all shop items (up to 8) + 6 inventory slots.
@@ -111,7 +111,6 @@ export function bindInput(input: InputManager, targeting: TargetingSystem, cb: I
     input.onKeyDown(`Digit${i}`, () => {
       if (cb.isShopVisible()) {
         cb.enqueueCommand({ type: 'buy', shopIndex: cb.getShopIndex(), itemIndex: i - 1 });
-        cb.closeShop();
         return;
       }
       const slot = i - 1;

@@ -8,6 +8,30 @@
  */
 import { Tooltip, type TooltipContent } from './Tooltip';
 
+// ── Sparkle border animation (injected once) ────────────────────────
+let _sparkleStyleInjected = false;
+function ensureSparkleStyle(): void {
+  if (_sparkleStyleInjected) return;
+  _sparkleStyleInjected = true;
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes skillpoint-pulse {
+      0%, 100% { box-shadow: 0 0 4px rgba(255,220,100,0.5), 0 0 8px rgba(255,200,60,0.3); }
+      50%      { box-shadow: 0 0 10px rgba(255,240,180,1), 0 0 20px rgba(255,220,100,0.6), 0 0 32px rgba(255,200,60,0.35); }
+    }
+    .sparkle-border::after {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: 5px;
+      border: 2px solid transparent;
+      animation: skillpoint-pulse 1.2s ease-in-out infinite;
+      pointer-events: none;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 /** Per-slot display state passed to `SpellBar.update`. */
 export interface SpellSlotInfo {
   /** 0..1 — 1 = ready, <1 = cooling down. */
@@ -345,9 +369,16 @@ class SpellSlot {
 
   /** Glow border when a skill point can be spent here (including learning from 0). */
   setCanLevel(can: boolean): void {
+    if (this._canLevel === can) return;
     this._canLevel = can;
     this._refreshBorder();
     this._refreshPointer();
+    if (can) {
+      ensureSparkleStyle();
+      this.el.classList.add('sparkle-border');
+    } else {
+      this.el.classList.remove('sparkle-border');
+    }
   }
 
   /** Set cursor to pointer when the slot is clickable; pointer events stay on for tooltip hover. */

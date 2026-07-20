@@ -89,8 +89,8 @@ export const ARROW = {
    * the recharge reproduces that parallel-cooldown sustained fire rate.
    */
   cooldownByLevel: [0, 1.125, 1.0, 0.875, 0.75, 0.625],
-  /** Max flight range per ability level (fixed at 800 for all ranks). */
-  rangeByLevel: [0, 800, 800, 800, 800, 800],
+  /** Max flight range per ability level */
+  rangeByLevel: [0, 800, 1000, 1200, 1400, 1600],
   maxLevel: 5,
   /** Maximum number of charges the ability holds. */
   maxCharges: 2,
@@ -99,7 +99,7 @@ export const ARROW = {
    * order before the arrow looses. Issuing any fresh order during it cancels
    * the shot with no charge spent — the original hero unit's 0.3s cast point.
    */
-  windup: 0.3,
+  windup: 0.2,
   /** Minimum delay between consecutive shots when a charge is available (seconds). */
   recoilTime: 0.2,
   speed: 900,
