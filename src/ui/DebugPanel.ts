@@ -1,3 +1,5 @@
+import type { AiDifficulty } from '../sim/ai/AiController';
+
 /**
  * Debug panel — only shown in local/dev mode.
  * Buttons for toggling fog, levelling up, adding gold, and swapping maps.
@@ -10,6 +12,7 @@ export class DebugPanel {
   private _btnGold: HTMLButtonElement;
   private _btnMap: HTMLButtonElement;
   private _btnAI: HTMLButtonElement;
+  private _btnDifficulty: HTMLButtonElement;
 
   constructor(
     private _onFogToggle: () => void,
@@ -18,6 +21,7 @@ export class DebugPanel {
     otherMapName: string,
     private _onSwapMap: () => void,
     private _onToggleAI: () => void,
+    private _onCycleDifficulty: () => void,
   ) {
     this.el = document.createElement('div');
     this.el.style.cssText = `
@@ -37,12 +41,14 @@ export class DebugPanel {
     this._btnGold = this._makeButton('+100 Gold', () => this._onAddGold());
     this._btnMap = this._makeButton(`Map: ${otherMapName}`, () => this._onSwapMap());
     this._btnAI = this._makeButton('AI: OFF', () => this._onToggleAI());
+    this._btnDifficulty = this._makeButton('Difficulty: Hard', () => this._onCycleDifficulty());
 
     this.el.appendChild(this._btnFog);
     this.el.appendChild(this._btnLevel);
     this.el.appendChild(this._btnGold);
     this.el.appendChild(this._btnMap);
     this.el.appendChild(this._btnAI);
+    this.el.appendChild(this._btnDifficulty);
 
     document.body.appendChild(this.el);
   }
@@ -61,6 +67,12 @@ export class DebugPanel {
     this._btnAI.style.background = enabled
       ? 'rgba(30,30,30,0.85)'
       : 'rgba(50,20,20,0.85)';
+  }
+
+  /** Update the difficulty button label to reflect the selected level. */
+  setDifficultyLabel(level: AiDifficulty): void {
+    const name = level.charAt(0).toUpperCase() + level.slice(1);
+    this._btnDifficulty.textContent = `Difficulty: ${name}`;
   }
 
   destroy(): void {

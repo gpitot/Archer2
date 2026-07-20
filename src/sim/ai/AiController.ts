@@ -34,9 +34,33 @@ type Mode = 'FIGHT' | 'CHASE' | 'FLEE' | 'RUNE' | 'SHOP' | 'FARM';
 export interface AiOptions {
   /** Seconds between macro/micro decisions (threat response is always per-frame). */
   thinkInterval?: number;
+  /**
+   * World-unit scatter added to the emitted aim point; `0` (default) is a
+   * perfect lead shot. Larger values make the bot miss moving targets more.
+   */
+  aimError?: number;
+  /**
+   * Seconds a threat must persist before the bot reacts (dodge / sidestep /
+   * blast evacuation). `0` (default) reacts instantly, every frame.
+   */
+  reactionDelay?: number;
   /** Injected RNG for jink direction; defaults to `Math.random`. */
   rng?: () => number;
 }
+
+/** Named difficulty levels selectable in debug mode. */
+export type AiDifficulty = 'easy' | 'medium' | 'hard';
+
+/**
+ * Difficulty presets. `hard` reproduces the original max-strength behavior
+ * (perfect aim, instant reactions, 10 Hz thinking); easier levels add aim
+ * scatter, reaction latency, and slower thinking.
+ */
+export const AI_DIFFICULTY_PRESETS: Record<AiDifficulty, AiOptions> = {
+  easy: { thinkInterval: 0.35, aimError: 220, reactionDelay: 0.6 },
+  medium: { thinkInterval: 0.18, aimError: 90, reactionDelay: 0.25 },
+  hard: { thinkInterval: 0.1, aimError: 0, reactionDelay: 0 },
+};
 
 // ── Tuning constants ──────────────────────────────────────────────────
 /** Fraction of hp below which the bot disengages to heal. */
@@ -61,9 +85,13 @@ interface ThreatOutcome {
 export class AiController {
   private readonly _heroId: string;
   private readonly _thinkInterval: number;
+  private readonly _aimError: number;
+  private readonly _reactionDelay: number;
   private readonly _rng: () => number;
 
   private _accum = 0;
+  /** Time the current threat has persisted, for the reaction-delay gate. */
+  private _dangerTimer = 0;
   private _mode: Mode = 'FARM';
   /** Last destination handed to a `moveTo` — dedupes re-pathing. */
   private _lastDest: V.Vec2 | null = null;
@@ -74,6 +102,8 @@ export class AiController {
   constructor(heroId: string, opts: AiOptions = {}) {
     this._heroId = heroId;
     this._thinkInterval = opts.thinkInterval ?? 0.1;
+    this._aimError = opts.aimError ?? 0;
+    this._reactionDelay = opts.reactionDelay ?? 0;
     this._rng = opts.rng ?? Math.random;
   }
 
@@ -90,13 +120,14 @@ export class AiController {
     if (!hero || !hero.alive) {
       this._lastDest = null;
       this._accum = 0;
+      this._dangerTimer = 0;
       return [];
     }
 
     const out: Command[] = [];
 
     // ── Frame-critical threat responses ──
-    const threat = this._respondToThreats(state, world, hero, out);
+    const threat = this._respondToThreats(state, world, hero, out, dt);
 
     // ── Throttled macro + micro ──
     this._accum += dt;
@@ -116,9 +147,22 @@ export class AiController {
     world: SimWorld,
     hero: HeroState,
     out: Command[],
+    dt: number,
   ): ThreatOutcome {
     // Standing in an enemy blast: walk straight out. Nothing else matters.
     const blast = blastDangerFor(state, hero);
+
+    // Reaction delay: while any danger is present, count how long it has been.
+    // On easier difficulties the bot must "notice" the threat for
+    // `_reactionDelay` seconds before it may defend — until then it keeps doing
+    // its macro action, oblivious. At max strength the delay is 0, so this gate
+    // passes on the very first frame (identical to instant reactions).
+    const danger = !!blast || !!incomingArrowThreat(state, hero, HERO.bodyRadius);
+    this._dangerTimer = danger ? this._dangerTimer + dt : 0;
+    if (this._dangerTimer < this._reactionDelay) {
+      return { skipMove: false, skipCast: false };
+    }
+
     if (blast) {
       const exit = V.normalize(V.sub(hero.pos, blast.pos));
       const dir = V.length(exit) < 0.01 ? { x: 1, z: 0 } : exit;
@@ -463,9 +507,24 @@ export class AiController {
     if (flightDist > this._arrowRange(hero) - FIRE_MARGIN) return false;
     if (!hasLineOfFire(world, hero.pos, shot.point)) return false;
 
-    out.push({ type: 'cast', ability: 'arrow', x: shot.point.x, z: shot.point.z });
+    // Range/LoF gates use the true intercept; only the emitted aim is scattered
+    // so an easier bot shoots when a perfect bot would, but misses by `_aimError`.
+    const aim = this._scatter(shot.point);
+    out.push({ type: 'cast', ability: 'arrow', x: aim.x, z: aim.z });
     this._lastDest = null; // the cast stopped movement — force a fresh step
     return true;
+  }
+
+  /**
+   * Displace an aim point by a random 2D offset up to ~`_aimError` world units.
+   * Uses the injected RNG so headless runs stay reproducible. Returns the point
+   * unchanged when `_aimError` is 0 (max difficulty → perfect aim).
+   */
+  private _scatter(point: V.Vec2): V.Vec2 {
+    if (this._aimError <= 0) return point;
+    const angle = this._rng() * Math.PI * 2;
+    const radius = this._rng() * this._aimError;
+    return { x: point.x + Math.cos(angle) * radius, z: point.z + Math.sin(angle) * radius };
   }
 
   /** Stutter-step kite: hold the range band on our current bearing, with jink. */
