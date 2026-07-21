@@ -150,7 +150,7 @@ export class HeroView extends UnitView {
 
     this.mesh.visible = true;
     this._healthBar.show();
-    this._healthBar.setHP(state.hp, heroMaxHp(state.level, state.bonusHp));
+    this._healthBar.setHP(state.hp, heroMaxHp(state.level, state.bonusHp), state.shieldHp, state.shieldMax);
 
     const y = this._heightAt(state.pos.x, state.pos.z) + HERO.groundOffset;
     this.mesh.position.set(state.pos.x, y, state.pos.z);

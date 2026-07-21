@@ -300,6 +300,14 @@ function stepHero(hero: HeroState, dt: number): void {
     hero.slowTimer = Math.max(0, hero.slowTimer - dt);
   }
 
+  // Null Shield recharge: when the timer expires, restore shield to max.
+  if (hero.shieldMax > 0 && hero.shieldRechargeTimer > 0) {
+    hero.shieldRechargeTimer = Math.max(0, hero.shieldRechargeTimer - dt);
+    if (hero.shieldRechargeTimer <= 0) {
+      hero.shieldHp = hero.shieldMax;
+    }
+  }
+
   // Don't move while stunned, casting Blink Dagger, or being pulled by a grapple.
   if (
     !isStunned(hero) &&
@@ -363,6 +371,11 @@ function respawn(hero: HeroState, pos: V.Vec2): void {
   hero.blinkCastTimer = 0;
   hero.blinkTarget = undefined;
   clearStatusEffects(hero);
+  // Null Shield fully restored on respawn.
+  if (hero.shieldMax > 0) {
+    hero.shieldHp = hero.shieldMax;
+    hero.shieldRechargeTimer = 0;
+  }
 }
 
 // ── Projectiles ───────────────────────────────────────────────────────
