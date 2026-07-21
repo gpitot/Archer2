@@ -39,19 +39,26 @@ export function run(h: SimHarness): void {
   expectTrue(hit.type === 'hit' && hit.damage === def.baseDamage, 'level-1 ghoul damage');
   expectTrue(hero.hp === 625 - def.baseDamage, `hero hp after claw: ${hero.hp}`);
 
-  // Two level-1 arrows (200 each vs 250 hp) kill it; the last-hitter gets
-  // the exact level-1 bounty.
+  // Level-1 arrows (200 each) chip the ghoul down; at 750 hp that is 4 of
+  // them, paced by the two-charge recharge. The last-hitter gets the exact
+  // level-1 bounty.
+  const arrowsToKill = Math.ceil(def.baseHp / 200);
+  expectTrue(arrowsToKill === 4, `ghoul takes 4 rank-1 arrows: ${arrowsToKill}`);
   h.issue('p1', { type: 'levelAbility', ability: 'arrow' });
   h.tick();
   h.issue('p1', { type: 'cast', ability: 'arrow', x: ghoul.pos.x, z: ghoul.pos.z });
   h.runUntil((_s, evs) => evs.some((e) => e.type === 'creepHit'), h.seconds(2), 'first arrow');
   expectTrue(ghoul.hp === def.baseHp - 200, `ghoul hp after first arrow: ${ghoul.hp}`);
 
-  h.tick(7); // let the 0.2s fire recoil clear so the second shot isn't dropped
-  h.issue('p1', { type: 'cast', ability: 'arrow', x: ghoul.pos.x, z: ghoul.pos.z });
+  // Remaining shots: re-issue whenever a charge is up until the ghoul drops.
   const killEvents = h.runUntil(
-    (_s, evs) => evs.some((e) => e.type === 'creepKill'),
-    h.seconds(2),
+    (s, evs) => {
+      if (s.projectiles.every((p) => p.ownerId !== 'p1')) {
+        h.issue('p1', { type: 'cast', ability: 'arrow', x: ghoul.pos.x, z: ghoul.pos.z });
+      }
+      return evs.some((e) => e.type === 'creepKill');
+    },
+    h.seconds(12),
     'creep kill',
   );
   const kill = expectEvent(killEvents, 'creepKill');

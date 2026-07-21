@@ -51,15 +51,15 @@ export interface CreepTypeDef {
 
 export const CREEP_TYPES: Record<CreepTypeId, CreepTypeDef> = {
   // ── Melee ladder ──────────────────────────────────────────────────
-  // Kiteable chaser: dies to two lvl-1 arrows, outrun by every hero (250 vs
-  // 350), but a pair face-tanked kills a hero in ~12s.
+  // Kiteable chaser: ~4 lvl-1 arrows, outrun by every hero (250 vs 350), but a
+  // pair face-tanked kills a hero in ~12s.
   ghoul: {
     kind: 'melee',
     bodyRadius: 24,
-    baseHp: 250,
-    hpPerLevel: 60,
+    baseHp: 750,
+    hpPerLevel: 200,
     baseDamage: 30,
-    damagePerLevel: 10,
+    damagePerLevel: 2,
     speed: 250,
     aggroRange: 350,
     attackRange: 60,
@@ -73,10 +73,10 @@ export const CREEP_TYPES: Record<CreepTypeId, CreepTypeDef> = {
   cactoro: {
     kind: 'melee',
     bodyRadius: 26,
-    baseHp: 380,
-    hpPerLevel: 80,
+    baseHp: 1150,
+    hpPerLevel: 260,
     baseDamage: 38,
-    damagePerLevel: 12,
+    damagePerLevel: 2,
     speed: 240,
     aggroRange: 360,
     attackRange: 64,
@@ -90,10 +90,10 @@ export const CREEP_TYPES: Record<CreepTypeId, CreepTypeDef> = {
   orc: {
     kind: 'melee',
     bodyRadius: 28,
-    baseHp: 520,
-    hpPerLevel: 100,
+    baseHp: 1550,
+    hpPerLevel: 320,
     baseDamage: 46,
-    damagePerLevel: 14,
+    damagePerLevel: 3,
     speed: 250,
     aggroRange: 380,
     attackRange: 70,
@@ -107,10 +107,10 @@ export const CREEP_TYPES: Record<CreepTypeId, CreepTypeDef> = {
   dino: {
     kind: 'melee',
     bodyRadius: 34,
-    baseHp: 720,
-    hpPerLevel: 130,
+    baseHp: 2150,
+    hpPerLevel: 420,
     baseDamage: 60,
-    damagePerLevel: 18,
+    damagePerLevel: 4,
     speed: 255,
     aggroRange: 400,
     attackRange: 80,
@@ -124,10 +124,10 @@ export const CREEP_TYPES: Record<CreepTypeId, CreepTypeDef> = {
   yeti: {
     kind: 'melee',
     bodyRadius: 40,
-    baseHp: 1050,
-    hpPerLevel: 180,
+    baseHp: 3150,
+    hpPerLevel: 550,
     baseDamage: 74,
-    damagePerLevel: 22,
+    damagePerLevel: 4,
     speed: 205,
     aggroRange: 420,
     attackRange: 90,
@@ -143,10 +143,10 @@ export const CREEP_TYPES: Record<CreepTypeId, CreepTypeDef> = {
   ghost: {
     kind: 'ranged',
     bodyRadius: 26,
-    baseHp: 300,
-    hpPerLevel: 70,
+    baseHp: 900,
+    hpPerLevel: 230,
     baseDamage: 30,
-    damagePerLevel: 10,
+    damagePerLevel: 2,
     speed: 240,
     aggroRange: 500,
     attackRange: 440,
@@ -163,10 +163,10 @@ export const CREEP_TYPES: Record<CreepTypeId, CreepTypeDef> = {
   dragon: {
     kind: 'ranged',
     bodyRadius: 30,
-    baseHp: 350,
-    hpPerLevel: 80,
+    baseHp: 1050,
+    hpPerLevel: 260,
     baseDamage: 40,
-    damagePerLevel: 12,
+    damagePerLevel: 2,
     speed: 220,
     aggroRange: 550,
     attackRange: 500,
@@ -193,8 +193,13 @@ export const CREEP = {
   arriveEpsilon: 5,
   /** Creeps stay in snapshots this many ticks after going idle. */
   activeLingerTicks: 30,
-  /** Per-unit spawn offset inside a camp. */
-  spawnSpread: 50,
+  /**
+   * Base spacing of the camp's spawn scatter (see `buildCamp`). Units are laid
+   * out on a phyllotaxis disc rather than a row: a row let a single arrow
+   * pierce the whole camp, and pierce falloff only helps if the shot has to
+   * choose which units to line up.
+   */
+  spawnSpread: 110,
   /** An aggroed creep recomputes its path at most every Nth tick (staggered
    *  by creep index) as the target drifts — bounds A* cost across the camp. */
   repathEvery: 8,

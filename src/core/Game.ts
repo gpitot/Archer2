@@ -1903,7 +1903,7 @@ export class Game {
           if (buyerView) {
             const pos = buyerView.mesh.position.clone();
             pos.y += 60;
-            const label = def.id === 'strength_tome' ? '+50 HP' : def.id === 'attack_tome' ? '+50 DMG' : '';
+            const label = def.id === 'strength_tome' ? '+25 HP' : def.id === 'attack_tome' ? '+10 DMG' : '';
             if (label) this._floatingText.spawnText(pos, label, def.id === 'strength_tome' ? '#44cc44' : '#ff8844');
           }
           // Quick golden flash on the hero mesh.

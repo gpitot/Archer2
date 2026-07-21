@@ -111,6 +111,15 @@ export const ARROW = {
    * hitbox against arrows and the arrow's own clearance past obstacles).
    */
   collisionRadius: 16,
+  /**
+   * Damage multiplier per *creep* pierced, by hit index (last value repeats).
+   * Arrows pass through everything they overlap; against a camp that used to
+   * multiply hero dps by the unit count, so bigger camps cleared *faster* than
+   * small ones. Falloff keeps the pierce feel while making the second and third
+   * target cost real damage. Hero-vs-hero pierce is unaffected — full damage to
+   * every hero hit is a deliberate PvP property.
+   */
+  creepPierceFalloff: [1, 0.5, 0.3, 0.2],
   /** Distance in front of the hero the arrow spawns (0.8 × mesh scale of 60). */
   spawnOffset: 48,
   /** Height above terrain the arrow rides (presentation only). */

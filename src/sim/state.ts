@@ -155,6 +155,12 @@ export interface ProjectileState {
    * original), tracked here so a unit isn't re-hit each tick it overlaps.
    */
   hitIds?: string[];
+  /**
+   * How many creeps this projectile has already pierced. Drives
+   * `ARROW.creepPierceFalloff`; counted apart from `hitIds`, which also holds
+   * hero ids and so can't index the falloff table.
+   */
+  creepHits?: number;
 }
 
 export interface WardState {

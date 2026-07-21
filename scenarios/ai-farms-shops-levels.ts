@@ -1,5 +1,5 @@
 /**
- * A full economy loop over 120s of PvE (no enemy hero): the AI farms creep
+ * A full economy loop over 300s of PvE (no enemy hero): the AI farms creep
  * camps, spends the gold on its build order, spends skill points as it levels,
  * and never gets stuck. Exercises the FARM/SHOP macro modes, `build.ts`, and
  * the LoF-aware repositioning that stops the bot freezing behind obstacles.
@@ -26,7 +26,9 @@ export function run(h: SimHarness): void {
   let kills = 0;
   const samples: V.Vec2[] = [];
 
-  for (let t = 0; t < h.seconds(120); t++) {
+  // 300s, not 120s: creeps carry ~3× the hp they used to for unchanged
+  // bounties, so a two-item build order now takes ~5 minutes to fund.
+  for (let t = 0; t < h.seconds(300); t++) {
     for (const e of h.tick()) {
       if (e.type === 'purchase' && e.heroId === 'p1') purchases.push(e.itemId);
       if (e.type === 'creepKill' && e.killerId === 'p1') kills++;

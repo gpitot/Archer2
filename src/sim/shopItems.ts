@@ -208,11 +208,11 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     color: '#44CC44',
     cost: 200,
     description: "A mystical tome that permanently increases your body's fortitude.",
-    stats: [{ label: 'Permanent Bonus', values: ['+50 Max HP'] }],
+    stats: [{ label: 'Permanent Bonus', values: ['+25 Max HP'] }],
     consumable: true,
     apply: (hero) => {
-      hero.bonusHp += 50;
-      hero.hp += 50;
+      hero.bonusHp += 25;
+      hero.hp += 25;
     },
   },
   {
@@ -222,10 +222,10 @@ export const SHOP_ITEMS: ShopItemDef[] = [
     color: '#FF6633',
     cost: 200,
     description: 'A mystical tome that permanently sharpens your offensive prowess.',
-    stats: [{ label: 'Permanent Bonus', values: ['+50 Ability Damage'] }],
+    stats: [{ label: 'Permanent Bonus', values: ['+10 Ability Damage'] }],
     consumable: true,
     apply: (hero) => {
-      hero.bonusDamage += 50;
+      hero.bonusDamage += 10;
     },
   },
   {

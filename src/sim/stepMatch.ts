@@ -393,7 +393,15 @@ function stepProjectiles(
       const r = CREEP_TYPES[creep.type].bodyRadius + ARROW.collisionRadius;
       if (V.distanceSq(p.pos, creep.pos) >= r * r) continue;
       hitIds.push(creep.id);
-      const { damage, crit } = rollAbilityDamage(source, p.damage, rng);
+      // Falloff is indexed by creeps pierced *so far* by this projectile, so it
+      // is counted separately from `hitIds` (which also holds hero ids).
+      const pierced = p.creepHits ?? 0;
+      const falloff =
+        ARROW.creepPierceFalloff[
+          Math.min(pierced, ARROW.creepPierceFalloff.length - 1)
+        ];
+      p.creepHits = pierced + 1;
+      const { damage, crit } = rollAbilityDamage(source, p.damage * falloff, rng);
       for (const slotItemId of source.inventory) {
         if (!slotItemId) continue;
         SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, creep, damage);

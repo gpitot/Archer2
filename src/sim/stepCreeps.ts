@@ -61,6 +61,9 @@ export function createCreep(
   };
 }
 
+/** Golden angle (rad) — the phyllotaxis step used to scatter camp spawns. */
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+
 /**
  * Build one camp's creeps and its `CampState`, appending both to `state`.
  * A camp reserves a fixed pool (`campPoolSize` = base + `maxExtraUnits`) so
@@ -82,11 +85,20 @@ export function buildCamp(
   const tier0 = campComposition(base, 0); // == base (0 upgrade steps, 0 extra)
   const created: CreepState[] = [];
   for (let i = 0; i < pool; i++) {
-    // Spread the units along one row, centred on the BASE units so tier-0
-    // positions are unaffected by the reserved extra slots (which trail off to
-    // one side, used only at higher tiers).
-    const offsetX = (i - (base.length - 1) / 2) * CREEP.spawnSpread;
-    const pos = findWalkableNear(world, center.x + offsetX, center.z);
+    // Scatter the units over a disc (phyllotaxis: golden-angle steps, radius
+    // ∝ √i) instead of a row. A row put every unit on one line, so a single
+    // arrow pierced the whole camp; on a disc no two units share a line through
+    // the centre, so lining up multiple targets takes positioning. Indexing by
+    // slot keeps tier-0 positions unaffected by the reserved extra slots, which
+    // take the outer rings and are used only at higher tiers. Radius is √i and
+    // not √(i+½) so slot 0 still sits exactly on the authored camp centre.
+    const angle = i * GOLDEN_ANGLE;
+    const radius = CREEP.spawnSpread * Math.sqrt(i);
+    const pos = findWalkableNear(
+      world,
+      center.x + Math.cos(angle) * radius,
+      center.z + Math.sin(angle) * radius,
+    );
     const alive = i < tier0.length;
     const type = alive ? tier0[i] : base[Math.min(i, base.length - 1)];
     const creep = createCreep(`c${startId + i}`, campId, type, pos, { alive, level });
