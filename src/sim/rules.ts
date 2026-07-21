@@ -169,7 +169,7 @@ export const BLAST = {
   /** Seconds between the cast (circle appears) and the explosion. */
   delay: 1.5,
   /** Damage per rank (index 0 = unlearned). */
-  damageByLevel: [0, 300, 425, 550],
+  damageByLevel: [0, 600, 1200, 1800],
   /** Cooldown per rank (seconds). */
   cooldownByLevel: [0, 8, 6, 4],
   maxLevel: 3,
