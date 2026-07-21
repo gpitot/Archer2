@@ -7,6 +7,7 @@ import { ABILITIES, ABILITY_ORDER, AbilityDef, canCast } from '../sim/abilities'
 import { SHOP_ITEMS, SHOP_ITEMS_BY_ID } from '../sim/shopItems';
 import type { InputManager } from '../input/InputManager';
 import type { TargetingSystem } from '../input/TargetingSystem';
+import { shopHotkeyCode } from '../ui/shopHotkeys';
 import type { Command, HeroState } from '../sim/state';
 
 export interface InputCallbacks {
@@ -104,15 +105,21 @@ export function bindInput(input: InputManager, targeting: TargetingSystem, cb: I
   // Space — snap camera to hero (one-shot, no follow)
   input.onKeyDown('Space', () => { cb.centerOnHero(); });
 
-  // Number keys: buy from shop when open, or use item from inventory slot.
-  // Covers all shop items (up to 8) + 6 inventory slots.
-  const numKeys = Math.max(6, SHOP_ITEMS.length);
-  for (let i = 1; i <= numKeys; i++) {
+  // Letter hotkeys: buy the matching shop slot while the shop is open.
+  // The shop outgrew the ten digits, and digits belong to the inventory, so
+  // shop slots get letters from the reserved-safe pool in shopHotkeys.ts.
+  for (let i = 0; i < SHOP_ITEMS.length; i++) {
+    const code = shopHotkeyCode(i);
+    if (!code) break;
+    input.onKeyDown(code, () => {
+      if (!cb.isShopVisible()) return;
+      cb.enqueueCommand({ type: 'buy', shopIndex: cb.getShopIndex(), itemIndex: i });
+    });
+  }
+
+  // Number keys 1–6: use the item in that inventory slot.
+  for (let i = 1; i <= 6; i++) {
     input.onKeyDown(`Digit${i}`, () => {
-      if (cb.isShopVisible()) {
-        cb.enqueueCommand({ type: 'buy', shopIndex: cb.getShopIndex(), itemIndex: i - 1 });
-        return;
-      }
       const slot = i - 1;
       const p = cb.getPlayerState();
       if (slot >= p.inventory.length) return;
