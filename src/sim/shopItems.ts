@@ -73,7 +73,7 @@ export const VAMPIRIC_BOW_LIFESTEAL = 0.1;
 /** Ministun Bow: chance (0-1) for an arrow to stun on hit. */
 export const MINISTUN_CHANCE = 0.2;
 /** Ministun Bow: how long the proc stuns for, in seconds. */
-export const MINISTUN_DURATION = 1;
+export const MINISTUN_DURATION = 0.5;
 
 /** Null Shield: max shield HP granted per copy (unique — does not stack). */
 export const NULL_SHIELD_MAX = 120;
