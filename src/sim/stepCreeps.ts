@@ -212,8 +212,10 @@ export function stepCreeps(
         if (dir.x !== 0 || dir.z !== 0) creep.facing = V.heading(dir);
         if (creep.attackCooldown <= 0) {
           if (def.kind === 'melee') {
-            // Melee ignores dodge (dodge evades projectiles, not claws).
-            applyCreepDamageToHero(state, target, creepDamage(creep.type, creep.level), creep, creep.id, events);
+            // Dodge evades melee swings too
+            if (!target.abilities.dodge.active) {
+              applyCreepDamageToHero(state, target, creepDamage(creep.type, creep.level), creep, creep.id, events);
+            }
           } else {
             fireCreepProjectile(state, creep, def, target, events);
           }
