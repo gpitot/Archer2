@@ -127,6 +127,12 @@ export interface HeroState extends UnitCore {
   blinkCastTimer: number;
   /** Where to teleport when the cast delay expires. */
   blinkTarget?: Vec2;
+  /** Null Shield: current shield HP (absorbs damage before regular HP). */
+  shieldHp: number;
+  /** Null Shield: max shield HP restored when the recharge timer elapses. */
+  shieldMax: number;
+  /** Null Shield: seconds until shield regenerates (resets on taking damage). */
+  shieldRechargeTimer: number;
 }
 
 export interface ProjectileState {
@@ -364,6 +370,9 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     burnSourceId: null,
     burnTickAccum: 0,
     blinkCastTimer: 0,
+    shieldHp: 0,
+    shieldMax: 0,
+    shieldRechargeTimer: 0,
   };
 }
 

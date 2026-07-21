@@ -8,7 +8,7 @@
  * kill, XP, and reward helpers that were scattered across stepMatch and
  * stepCreeps.
  */
-import { CRIT_MULTIPLIER } from './shopItems';
+import { CRIT_MULTIPLIER, NULL_SHIELD_RECHARGE } from './shopItems';
 import { CreepState, HeroState, MatchState, SimEvent } from './state';
 import { runeDamageMultiplier } from './stepRunes';
 import { creepGold, creepXp, CREEP } from './creepRules';
@@ -108,7 +108,17 @@ export function dealDamageToHero(
 ): void {
   if (!target.alive || target.invulnerable) return;
 
-  target.hp = Math.max(0, target.hp - damage);
+  // Absorb damage through Null Shield before touching HP.
+  let remaining = damage;
+  if (target.shieldHp > 0) {
+    const absorbed = Math.min(target.shieldHp, remaining);
+    target.shieldHp -= absorbed;
+    remaining -= absorbed;
+  }
+  target.hp = Math.max(0, target.hp - remaining);
+
+  // Taking damage resets the shield recharge timer.
+  target.shieldRechargeTimer = NULL_SHIELD_RECHARGE;
   const sourceId = source.kind === 'hero' ? source.hero.id : source.creep.id;
   const hitEvent: SimEvent = {
     type: 'hit',

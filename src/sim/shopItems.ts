@@ -16,7 +16,7 @@ import { Vec2 } from './math';
 import * as V from './math';
 import { stopMovement } from './abilities';
 import { breakInvisibility } from './stepRunes';
-import { WARD } from './rules';
+import { WARD, heroMaxHp } from './rules';
 
 // ── Shared constants (still named exports — consumed by stepMatch.ts) ─
 
@@ -41,6 +41,14 @@ export const ICE_BOW_SLOW_FACTOR = 0.8;
 export const FIRE_BOW_BURN_FRACTION = 0.1;
 /** Burn duration (seconds) applied by Fire Bow on arrow hit. */
 export const FIRE_BOW_BURN_DURATION = 3;
+
+/** Fraction of arrow damage healed back to the source by Vampiric Bow (20%). */
+export const VAMPIRIC_BOW_LIFESTEAL = 0.2;
+
+/** Null Shield: max shield HP granted per copy (unique — does not stack). */
+export const NULL_SHIELD_MAX = 120;
+/** Null Shield: seconds without taking damage before the shield regenerates. */
+export const NULL_SHIELD_RECHARGE = 10;
 
 // ── Contexts ──────────────────────────────────────────────────────────
 
@@ -295,6 +303,45 @@ export const SHOP_ITEMS: ShopItemDef[] = [
       target.burnRemaining += damage * FIRE_BOW_BURN_FRACTION;
       target.burnDps = target.burnRemaining / FIRE_BOW_BURN_DURATION;
       target.burnSourceId = source.id;
+    },
+  },
+  {
+    id: 'vampiric_bow',
+    name: 'Vampiric Bow',
+    icon: '🩸',
+    color: '#CC2244',
+    cost: 1000,
+    description: 'Life-draining arrows that siphon health from enemies struck, returning a portion to the archer.',
+    stats: [
+      { label: 'Lifesteal', values: [`${Math.round(VAMPIRIC_BOW_LIFESTEAL * 100)}% of arrow dmg`] },
+      { label: 'Heals from', values: ['Heroes', 'Creeps'] },
+    ],
+    apply: (_hero) => {
+      // Lifesteal is applied via the onProjectileHitHero hook.
+    },
+    onProjectileHitHero: (source, _target, damage) => {
+      const heal = damage * VAMPIRIC_BOW_LIFESTEAL;
+      const maxHp = heroMaxHp(source.level, source.bonusHp);
+      source.hp = Math.min(source.hp + heal, maxHp);
+    },
+  },
+  {
+    id: 'null_shield',
+    name: 'Null Barrier',
+    icon: '💠',
+    color: '#6699EE',
+    cost: 800,
+    description: 'A mystical barrier that absorbs incoming damage. Regenerates after avoiding harm for a short time.',
+    stats: [
+      { label: 'Shield', values: [String(NULL_SHIELD_MAX)] },
+      { label: 'Recharge', values: [`${NULL_SHIELD_RECHARGE}s out of combat`] },
+    ],
+    apply: (hero) => {
+      // Unique — stacking would be too strong. A second purchase is a no-op.
+      if (hero.shieldMax > 0) return;
+      hero.shieldMax = NULL_SHIELD_MAX;
+      hero.shieldHp = NULL_SHIELD_MAX;
+      hero.shieldRechargeTimer = 0;
     },
   },
   {

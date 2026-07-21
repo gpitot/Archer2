@@ -3,6 +3,8 @@ import * as THREE from 'three';
 /**
  * Billboard health bar rendered above a hero.
  * Uses a canvas texture on a Sprite so it always faces the camera.
+ * When the hero owns a Null Barrier, a grey shield segment extends to the
+ * right past the HP fill so enemies can see it too.
  */
 export class HealthBar {
   readonly sprite: THREE.Sprite;
@@ -12,8 +14,10 @@ export class HealthBar {
   private _width = 128;
   private _height = 16;
 
-  private _maxHP: number;
-  private _currentHP: number;
+  private _maxHP = 0;
+  private _currentHP = 0;
+  private _shieldHp = 0;
+  private _shieldMax = 0;
 
   constructor(maxHP: number) {
     this._maxHP = maxHP;
@@ -40,11 +44,19 @@ export class HealthBar {
     this._draw();
   }
 
-  /** Update the displayed HP value. Repaints only when the value changed. */
-  setHP(current: number, max: number): void {
-    if (current === this._currentHP && max === this._maxHP) return;
+  /** Update HP and shield values. Repaints only when something changed. */
+  setHP(current: number, max: number, shieldHp = 0, shieldMax = 0): void {
+    if (
+      current === this._currentHP &&
+      max === this._maxHP &&
+      shieldHp === this._shieldHp &&
+      shieldMax === this._shieldMax
+    )
+      return;
     this._currentHP = current;
     this._maxHP = max;
+    this._shieldHp = shieldHp;
+    this._shieldMax = shieldMax;
     this._draw();
   }
 
@@ -58,31 +70,54 @@ export class HealthBar {
 
     ctx.clearRect(0, 0, w, h);
 
+    const effectiveShield = this._shieldHp > 0 ? this._shieldHp : 0;
+    const total = this._maxHP + effectiveShield;
+    const barLeft = 1;
+    const barWidth = w - 2;
+
     // Background (dark)
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     ctx.fillRect(0, 0, w, h);
 
-    // HP fill
-    const ratio = Math.max(0, this._currentHP / this._maxHP);
-    const fillWidth = Math.max(0, (w - 2) * ratio);
+    // HP fill width — fraction of total capacity so the bar doesn't overflow
+    // when shield is active.
+    const hpWidth = total > 0 ? Math.max(0, (this._currentHP / total) * barWidth) : 0;
 
-    if (ratio > 0.5) {
-      ctx.fillStyle = '#44cc44'; // green
-    } else if (ratio > 0.25) {
-      ctx.fillStyle = '#cccc44'; // yellow
-    } else {
-      ctx.fillStyle = '#cc4444'; // red
+    if (this._shieldMax > 0) {
+      // Grey shield segment extends past HP.  It fills from the end of HP
+      // to (HP + shield) / total — the rightward "extra HP" segment.
+      const shieldEnd = total > 0
+        ? Math.max(0, ((this._currentHP + this._shieldHp) / total) * barWidth)
+        : 0;
+      const shieldWidth = Math.max(0, shieldEnd - hpWidth);
+
+      if (shieldWidth > 0.5) {
+        ctx.fillStyle = '#2a2727ff';
+        ctx.fillRect(barLeft + hpWidth, 1, shieldWidth, h - 2);
+        
+      }
     }
 
-    ctx.fillRect(1, 1, fillWidth, h - 2);
+    // HP fill behind the shield (z-order: HP first, then shield on top).
+    if (hpWidth > 0) {
+      const ratio = this._maxHP > 0 ? this._currentHP / this._maxHP : 0;
+      if (ratio > 0.5) {
+        ctx.fillStyle = '#44cc44';
+      } else if (ratio > 0.25) {
+        ctx.fillStyle = '#cccc44';
+      } else {
+        ctx.fillStyle = '#cc4444';
+      }
+      ctx.fillRect(barLeft, 1, hpWidth, h - 2);
+    }
 
-    // Segment dividers — thin dark line every 100 HP
-    const barLeft = 4;
-    const barWidth = w - (barLeft * 2);
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    for (let hp = 100; hp < this._maxHP; hp += 100) {
-      const segX = Math.round(barLeft + (hp / this._maxHP) * barWidth);
-      ctx.fillRect(segX, 1, barLeft, h - 2);
+    // Segment dividers — thin dark line every 100 HP, scaled to total.
+    if (total > 0) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      for (let mark = 100; mark < total; mark += 100) {
+        const segX = Math.round(barLeft + (mark / total) * barWidth);
+        ctx.fillRect(segX, 1, 2, h - 2);
+      }
     }
 
     // Border

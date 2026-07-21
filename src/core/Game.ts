@@ -2319,7 +2319,7 @@ export class Game {
 
   private _debugAddGold(): void {
     if (this._playerState) {
-      this._playerState.gold += 100;
+      this._playerState.gold += 1000;
     }
   }
 
