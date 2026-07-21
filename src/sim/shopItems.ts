@@ -67,8 +67,8 @@ export const FIRE_BOW_BURN_FRACTION = 0.1;
 /** Burn duration (seconds) applied by Fire Bow on arrow hit. */
 export const FIRE_BOW_BURN_DURATION = 3;
 
-/** Fraction of arrow damage healed back to the source by Vampiric Bow (20%). */
-export const VAMPIRIC_BOW_LIFESTEAL = 0.2;
+/** Fraction of arrow damage healed back to the source by Vampiric Bow (10%). */
+export const VAMPIRIC_BOW_LIFESTEAL = 0.1;
 
 /** Ministun Bow: chance (0-1) for an arrow to stun on hit. */
 export const MINISTUN_CHANCE = 0.2;
