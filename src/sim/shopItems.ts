@@ -8,7 +8,7 @@
  * Inventory helpers (`addItem`, `removeItem`) live here alongside the defs
  * so the `execute` callbacks can use them without a circular import.
  */
-import type { HeroState, CreepState, MatchState, SimEvent } from './state';
+import type { HeroState, CreepState, MatchState, SimEvent, UnitCore } from './state';
 import type { SimWorld } from './world';
 import type { StatLine, TooltipContent } from '../ui/TooltipContent';
 import { findReachableNear, sphereHitsObstacle } from './world';
@@ -16,6 +16,7 @@ import { Vec2 } from './math';
 import * as V from './math';
 import { aimDir, stopMovement } from './abilities';
 import { breakInvisibility } from './stepRunes';
+import { applyStun } from './statusEffects';
 import { spawnProjectile } from './projectiles';
 import { ARROW, WARD, heroMaxHp } from './rules';
 
@@ -69,6 +70,11 @@ export const FIRE_BOW_BURN_DURATION = 3;
 /** Fraction of arrow damage healed back to the source by Vampiric Bow (20%). */
 export const VAMPIRIC_BOW_LIFESTEAL = 0.2;
 
+/** Ministun Bow: chance (0-1) for an arrow to stun on hit. */
+export const MINISTUN_CHANCE = 0.2;
+/** Ministun Bow: how long the proc stuns for, in seconds. */
+export const MINISTUN_DURATION = 1;
+
 /** Null Shield: max shield HP granted per copy (unique — does not stack). */
 export const NULL_SHIELD_MAX = 120;
 /** Null Shield: seconds without taking damage before the shield regenerates. */
@@ -77,11 +83,12 @@ export const NULL_SHIELD_RECHARGE = 10;
 // ── Contexts ──────────────────────────────────────────────────────────
 
 /**
- * The unit an owner's projectile struck — hero or creep. Exposes the debuff
- * fields an on-hit hook may write (Ice Bow slow, Fire Bow burn). Both
- * `HeroState` and `CreepState` structurally satisfy this shape.
+ * The unit an owner's projectile struck — hero or creep. Extends `UnitCore`
+ * (so hooks can hand the target to shared helpers like `applyStun`) with the
+ * debuff fields an on-hit hook may write directly (Ice Bow slow, Fire Bow
+ * burn). Both `HeroState` and `CreepState` satisfy this shape.
  */
-export interface ProjectileHitTarget {
+export interface ProjectileHitTarget extends UnitCore {
   slowTimer: number;
   burnRemaining: number;
   burnDps: number;
@@ -148,7 +155,17 @@ export interface ShopItemDef {
    * Called when the owner's arrow/projectile hits a hero or creep, with the
    * final (post-crit) `damage` of that hit — Fire Bow scales its burn off it.
    */
-  onProjectileHitHero?: (source: HeroState, target: ProjectileHitTarget, damage: number) => void;
+  onProjectileHitHero?: (
+    source: HeroState,
+    target: ProjectileHitTarget,
+    damage: number,
+    /**
+     * The sim's seeded rng. Hooks that roll a chance MUST use this rather
+     * than `Math.random`, or the server and every client disagree about
+     * whether the proc happened.
+     */
+    rng: () => number,
+  ) => void;
 }
 
 // ── Inventory helpers ─────────────────────────────────────────────────
@@ -338,6 +355,30 @@ export const SHOP_ITEMS: ShopItemDef[] = [
       target.burnRemaining += damage * FIRE_BOW_BURN_FRACTION;
       target.burnDps = target.burnRemaining / FIRE_BOW_BURN_DURATION;
       target.burnSourceId = source.id;
+    },
+  },
+  {
+    id: 'ministun_bow',
+    name: 'Ministun Bow',
+    icon: '💫',
+    color: '#FFCC33',
+    cost: 1000,
+    description:
+      'Concussive arrows that sometimes rattle their target, stunning them where they stand.',
+    stats: [
+      { label: 'Stun Chance', values: [`${Math.round(MINISTUN_CHANCE * 100)}%`] },
+      { label: 'Stun Duration', values: [`${MINISTUN_DURATION}s`] },
+      { label: 'Procs on', values: ['Heroes', 'Creeps'] },
+    ],
+    apply: (_hero) => {
+      // The stun is rolled in the onProjectileHitHero hook.
+    },
+    onProjectileHitHero: (_source, target, _damage, rng) => {
+      // Seeded rng, not Math.random — every peer must agree on the proc.
+      if (rng() >= MINISTUN_CHANCE) return;
+      // Stuns refresh rather than stack, so a lucky streak of procs holds the
+      // target for MINISTUN_DURATION from the last one, not the sum.
+      applyStun(target, MINISTUN_DURATION);
     },
   },
   {

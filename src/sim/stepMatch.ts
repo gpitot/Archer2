@@ -453,7 +453,7 @@ function stepProjectiles(
       // Rolled after the damage so a burn can scale off the actual hit.
       for (const slotItemId of source.inventory) {
         if (!slotItemId) continue;
-        SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, hero, damage);
+        SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, hero, damage, rng);
       }
       applyDamage(state, hero, source, damage, p.id, events, crit);
     }
@@ -475,7 +475,7 @@ function stepProjectiles(
       const { damage, crit } = rollAbilityDamage(source, p.damage * falloff, rng);
       for (const slotItemId of source.inventory) {
         if (!slotItemId) continue;
-        SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, creep, damage);
+        SHOP_ITEMS_BY_ID[slotItemId]?.onProjectileHitHero?.(source, creep, damage, rng);
       }
       applyCreepDamage(state, creep, source, damage, events, crit);
     }

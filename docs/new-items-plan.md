@@ -53,6 +53,27 @@ Would require a post-hit search in `stepMatch` after each projectile
 resolves — a one-shot `sphereHitsObstacle`-free search for a nearby foe.
 Adds AoE teamfight pressure.
 
+### 💫 Ministun Bow — 1000g ✅ implemented
+
+> 20% chance on arrow hit to stun the target for 1s. Works on creeps too.
+
+The first consumer of `applyStun` outside the hook, and it needed two changes
+to the on-hit contract:
+
+* `ProjectileHitTarget` now extends `UnitCore` instead of listing only the
+  debuff fields, so a hook can hand its target to shared helpers rather than
+  poking timers by hand.
+* `onProjectileHitHero` takes the sim's seeded **`rng`** as a 4th argument.
+  Any hook that rolls a chance must use it — `Math.random` would have the
+  server and each client disagree about whether the proc happened. (Client
+  prediction discards its projectiles, so hit hooks only ever run on the
+  authoritative sim, but the seed still has to drive it for offline mode and
+  the harness.)
+
+Since stuns refresh rather than stack, a lucky streak holds the target for 1s
+from the *last* proc rather than the sum. Covered by `scenarios/ministun-bow.ts`,
+which stubs the rng for the roll boundaries and then fires real arrows.
+
 ---
 
 ## 3. Active items — medium effort (reuse `use` + `itemCooldowns`)
@@ -176,6 +197,7 @@ on `HeroState`. Shield absorbs damage before HP; recharge timer resets to
 | Crown of Power | 800g | Recipe | None (composition) |
 | Warden's Cloak | 700g | Passive | `damageReduction` field |
 | Null Barrier | 800g | Passive | `shieldHp` + `shieldMax` |
+| Ministun Bow | 1000g | Passive | None (`applyStun` + rng in hook) |
 
 ---
 

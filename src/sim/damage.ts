@@ -11,6 +11,7 @@
 import { CRIT_MULTIPLIER, NULL_SHIELD_RECHARGE } from './shopItems';
 import { CreepState, HeroState, MatchState, SimEvent } from './state';
 import { runeDamageMultiplier } from './stepRunes';
+import { clearStatusEffects } from './statusEffects';
 import { creepGold, creepXp, CREEP } from './creepRules';
 import {
   HERO,
@@ -206,6 +207,7 @@ export function dealDamageToCreep(
   creep.respawnTimer = CREEP.respawnInterval;
   creep.aggroTargetId = null;
   creep.attackCooldown = 0;
+  clearStatusEffects(creep);
 
   const gold = creepGold(creep.type, creep.level);
   const xp = creepXp(creep.type, creep.level);
@@ -239,6 +241,9 @@ export function killHero(target: HeroState): void {
   // Cancel any in-progress blink cast.
   target.blinkCastTimer = 0;
   target.blinkTarget = undefined;
+  // A corpse isn't stunned or mid-yank; respawn would clear these anyway, but
+  // leaving them set means `isStunned` reads true for the whole death timer.
+  clearStatusEffects(target);
 }
 
 function awardKillGold(state: MatchState, killer: HeroState, victim: HeroState): number {
