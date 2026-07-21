@@ -14,9 +14,10 @@ import type { StatLine, TooltipContent } from '../ui/TooltipContent';
 import { findReachableNear, sphereHitsObstacle } from './world';
 import { Vec2 } from './math';
 import * as V from './math';
-import { stopMovement } from './abilities';
+import { aimDir, stopMovement } from './abilities';
 import { breakInvisibility } from './stepRunes';
-import { WARD } from './rules';
+import { spawnProjectile } from './projectiles';
+import { ARROW, WARD } from './rules';
 
 // ── Shared constants (still named exports — consumed by stepMatch.ts) ─
 
@@ -36,6 +37,29 @@ export const CRIT_MULTIPLIER = 2;
 export const ICE_BOW_SLOW_DURATION = 2;
 /** Speed multiplier while slowed. */
 export const ICE_BOW_SLOW_FACTOR = 0.8;
+
+/** Grappling Arrow hook range. */
+export const GRAPPLE_RANGE = 1000;
+/** Grappling Arrow cooldown in seconds. */
+export const GRAPPLE_COOLDOWN = 12;
+/** Hook flight speed — fast enough to read as a whip crack, not a shot. */
+export const GRAPPLE_SPEED = 2200;
+/** Duration (seconds) of the yank, whoever is being moved. */
+export const GRAPPLE_PULL_DURATION = 0.4;
+/** How far a hooked unit is dragged toward the grappler. */
+export const GRAPPLE_HERO_PULL_DISTANCE = 1000;
+/**
+ * Extra stun (seconds) a hooked unit eats after the yank lands, on top of the
+ * pull itself. This is the whole payoff of the hook: the victim arrives next
+ * to you and stays put long enough to be punished for it.
+ */
+export const GRAPPLE_STUN_EXTRA = 0.5;
+/**
+ * Stand-off kept from a hooked wall/tree. The hook latches where the
+ * projectile stopped, which is already inside the obstacle's collision
+ * sphere — landing there would leave the hero clipped into it.
+ */
+export const GRAPPLE_ANCHOR_GAP = 45;
 
 /** Fraction of the triggering hit's damage dealt again as a burn (10%). */
 export const FIRE_BOW_BURN_FRACTION = 0.1;
@@ -94,6 +118,17 @@ export interface ShopItemDef {
     targeting: 'point' | 'self';
     /** Maximum cast range (point-targeted items only). */
     range?: number;
+    /**
+     * Ground-target reticle colour. Defaults to the placement green used by
+     * wards; set it for items that read as something else.
+     */
+    indicatorColor?: number;
+    /**
+     * Point-targeted items normally snap their target to walkable ground.
+     * Free-aim items (the grapple, which is fired *at* walls) take the raw
+     * click instead — only the direction matters.
+     */
+    freeAim?: boolean;
     /** Cooldown the execute callback should apply to hero.itemCooldowns[id]. */
     cooldown?: number;
     /** Extra readiness gate beyond the cooldown (e.g. ward charges left). */
@@ -295,6 +330,60 @@ export const SHOP_ITEMS: ShopItemDef[] = [
       target.burnRemaining += damage * FIRE_BOW_BURN_FRACTION;
       target.burnDps = target.burnRemaining / FIRE_BOW_BURN_DURATION;
       target.burnSourceId = source.id;
+    },
+  },
+  {
+    id: 'grappling_arrow',
+    name: 'Grappling Arrow',
+    icon: '🪝',
+    color: '#B8860B',
+    cost: 800,
+    description:
+      'Fire a hook in the target direction. It latches onto the first tree or cliff and reels you to it — or onto the first enemy it touches, dragging them toward you and stunning them.',
+    stats: [
+      { label: 'Range', values: [String(GRAPPLE_RANGE)] },
+      { label: 'Pull', values: [String(GRAPPLE_HERO_PULL_DISTANCE)] },
+      { label: 'Pull Time', values: [`${GRAPPLE_PULL_DURATION}s`] },
+      { label: 'Stun', values: [`${GRAPPLE_PULL_DURATION + GRAPPLE_STUN_EXTRA}s`] },
+      { label: 'Cooldown', values: [`${GRAPPLE_COOLDOWN}s`] },
+    ],
+    apply: (_hero) => {
+      // Effect is handled via the use.execute callback.
+    },
+    use: {
+      targeting: 'point',
+      range: GRAPPLE_RANGE,
+      cooldown: GRAPPLE_COOLDOWN,
+      indicatorColor: 0xffbb33,
+      // Fired at walls and trees, so the click must not snap to walkable ground.
+      freeAim: true,
+      execute(ctx) {
+        const { state, hero, events } = ctx;
+        if (!hero.alive) return;
+        if (ctx.x === undefined || ctx.z === undefined) return;
+
+        // Firing the hook is an attack: it stops the hero, turns them toward
+        // the shot, and breaks invisibility — same preamble as an arrow.
+        stopMovement(hero);
+        const dir = aimDir(hero, ctx.x, ctx.z);
+        hero.targetFacing = V.heading(dir);
+        breakInvisibility(hero);
+        hero.itemCooldowns['grappling_arrow'] = GRAPPLE_COOLDOWN;
+
+        // The hook resolves in stepProjectiles — it's the only projectile that
+        // pulls instead of damaging (see the 'grapple' branch there).
+        spawnProjectile(state, events, {
+          ownerId: hero.id,
+          kind: 'grapple',
+          team: hero.team,
+          pos: V.add(hero.pos, V.scale(dir, ARROW.spawnOffset)),
+          dir,
+          speed: GRAPPLE_SPEED,
+          maxRange: GRAPPLE_RANGE,
+          traveled: 0,
+          damage: 0,
+        });
+      },
     },
   },
   {

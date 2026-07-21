@@ -45,6 +45,7 @@ import {
   MatchState,
   ProjectileState,
   SimEvent,
+  UnitCore,
 } from './state';
 import {
   applyCreepDamage,
@@ -52,12 +53,30 @@ import {
   stepCreeps,
 } from './stepCreeps';
 import { CREEP_TYPES } from './creepRules';
-import { findRespawnPosition, SimWorld } from './world';
-import { ICE_BOW_SLOW_FACTOR, SHOP_ITEMS_BY_ID, addItem, removeItem } from './shopItems';
+import { findReachableNear, findRespawnPosition, SimWorld } from './world';
+import {
+  GRAPPLE_ANCHOR_GAP,
+  GRAPPLE_HERO_PULL_DISTANCE,
+  GRAPPLE_PULL_DURATION,
+  GRAPPLE_STUN_EXTRA,
+  ICE_BOW_SLOW_FACTOR,
+  SHOP_ITEMS_BY_ID,
+  addItem,
+  removeItem,
+} from './shopItems';
+import {
+  applyStun,
+  clearStatusEffects,
+  isBeingPulled,
+  isStunned,
+  startPull,
+  stepPull,
+  stepStun,
+} from './statusEffects';
 import { stepRuneBuffs, stepRunes } from './stepRunes';
 import { RUNE } from './runeRules';
 import { rollAbilityDamage, dealDamageToHero, killHero, addXp, stepBurn } from './damage';
-import { advanceProjectile, findHitHero } from './projectiles';
+import { advanceProjectile, findHitCreep, findHitHero } from './projectiles';
 import { turnToward, followPath, computePath } from './movement';
 
 /**
@@ -115,6 +134,11 @@ function applyCommand(
   world: SimWorld,
   events: SimEvent[],
 ): void {
+  // A stunned hero can't act on anything. Levelling an ability is the one
+  // exception: it's a progression choice, not an in-world action, so it stays
+  // available (the same way it is while dead).
+  if (isStunned(hero) && cmd.type !== 'levelAbility') return;
+
   // Any fresh order interrupts an in-progress arrow cast point (the shot is
   // aborted, no charge spent) — except re-issuing the arrow itself, which its
   // own guard already rejects while a draw is pending.
@@ -265,14 +289,25 @@ function stepHero(hero: HeroState, dt: number): void {
     }
   }
 
+  stepStun(hero, dt);
+
+  // Grappling Arrow yank — overrides the hero's own movement while it runs.
+  stepPull(hero, dt);
+
   stepRuneBuffs(hero, dt);
 
   if (hero.slowTimer > 0) {
     hero.slowTimer = Math.max(0, hero.slowTimer - dt);
   }
 
-  // Don't move while casting Blink Dagger.
-  if (hero.blinkCastTimer <= 0 && hero.moving && hero.path.length > 0) {
+  // Don't move while stunned, casting Blink Dagger, or being pulled by a grapple.
+  if (
+    !isStunned(hero) &&
+    !isBeingPulled(hero) &&
+    hero.blinkCastTimer <= 0 &&
+    hero.moving &&
+    hero.path.length > 0
+  ) {
     followPath(hero, dt, {
       speed: heroSpeed(hero),
       arriveEpsilon: HERO.arriveEpsilon,
@@ -327,6 +362,7 @@ function respawn(hero: HeroState, pos: V.Vec2): void {
   hero.burnTickAccum = 0;
   hero.blinkCastTimer = 0;
   hero.blinkTarget = undefined;
+  clearStatusEffects(hero);
 }
 
 // ── Projectiles ───────────────────────────────────────────────────────
@@ -344,10 +380,32 @@ function stepProjectiles(
     // skips collision) and pass through every unit, expiring only at range.
     const flight = advanceProjectile(p, dt, p.kind === 'scout' ? null : world, ARROW.collisionRadius);
     if (flight !== 'flying') {
+      // A hook that ran into terrain latched on: reel its owner to the anchor.
+      // (Reaching max range without touching anything just drops the hook.)
+      if (p.kind === 'grapple' && flight === 'blocked') resolveGrappleAnchor(state, p, world);
       state.projectiles.splice(i, 1);
       continue;
     }
     if (p.kind === 'scout') continue;
+
+    // Hook in flight: the first unit it touches is dragged in, and the hook
+    // dies there. Unlike arrows it never pierces and never damages. Heroes are
+    // checked before creeps so a hook thrown into a camp brawl grabs the enemy
+    // archer rather than the creep they're standing behind.
+    if (p.kind === 'grapple') {
+      const hookedHero = findHitHero(state, p, p.ownerId);
+      if (hookedHero) {
+        state.projectiles.splice(i, 1);
+        resolveGrappleUnit(state, p, hookedHero, HERO.bodyRadius, world);
+        continue;
+      }
+      const hookedCreep = findHitCreep(state, p);
+      if (hookedCreep) {
+        state.projectiles.splice(i, 1);
+        resolveGrappleUnit(state, p, hookedCreep, CREEP_TYPES[hookedCreep.type].bodyRadius, world);
+      }
+      continue;
+    }
 
     if (p.ownerKind === 'creep') {
       // Creep fireball: hits any hero (no owner-skip), never hits creeps.
@@ -409,6 +467,59 @@ function stepProjectiles(
       applyCreepDamage(state, creep, source, damage, events, crit);
     }
   }
+}
+
+// ── Grappling Arrow ───────────────────────────────────────────────────
+
+/**
+ * The hook hit terrain: reel the grappler to it. The anchor sits inside the
+ * obstacle the projectile collided with, so the landing spot is backed off
+ * along the flight line and then snapped to reachable ground — a hook fired
+ * across a chasm lands the hero on their own side rather than through it.
+ */
+function resolveGrappleAnchor(state: MatchState, p: ProjectileState, world: SimWorld): void {
+  const owner = state.heroes.find((h) => h.id === p.ownerId);
+  if (!owner || !owner.alive) return;
+  const anchor = V.sub(p.pos, V.scale(p.dir, GRAPPLE_ANCHOR_GAP));
+  // Reeling yourself in is a displacement, not a stun — the grappler stays in
+  // control the moment they land.
+  startPull(owner, anchor, GRAPPLE_PULL_DURATION, world);
+}
+
+/**
+ * The hook caught a unit: drag it toward the grappler and stun it for the
+ * trip plus a beat on the far end, so the victim arrives helpless rather than
+ * running straight back out. Works on heroes and creeps alike.
+ *
+ * The pull stops short of the grappler's own body so the two don't end up
+ * stacked, and a victim already closer than the pull distance is simply
+ * brought to that stand-off — still stunned either way, which is what makes
+ * a point-blank hook worth landing.
+ */
+function resolveGrappleUnit(
+  state: MatchState,
+  p: ProjectileState,
+  target: UnitCore,
+  targetRadius: number,
+  world: SimWorld,
+): void {
+  const owner = state.heroes.find((h) => h.id === p.ownerId);
+  if (!owner) return;
+
+  applyStun(target, GRAPPLE_PULL_DURATION + GRAPPLE_STUN_EXTRA);
+
+  const toOwner = V.sub(owner.pos, target.pos);
+  const dist = V.length(toOwner);
+  if (dist < 1e-6) return;
+  const standoff = HERO.bodyRadius + targetRadius;
+  const pull = Math.min(GRAPPLE_HERO_PULL_DISTANCE, Math.max(0, dist - standoff));
+  if (pull <= 0) return;
+  startPull(
+    target,
+    V.add(target.pos, V.scale(toOwner, pull / dist)),
+    GRAPPLE_PULL_DURATION,
+    world,
+  );
 }
 
 // ── Damage, kills, rewards ────────────────────────────────────────────

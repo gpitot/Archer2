@@ -102,6 +102,17 @@ export interface SnapshotHero {
   dest?: Vec2;
   /** Blink Dagger cast delay timer (0 = not casting). */
   blinkCastTimer: number;
+  /**
+   * Grappling Arrow yank, sent only while one is running (0/absent = none).
+   * The client replays the same lerp locally, so a pulled hero slides on
+   * every peer instead of being snapped by reconciliation.
+   */
+  pullTimer?: number;
+  pullDuration?: number;
+  pullFrom?: Vec2;
+  pullTo?: Vec2;
+  /** Seconds left on a stun, sent only while one is running (0/absent = none). */
+  stunTimer?: number;
 }
 
 /** Low-rate hero fields: progression, economy, and timers. */
@@ -149,6 +160,12 @@ export interface SnapshotCreep {
   pos: Vec2;
   facing: number;
   hp: number;
+  /**
+   * Seconds left on a stun, sent only while one is running (0/absent = none).
+   * Drives the client's stun indicator — a stunned creep is always "active",
+   * so it is never dropped by snapshot idle-omission while the timer runs.
+   */
+  stunTimer?: number;
 }
 
 /**

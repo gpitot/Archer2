@@ -38,6 +38,7 @@ import { SoundManager, STREAK_SOUNDS, MULTI_KILL_SOUNDS } from '../audio/SoundMa
 // ── Sim layer ──
 import { HeroState, ProjectileState, WardState, BlastState, CreepState, RuneState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
 import { stepMatch, heroSpeed } from '../sim/stepMatch';
+import { stepStun } from '../sim/statusEffects';
 import { spawnCamps } from '../sim/stepCreeps';
 import { spawnRunes } from '../sim/stepRunes';
 import type { CampPlacement } from '../sim/creepRules';
@@ -48,7 +49,10 @@ import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '..
 import { AiController, AI_DIFFICULTY_PRESETS, type AiDifficulty } from '../sim/ai/AiController';
 import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN, heroMaxHp } from '../sim/rules';
 import { ABILITIES, ABILITY_ORDER, AbilityDef, abilityTooltip, canCast } from '../sim/abilities';
-import { SHOP_ITEMS, SHOP_ITEMS_BY_ID } from '../sim/shopItems';
+import { GRAPPLE_ANCHOR_GAP, SHOP_ITEMS, SHOP_ITEMS_BY_ID } from '../sim/shopItems';
+
+/** Height the grapple rope leaves the hero's hand at. */
+const GRAPPLE_ROPE_HAND_HEIGHT = 42;
 import { SnapshotMessage, MatchInit, Snapshot, SnapshotHero, HeroMeta, CreepMeta, RuneMeta } from '../sim/protocol';
 import { creepMaxHp } from '../sim/creepRules';
 import { Vec2, distance } from '../sim/math';
@@ -66,6 +70,7 @@ import { FountainView } from '../entities/FountainView';
 import { ExplosionEffects } from '../rendering/ExplosionEffect';
 import { ImpactEffects, ImpactElement } from '../rendering/ImpactEffect';
 import { PortalEffects } from '../rendering/PortalEffects';
+import { GrappleRopes } from '../rendering/GrappleRope';
 import { LevelUpEffect } from '../rendering/LevelUpEffect';
 import { DeathEffect } from '../rendering/DeathEffect';
 import { CreepView } from '../entities/CreepView';
@@ -193,8 +198,11 @@ export class Game {
     ownerId: string;
     /** Absent = hero-owned; 'creep' renders as a fireball. */
     ownerKind?: 'creep';
-    /** 'scout' = E vision projectile (no collision, never fog-hidden). */
-    kind?: 'scout';
+    /**
+     * 'scout' = E vision projectile (no collision, never fog-hidden);
+     * 'grapple' = Grappling Arrow hook.
+     */
+    kind?: 'scout' | 'grapple';
     team: number;
     spawnPos: Vec2;
     dir: Vec2;
@@ -215,6 +223,7 @@ export class Game {
   private _explosions!: ExplosionEffects;
   private _impacts!: ImpactEffects;
   private _portalEffects!: PortalEffects;
+  private _grappleRopes!: GrappleRopes;
   private _levelUpEffect!: LevelUpEffect;
   private _deathEffect!: DeathEffect;
   /** Previous blinkCastTimer per hero, to detect cast completion. */
@@ -641,6 +650,7 @@ export class Game {
     this._explosions = new ExplosionEffects(this._scene);
     this._impacts = new ImpactEffects(this._scene);
     this._portalEffects = new PortalEffects(this._scene);
+    this._grappleRopes = new GrappleRopes(this._scene);
     this._levelUpEffect = new LevelUpEffect(this._scene);
     this._deathEffect = new DeathEffect(this._scene);
     this._killFeed = new KillFeed();
@@ -843,6 +853,9 @@ export class Game {
       burnSourceId: null,
       burnTickAccum: 0,
       leashing: false,
+      stunTimer: 0,
+      pullTimer: 0,
+      pullDuration: 0,
     };
   }
 
@@ -903,6 +916,7 @@ export class Game {
       creep.pos.x = sc.pos.x;
       creep.pos.z = sc.pos.z;
       creep.facing = sc.facing;
+      creep.stunTimer = sc.stunTimer ?? 0;
     }
     this._state.tick = snap.tick;
   }
@@ -961,6 +975,15 @@ export class Game {
     dst.hp = src.hp;
     dst.alive = src.alive;
     dst.blinkCastTimer = src.blinkCastTimer ?? 0;
+    // Adopt the grapple yank wholesale: with the same from/to and duration the
+    // local lerp lands on the server's positions, so no snap is needed.
+    dst.pullTimer = src.pullTimer ?? 0;
+    dst.pullDuration = src.pullDuration ?? 0;
+    dst.pullFrom = src.pullFrom ? { x: src.pullFrom.x, z: src.pullFrom.z } : undefined;
+    dst.pullTo = src.pullTo ? { x: src.pullTo.x, z: src.pullTo.z } : undefined;
+    // Stuns are server-authoritative: prediction must not let a stunned hero
+    // keep acting locally, so this is adopted for our own hero too.
+    dst.stunTimer = src.stunTimer ?? 0;
   }
 
   /** Cold fields from a heroMeta message (shallow, safe for plain data). */
@@ -1013,7 +1036,10 @@ export class Game {
     // A pending arrow cast point must run through the full step (below) so the
     // wind-up ticks and looses — the timers-only fast path can't spawn it.
     const drawingArrow = (this._playerState?.abilities.arrow.windup ?? 0) > 0;
-    if (inputs.length === 0 && !this._playerState?.moving && !drawingArrow) {
+    // A grapple yank moves the hero without `moving` being set — it too needs
+    // the full step, or the pull would stall until the next snapshot.
+    const beingPulled = (this._playerState?.pullTimer ?? 0) > 0;
+    if (inputs.length === 0 && !this._playerState?.moving && !drawingArrow && !beingPulled) {
       // Prediction isn't stepping this frame, but predicted timers must still
       // run — otherwise a stationary hero's cooldown stays stuck until the
       // next move and the fire guard wrongly rejects follow-up shots.
@@ -1029,6 +1055,10 @@ export class Game {
             idle.itemCooldowns[itemId] = Math.max(0, idle.itemCooldowns[itemId] - dt);
           }
         }
+        // A stunned hero is stationary, so it's this branch that runs while a
+        // stun expires. Tick it locally or control would come back only on the
+        // next snapshot — a visible hitch at the end of every stun.
+        stepStun(idle, dt);
       }
       return;
     }
@@ -1064,7 +1094,7 @@ export class Game {
     // visible cosmetic from that fire event so the shot is delayed by the
     // wind-up and never appears for a draw the player cancelled.
     for (const ev of predEvents) {
-      if (ev.type === 'fire' && ev.heroId === this._playerId && ev.projectile.kind !== 'scout') {
+      if (ev.type === 'fire' && ev.heroId === this._playerId && ev.projectile.kind === undefined) {
         this._spawnCosmeticFromFire(ev.projectile);
       }
     }
@@ -1195,9 +1225,9 @@ export class Game {
   /** Track our fire/hit events to link cosmetic arrows to server projectiles. */
   private _handleOwnArrowEvent(ev: SimEvent): void {
     if (ev.type === 'fire' && ev.heroId === this._playerId) {
-      // Scout (E) projectiles never spawn a cosmetic copy — they must not
-      // claim a pending Q arrow's slot.
-      if (ev.projectile.kind === 'scout') return;
+      // Only plain arrows have a cosmetic copy — scout (E) and grapple hook
+      // projectiles must not claim a pending Q arrow's slot.
+      if (ev.projectile.kind !== undefined) return;
       const cosmetic = this._cosmeticProjectiles.find((c) => c.serverId === null);
       // Only hide the server projectile when a local arrow actually claimed
       // it — if the cosmetic guard suppressed the spawn, the simulated remote
@@ -1560,8 +1590,12 @@ export class Game {
     this._targeting.activate(
       {
         range: use.range ?? 0,
-        indicatorColor: def.id === 'blink_dagger' ? 0x9966ff : 0x66ff88,
-        validateTarget: walkableValidator(this._navGrid, this._world.obstacles),
+        indicatorColor: use.indicatorColor ?? (def.id === 'blink_dagger' ? 0x9966ff : 0x66ff88),
+        // Free-aim items (the grapple) are fired *at* terrain — snapping the
+        // click to walkable ground would defeat the point.
+        validateTarget: use.freeAim
+          ? undefined
+          : walkableValidator(this._navGrid, this._world.obstacles),
         onTarget: (x, z) => {
           this._enqueueCommand({ type: 'useItem', slot, x, z });
           // For wards, anchor the hero after placing so the ward drops at
@@ -1659,6 +1693,7 @@ export class Game {
     }
     // Sync projectile views
     this._syncProjectileViews();
+    this._syncGrappleRopes();
     this._updateScoutTrail(dt);
     // Sync ward views
     this._syncWardViews();
@@ -1915,6 +1950,49 @@ export class Game {
         break;
       }
     }
+  }
+
+  // ── Grappling Arrow ropes ───────────────────────────────────────────
+
+  /**
+   * Redraw every grapple rope from this frame's sim state — one from each
+   * shooter to their hook in flight, and one for each hero mid-yank.
+   *
+   * The yank's far end isn't in the hero's state, but it doesn't need to be:
+   * whatever the hook caught (the wall it latched onto, or the grappler doing
+   * the dragging) always sits just past the pull destination along the pull
+   * direction, so the anchor is derived rather than sent over the wire.
+   */
+  private _syncGrappleRopes(): void {
+    this._grappleRopes.begin();
+
+    for (const p of this._state.projectiles) {
+      if (p.kind !== 'grapple') continue;
+      const shooter = this._state.heroes.find((h) => h.id === p.ownerId);
+      if (!shooter || !shooter.alive) continue;
+      this._grappleRopes.draw(
+        `flight:${p.id}`,
+        shooter.pos.x, this._heightAt(shooter.pos.x, shooter.pos.z) + GRAPPLE_ROPE_HAND_HEIGHT, shooter.pos.z,
+        p.pos.x, this._heightAt(p.pos.x, p.pos.z) + ARROW.flyHeight, p.pos.z,
+      );
+    }
+
+    for (const hero of this._state.heroes) {
+      if (hero.pullTimer <= 0 || !hero.pullFrom || !hero.pullTo) continue;
+      const dx = hero.pullTo.x - hero.pullFrom.x;
+      const dz = hero.pullTo.z - hero.pullFrom.z;
+      const len = Math.hypot(dx, dz);
+      if (len < 1) continue;
+      const ax = hero.pullTo.x + (dx / len) * GRAPPLE_ANCHOR_GAP;
+      const az = hero.pullTo.z + (dz / len) * GRAPPLE_ANCHOR_GAP;
+      this._grappleRopes.draw(
+        `pull:${hero.id}`,
+        hero.pos.x, this._heightAt(hero.pos.x, hero.pos.z) + GRAPPLE_ROPE_HAND_HEIGHT, hero.pos.z,
+        ax, this._heightAt(ax, az) + ARROW.flyHeight, az,
+      );
+    }
+
+    this._grappleRopes.end();
   }
 
   // ── Projectile view sync ────────────────────────────────────────────

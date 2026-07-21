@@ -26,6 +26,7 @@ import { addXp, killHero, dealDamageToHero, dealDamageToCreep, stepBurn } from '
 import { spawnProjectile } from './projectiles';
 import { findReachableNear, findWalkableNear, SimWorld } from './world';
 import { followPath, computePath } from './movement';
+import { clearStatusEffects, isBeingPulled, isStunned, stepPull, stepStun } from './statusEffects';
 
 // ── Camp construction ─────────────────────────────────────────────────
 
@@ -58,6 +59,9 @@ export function createCreep(
     burnSourceId: null,
     burnTickAccum: 0,
     leashing: false,
+    stunTimer: 0,
+    pullTimer: 0,
+    pullDuration: 0,
   };
 }
 
@@ -159,6 +163,11 @@ export function stepCreeps(
       creep.slowTimer = Math.max(0, creep.slowTimer - dt);
     }
 
+    stepStun(creep, dt);
+    // A hooked creep is dragged along its lerp before anything else looks at
+    // its position, so the drag reads as movement rather than a teleport.
+    stepPull(creep, dt);
+
     // Fire Bow burn: damage over time credited to the burning hero. May kill
     // the creep — bail out of the rest of its step if so.
     if (creep.burnRemaining > 0) {
@@ -171,6 +180,15 @@ export function stepCreeps(
         creep.burnRemaining = 0;
       }
       if (!creep.alive) continue;
+    }
+
+    // Stunned or mid-yank: no aggro scan, no chase, no swing. Existing aggro
+    // is kept, so a hooked creep resumes chasing the moment it comes to. The
+    // activity stamp keeps flowing so snapshot idle-omission doesn't freeze
+    // the client's copy of a creep that is visibly being dragged.
+    if (isStunned(creep) || isBeingPulled(creep)) {
+      creep.lastActiveTick = state.tick;
+      continue;
     }
 
     // Acquire aggro. Idle scans are throttled and staggered by creep index so
@@ -380,6 +398,7 @@ function respawnCamp(state: MatchState, camp: CampState, events: SimEvent[]): vo
     creep.burnTickAccum = 0;
     creep.leashing = false;
     creep.path = [];
+    clearStatusEffects(creep);
     creep.lastActiveTick = state.tick;
     events.push({ type: 'creepRespawn', creepId: creep.id, creepType: creep.type, level });
   }

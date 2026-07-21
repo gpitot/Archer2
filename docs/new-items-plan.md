@@ -66,7 +66,7 @@ Requires a `smokeZones[]` array on `MatchState` + a step function similar to
 `stepCreeps` to tick down timers and adjust fog for heroes inside.
 Huge outplay potential at low cost.
 
-### 🎯 Grappling Arrow — 800g
+### 🎯 Grappling Arrow — 800g ✅ implemented
 > Fire a hook in target direction (600 range). If it hits a tree/wall,
 > pull yourself to that point over 0.4s. If it hits an enemy hero,
 > pull them 200 units toward you.
@@ -74,6 +74,40 @@ Huge outplay potential at low cost.
 Needs a fast invisible projectile + collision check (builds on the existing
 projectile engine). Only hits one target — first obstacle or first hero.
 Cooldown 12s.
+
+Shipped as `grappling_arrow`: a `kind: 'grapple'` projectile resolved in
+`stepProjectiles`, driving shared `pullTimer`/`pullFrom`/`pullTo` displacement
+state on `UnitCore` (both pull modes use the same lerp). The hook is visible,
+not invisible — it reads better with the rope drawn behind it
+(`rendering/GrappleRope.ts`). Covered by `scenarios/grappling-arrow.ts`.
+Not in the AI build order: the AI has no aiming logic for it.
+
+It catches creeps as well as heroes (heroes first, so a hook into a camp
+brawl grabs the enemy archer rather than the creep in front of them), and a
+hooked unit is **stunned** for the drag plus `GRAPPLE_STUN_EXTRA` (0.5s) — the
+victim lands next to you and stays there long enough to be punished for it.
+Reeling *yourself* into a wall does not stun.
+
+### 💫 Stuns — a shared status effect
+
+`sim/statusEffects.ts` owns stun and displacement as cross-unit concepts,
+written against `UnitCore` so one call covers heroes and creeps:
+
+```ts
+applyStun(unit, seconds);   // refreshes rather than stacks; interrupts casts
+isStunned(unit);            // gate movement / commands / creep AI
+stepStun(unit, dt);         // once per unit per step
+```
+
+A stunned unit can't move, cast, attack, or accept orders (`levelAbility` is
+the one exception — it's progression, not an in-world action). Cooldowns keep
+ticking: a stun costs you tempo, not your rotation. Landing one interrupts a
+Blink Dagger mid-cast and cancels a pending arrow draw. `stunTimer` rides the
+wire for both heroes and creeps, and `entities/StunIndicator.ts` renders the
+orbiting stars above the victim.
+
+Any future spell that wants a stun calls `applyStun` and gets all of the
+above — no per-ability bookkeeping.
 
 ### ✨ Mirror Image — 900g
 > Create an illusion of yourself that runs in a straight line for 2s

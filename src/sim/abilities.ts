@@ -143,7 +143,7 @@ function beginCast(hero: HeroState, breakInvis: boolean): void {
  * Normalized aim direction from the hero toward (aimX, aimZ), falling back
  * to the current facing when the aim point sits on the hero.
  */
-function aimDir(hero: HeroState, aimX: number, aimZ: number): V.Vec2 {
+export function aimDir(hero: HeroState, aimX: number, aimZ: number): V.Vec2 {
   const dir = V.sub({ x: aimX, z: aimZ }, hero.pos);
   if (V.length(dir) < 0.01) {
     return { x: Math.sin(hero.facing), z: Math.cos(hero.facing) };

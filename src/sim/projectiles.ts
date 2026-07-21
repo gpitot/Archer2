@@ -6,7 +6,8 @@
  */
 import * as V from './math';
 import { ARROW, HERO } from './rules';
-import { HeroState, MatchState, ProjectileState, SimEvent } from './state';
+import { CreepState, HeroState, MatchState, ProjectileState, SimEvent } from './state';
+import { CREEP_TYPES } from './creepRules';
 import { ObstacleAABB, sphereHitsObstacle } from './world';
 
 /**
@@ -74,6 +75,22 @@ export function findHitHero(
     if (!hero.alive || hero.invulnerable) continue;
     if (hero.abilities.dodge.active) continue;
     if (V.distanceSq(p.pos, hero.pos) < r2) return hero;
+  }
+  return null;
+}
+
+/**
+ * First live creep the projectile overlaps (2D), or null. Unlike heroes,
+ * creeps have per-type body radii, so the test is done per creep.
+ *
+ * Used by non-piercing projectiles (the grappling hook); piercing arrows do
+ * their own inline sweep because they must hit every creep along the path.
+ */
+export function findHitCreep(state: MatchState, p: ProjectileState): CreepState | null {
+  for (const creep of state.creeps) {
+    if (!creep.alive) continue;
+    const r = CREEP_TYPES[creep.type].bodyRadius + ARROW.collisionRadius;
+    if (V.distanceSq(p.pos, creep.pos) < r * r) return creep;
   }
   return null;
 }

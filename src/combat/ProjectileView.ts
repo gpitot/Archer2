@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { ProjectileState } from '../sim/state';
 import { ARROW } from '../sim/rules';
 
-export type ProjectileStyle = 'arrow' | 'fireball' | 'scout' | 'ice' | 'fire';
+export type ProjectileStyle = 'arrow' | 'fireball' | 'scout' | 'ice' | 'fire' | 'grapple';
 
 /** Per-style look-up table: colours for every recolourable part of the arrow. */
 interface StyleColors {
@@ -21,7 +21,7 @@ interface StyleColors {
   light: number; // point light tint
 }
 
-const STYLES: Record<'arrow' | 'ice' | 'fire', StyleColors> = {
+const STYLES: Record<'arrow' | 'ice' | 'fire' | 'grapple', StyleColors> = {
   // Default arrow: warm wood shaft, bright steel head, gold energy halo so it
   // reads clearly against grass and shadow from the top-down camera.
   arrow: {
@@ -56,6 +56,18 @@ const STYLES: Record<'arrow' | 'ice' | 'fire', StyleColors> = {
     glow: 0xff8a33,
     trail: 0xffb347,
     light: 0xff6a22,
+  },
+  // Grappling hook: dark iron shaft with a hot amber head, matching the rope
+  // drawn behind it so the two read as one object in flight.
+  grapple: {
+    shaft: 0x4a4a52,
+    shaftEmissive: 0x14141a,
+    head: 0xd9d2c4,
+    headEmissive: 0x8a5a12,
+    feather: 0x6b5a3a,
+    glow: 0xffbb33,
+    trail: 0xffcc66,
+    light: 0xffaa33,
   },
 };
 
@@ -150,7 +162,10 @@ export class ProjectileView {
 
   /** Mirror the simulation state onto the mesh for this frame. */
   sync(state: ProjectileState, heightAt: (x: number, z: number) => number, isIce = false): void {
-    if (isIce) {
+    // The hook has its own look regardless of the shooter's bow.
+    if (state.kind === 'grapple') {
+      this.setStyle('grapple');
+    } else if (isIce) {
       this.setStyle('ice');
     } else {
       this.setStyle(

@@ -15,6 +15,7 @@ import { CreepState } from '../sim/state';
 import { CreepTypeId, creepMaxHp, CREEP_TYPES } from '../sim/creepRules';
 import { HERO } from '../sim/rules';
 import { HealthBar } from './HealthBar';
+import { StunIndicator } from './StunIndicator';
 import { UnitView } from './UnitView';
 import { makeTextSprite, TextSprite } from './TextSprite';
 import { createMonsterInstance, pickClip, MonsterModelConfig, MONSTER_MODELS } from './MonsterModel';
@@ -61,6 +62,8 @@ export class CreepView extends UnitView {
   private _lastLabelType: CreepTypeId | null = null;
   /** Model's target world height; used to position the nameplate before and after model load. */
   private _worldHeight = 80;
+  /** Orbiting stars shown while the creep is stunned. */
+  private _stunIndicator: StunIndicator;
 
   constructor(
     creepId: string,
@@ -83,6 +86,13 @@ export class CreepView extends UnitView {
 
     this._buildNamePlate(type, 1);
 
+    // Stun stars, in raw world units — above the nameplate (worldHeight + 32).
+    this._stunIndicator = new StunIndicator(this.mesh, {
+      height: this._worldHeight + 56,
+      radius: 22,
+      starSize: 17,
+    });
+
     this._load(type);
   }
 
@@ -98,6 +108,7 @@ export class CreepView extends UnitView {
       this._healthBar.sprite.position.y = inst.config.worldHeight + 16;
       this._worldHeight = inst.config.worldHeight;
       if (this._namePlate) this._namePlate.sprite.position.y = inst.config.worldHeight + 32;
+      this._stunIndicator.setHeight(inst.config.worldHeight + 56);
 
       this._mixer = new THREE.AnimationMixer(inst.scene);
       this._idle = this._action(inst.clips, inst.config.clips.idle);
@@ -164,6 +175,7 @@ export class CreepView extends UnitView {
     this.mesh.visible = true;
     if (this._namePlate) this._namePlate.sprite.visible = true;
     this._healthBar.setHP(state.hp, creepMaxHp(state.type, state.level));
+    this._stunIndicator.update(state.stunTimer, dt);
 
     // Rebuild nameplate when level or type changes.
     if (state.level !== this._lastLevel || state.type !== this._lastLabelType) {
@@ -229,6 +241,7 @@ export class CreepView extends UnitView {
     this._loadToken++; // cancel any in-flight load
     this._namePlate?.dispose();
     this._namePlate = null;
+    this._stunIndicator.dispose();
     this.mesh.removeFromParent();
   }
 

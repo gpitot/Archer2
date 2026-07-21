@@ -36,6 +36,30 @@ export interface UnitCore {
   /** Remaining path waypoints (world-space cell centers), first = next target.
    *  Sim-internal — never sent over the wire. Followed by `followPath`. */
   path: Vec2[];
+
+  // ── Status effects (see statusEffects.ts) ───────────────────────────
+  // These live on the substrate, not on HeroState, because a stun or a
+  // displacement means the same thing whoever it lands on — one set of
+  // helpers then drives both heroes and creeps.
+
+  /**
+   * Seconds left on a stun (0 = not stunned). A stunned unit cannot move,
+   * cast, or attack; its cooldowns keep ticking. Applied via `applyStun`.
+   */
+  stunTimer: number;
+  /**
+   * Scripted displacement (the Grappling Arrow yank): seconds left in the
+   * pull, 0 = none. While it runs the unit can't walk and its position is a
+   * straight lerp from `pullFrom` to `pullTo` — the same for the grappler
+   * reeling themselves to a wall and for a victim dragged in by the hook.
+   */
+  pullTimer: number;
+  /** Total duration of the active pull, for the lerp denominator. */
+  pullDuration: number;
+  /** Where the pull started. */
+  pullFrom?: Vec2;
+  /** Where the pull ends (already snapped to walkable ground). */
+  pullTo?: Vec2;
 }
 
 /**
@@ -138,8 +162,10 @@ export interface ProjectileState {
    * Absent = damaging arrow. 'scout' = the E vision projectile: no damage,
    * no collision (flies over obstacles and units), grants fog vision around
    * itself to the owner's team, and is always visible to enemies.
+   * 'grapple' = the Grappling Arrow hook: no damage, dies on the first
+   * obstacle or hero it touches and pulls someone as it does.
    */
-  kind?: 'scout';
+  kind?: 'scout' | 'grapple';
   /** Scout only: fog reveal radius around the projectile (per caster's E rank). */
   sightRadius?: number;
   team: number;
@@ -364,6 +390,9 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     burnSourceId: null,
     burnTickAccum: 0,
     blinkCastTimer: 0,
+    stunTimer: 0,
+    pullTimer: 0,
+    pullDuration: 0,
   };
 }
 

@@ -6,6 +6,7 @@ import { heroSpeed } from '../sim/stepMatch';
 import { HealthBar } from './HealthBar';
 import { createHeroRig, HeroRig, MESH_SCALE } from './HeroRig';
 import { makeTextSprite, TextSprite } from './TextSprite';
+import { StunIndicator } from './StunIndicator';
 import { UnitView } from './UnitView';
 
 /**
@@ -27,6 +28,8 @@ export class HeroView extends UnitView {
   /** Rune-buff indicator sprites floating above the head (DotA-style). */
   private _buffSprites = new Map<RuneTypeId, THREE.Sprite>();
   private _buffTime = 0;
+  /** Orbiting stars shown while the hero is stunned. */
+  private _stunIndicator: StunIndicator;
   /** Healing sparkle particle pool. */
   private _healSparkles: { sprite: THREE.Sprite; vy: number; life: number }[] = [];
   /** Display-name plate above the head; null until `setName` is called. */
@@ -69,6 +72,14 @@ export class HeroView extends UnitView {
       this.mesh.add(sprite);
       this._buffSprites.set(type, sprite);
     }
+
+    // Stun stars — above the name plate (3.0) and buff badges (3.1) so they
+    // read at a glance without fighting the rest of the overhead furniture.
+    this._stunIndicator = new StunIndicator(this.mesh, {
+      height: 3.6,
+      radius: 0.42,
+      starSize: 0.32,
+    });
   }
 
   /**
@@ -169,6 +180,7 @@ export class HeroView extends UnitView {
     // Rune-buff indicators above the head.
     this._buffTime += dt;
     this._syncBuffs(state);
+    this._stunIndicator.update(state.stunTimer, dt);
 
     // Dodge visual — purple tint while dodging
     if (state.abilities.dodge.active) {
@@ -204,6 +216,7 @@ export class HeroView extends UnitView {
     this._rig.dispose?.();
     this._namePlate?.dispose();
     this._namePlate = null;
+    this._stunIndicator.dispose();
     for (const sprite of this._buffSprites.values()) {
       sprite.material.map?.dispose();
       sprite.material.dispose();

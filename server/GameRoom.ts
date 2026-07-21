@@ -515,12 +515,16 @@ export class GameRoom extends DurableObject<Env> {
   private _wireCreeps(): SnapshotCreep[] {
     return this._state.creeps
       .filter((c) => c.alive && this._state.tick - c.lastActiveTick < CREEP.activeLingerTicks)
-      .map((c) => ({
-        id: c.id,
-        pos: { x: q(c.pos.x), z: q(c.pos.z) },
-        facing: q(c.facing),
-        hp: q(c.hp),
-      }));
+      .map((c) => {
+        const wire: SnapshotCreep = {
+          id: c.id,
+          pos: { x: q(c.pos.x), z: q(c.pos.z) },
+          facing: q(c.facing),
+          hp: q(c.hp),
+        };
+        if (c.stunTimer > 0) wire.stunTimer = q(c.stunTimer);
+        return wire;
+      });
   }
 
   /** Cold creep registry for the welcome handshake. */
@@ -562,6 +566,14 @@ export class GameRoom extends DurableObject<Env> {
       const dest = h.path[h.path.length - 1];
       wire.dest = { x: q(dest.x), z: q(dest.z) };
     }
+    // Grapple yank — only on the wire while one is actually running.
+    if (h.pullTimer > 0 && h.pullFrom && h.pullTo) {
+      wire.pullTimer = q(h.pullTimer);
+      wire.pullDuration = q(h.pullDuration);
+      wire.pullFrom = { x: q(h.pullFrom.x), z: q(h.pullFrom.z) };
+      wire.pullTo = { x: q(h.pullTo.x), z: q(h.pullTo.z) };
+    }
+    if (h.stunTimer > 0) wire.stunTimer = q(h.stunTimer);
     return wire;
   }
 
