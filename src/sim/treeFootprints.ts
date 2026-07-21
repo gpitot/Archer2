@@ -11,7 +11,7 @@ import { NavGrid } from '../navigation/NavGrid';
 export const TREE_TYPE_IDS: ReadonlySet<string> = new Set(['ATtr', 'LTlt', 'YTpb', 'YTfc']);
 
 /** Half-extent of an unscaled tree footprint, world units (matches the tree AABB). */
-export const TREE_HALF_EXTENT = 24;
+export const TREE_HALF_EXTENT = 32;
 
 /**
  * Half-extent of a tree's *sight-blocking* footprint. Narrower than the

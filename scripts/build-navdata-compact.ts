@@ -20,7 +20,10 @@ import { buildTestMapData, testMapObstacles, TEST_MAP_ARENA } from '../src/world
 import { parseMapJson } from '../src/world/custom/mapSource';
 import { buildCustomMap } from '../src/world/custom/buildCustomMap';
 import type { CampPlacement } from '../src/sim/creepRules';
+import { CAMP_DEFS } from '../src/sim/creepRules';
 import type { RunePlacement } from '../src/sim/runeRules';
+import { RUNE_SPOT_DEFS } from '../src/sim/runeRules';
+import { FOUNTAIN } from '../src/sim/rules';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS_DIR = path.resolve(__dirname, '..', 'assets');
@@ -86,13 +89,26 @@ function main() {
     }
 
     const arena = arenaFromWc3(-2784, -6720, 4416, 512);
-    entries.push(buildEntry('arena', terrain, pathing, doodads, arena, obstacles, null, null, null, null));
+    entries.push(buildEntry('arena', terrain, pathing, doodads, arena, obstacles,
+      CAMP_DEFS.map((d) => ({ id: d.id, x: arena.minX + d.fx * arena.width, z: arena.minZ + d.fz * arena.height, units: d.units })),
+      null, // spawns
+      RUNE_SPOT_DEFS.map((d) => ({ x: arena.minX + d.fx * arena.width, z: arena.minZ + d.fz * arena.height })),
+      [0.25, 0.75].map((fx) => ({ x: arena.minX + fx * arena.width, z: arena.centerZ })),
+      [{ x: arena.centerX, z: arena.centerZ }],
+    ));
   }
 
   // ── 'test': the tiny generated debug map ──
   {
+    const a = TEST_MAP_ARENA;
     const map = buildTestMapData();
-    entries.push(buildEntry('test', map.terrain, map.pathing, map.doodads, { ...TEST_MAP_ARENA }, testMapObstacles(), null, null, null, null));
+    entries.push(buildEntry('test', map.terrain, map.pathing, map.doodads, { ...a }, testMapObstacles(),
+      CAMP_DEFS.map((d) => ({ id: d.id, x: a.minX + d.fx * a.width, z: a.minZ + d.fz * a.height, units: d.units })),
+      null, // spawns
+      RUNE_SPOT_DEFS.map((d) => ({ x: a.minX + d.fx * a.width, z: a.minZ + d.fz * a.height })),
+      [{ x: -600, z: 200 }],
+      [{ x: a.centerX, z: a.centerZ }],
+    ));
   }
 
   // ── Custom editor-made maps: every maps/*.map.json ──
@@ -148,7 +164,7 @@ export interface NavdataMap {
     centerX: number; centerZ: number; width: number; height: number;
   };
   shopPos: NavdataPoint;
-  /** Authored placements from custom maps; null → built-in defaults. */
+  /** Authored creep camp placements (null → none). */
   camps: readonly CampPlacement[] | null;
   spawns: readonly NavdataPoint[] | null;
   runes: readonly RunePlacement[] | null;
@@ -245,19 +261,19 @@ ${obsLines.join(',\n')}
 
     shopPos: { x: ${shopPos.x.toFixed(1)}, z: ${shopPos.z.toFixed(1)} },
 
-    /** Authored creep camps (custom maps); null → arena-fraction CAMP_DEFS. */
+    /** Authored creep camp placements (null → none). */
     camps: ${camps && camps.length > 0 ? JSON.stringify(camps.map((c) => ({ ...c, x: round1(c.x), z: round1(c.z) }))) : 'null'},
 
-    /** Fixed hero spawns (custom maps); null → random walkable spawns. */
+    /** Fixed hero spawns (null → random walkable spawns). */
     spawns: ${spawns && spawns.length > 0 ? JSON.stringify(spawns.map((s) => ({ x: round1(s.x), z: round1(s.z) }))) : 'null'},
 
-    /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
+    /** Authored rune spots (null → none). */
     runes: ${runes && runes.length > 0 ? JSON.stringify(runes.map((r) => ({ x: round1(r.x), z: round1(r.z) }))) : 'null'},
 
-    /** Authored fountain placements (custom maps); null → built-in defaults. */
+    /** Authored fountain placements (null → none). */
     fountains: ${fountains && fountains.length > 0 ? JSON.stringify(fountains.map((f) => ({ x: round1(f.x), z: round1(f.z) }))) : 'null'},
 
-    /** Authored shop placements (custom maps); null → arena-centre default. */
+    /** Authored shop placements (null → none). */
     shops: ${shops && shops.length > 0 ? JSON.stringify(shops.map((s) => ({ x: round1(s.x), z: round1(s.z) }))) : 'null'},
   }`;
 }

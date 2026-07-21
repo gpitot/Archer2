@@ -7,7 +7,6 @@
 import * as V from './math';
 import {
   RUNE,
-  RUNE_SPOT_DEFS,
   RUNE_TYPES,
   RunePlacement,
   RuneTypeId,
@@ -17,13 +16,11 @@ import { HeroState, MatchState, SimEvent } from './state';
 import { findReachableNear, findWalkableNear, SimWorld } from './world';
 
 /**
- * Populate `state.runes` from spot placements. By default spots come from
- * `RUNE_SPOT_DEFS` (fractions of the arena rect, so the same defs work on
- * every built-in map); custom maps pass their authored world-coordinate
- * placements instead. Spots are snapped to the walkable component reachable
- * from the shop, so a rune never lands on a cliff top or islet. Ids
- * (`r1`, `r2`, …) follow definition order, so every peer derives the same
- * ids independently. Initial types roll from `rng`.
+ * Populate `state.runes` from spot placements. Spots are snapped to the
+ * walkable component reachable from the nearest shop (or arena center),
+ * so a rune never lands on a cliff top or islet. Ids (`r1`, `r2`, …)
+ * follow definition order, so every peer derives the same ids
+ * independently. Initial types roll from `rng`.
  */
 export function spawnRunes(
   state: MatchState,
@@ -31,13 +28,11 @@ export function spawnRunes(
   placements?: readonly RunePlacement[] | null,
   rng: () => number = Math.random,
 ): void {
-  const defs: readonly RunePlacement[] = placements ?? RUNE_SPOT_DEFS.map((def) => ({
-    x: world.arena.minX + def.fx * world.arena.width,
-    z: world.arena.minZ + def.fz * world.arena.height,
-  }));
-  defs.forEach((def, idx) => {
+  if (!placements || placements.length === 0) return;
+  const anchor = world.shops.length > 0 ? world.shops[0].pos : { x: world.arena.centerX, z: world.arena.centerZ };
+  placements.forEach((def, idx) => {
     const pos =
-      findReachableNear(world, def.x, def.z, world.shops[0].pos.x, world.shops[0].pos.z) ??
+      findReachableNear(world, def.x, def.z, anchor.x, anchor.z) ??
       findWalkableNear(world, def.x, def.z);
     state.runes.push({
       id: `r${idx + 1}`,

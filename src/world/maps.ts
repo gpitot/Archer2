@@ -16,8 +16,11 @@ import { parseMapJson } from './custom/mapSource';
 import { decodeAmap } from './custom/amapCodec';
 import { buildCustomMap } from './custom/buildCustomMap';
 import type { CampPlacement } from '../sim/creepRules';
+import { CAMP_DEFS } from '../sim/creepRules';
 import type { RunePlacement } from '../sim/runeRules';
+import { RUNE_SPOT_DEFS } from '../sim/runeRules';
 import type { FountainDef } from '../sim/world';
+import { FOUNTAIN } from '../sim/rules';
 import type { ShopSource } from './custom/mapSource';
 
 export type MapName = string;
@@ -30,13 +33,13 @@ export interface LoadedMap {
   arena: ArenaRect;
   /** Fixed spawn points (offline mode); null → random walkable spawns. */
   spawns: { x: number; z: number }[] | null;
-  /** Authored creep camps (custom maps); null → arena-fraction CAMP_DEFS. */
+  /** Authored creep camps (null → none). */
   camps: CampPlacement[] | null;
-  /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
+  /** Authored rune spots (null → none). */
   runes: RunePlacement[] | null;
-  /** Authored fountain placements (custom maps); null → built-in placement. */
+  /** Authored fountain placements (null → none). */
   fountains: FountainDef[] | null;
-  /** Authored shop placements (custom maps); null → built-in placement. */
+  /** Authored shop placements (null → none). */
   shops: ShopSource[] | null;
 }
 
@@ -51,27 +54,49 @@ export function resolveMapName(raw: string | null): MapName {
 
 export async function loadMap(name: MapName): Promise<LoadedMap> {
   if (name === 'test') {
+    const a = TEST_MAP_ARENA;
     return {
       name,
       data: buildTestMapData(),
-      arena: { ...TEST_MAP_ARENA },
+      arena: { ...a },
       spawns: TEST_MAP_SPAWNS.map((s) => ({ ...s })),
-      camps: null,
-      runes: null,
-      fountains: null, // test map places fountains programmatically
-      shops: null,
+      camps: CAMP_DEFS.map((def) => ({
+        id: def.id,
+        x: a.minX + def.fx * a.width,
+        z: a.minZ + def.fz * a.height,
+        units: def.units,
+      })),
+      runes: RUNE_SPOT_DEFS.map((def) => ({
+        x: a.minX + def.fx * a.width,
+        z: a.minZ + def.fz * a.height,
+      })),
+      fountains: [{ pos: { x: -600, z: 200 }, healRadius: 200, healPerSecond: 100 }],
+      shops: [{ x: a.centerX, z: a.centerZ }],
     };
   }
   if (name === 'arena') {
+    const a = ARENA_TERRAIN1;
     return {
       name: 'arena',
       data: await loadMapData(),
-      arena: ARENA_TERRAIN1,
+      arena: a,
       spawns: null,
-      camps: null,
-      runes: null,
-      fountains: null, // arena map places fountains programmatically
-      shops: null,
+      camps: CAMP_DEFS.map((def) => ({
+        id: def.id,
+        x: a.minX + def.fx * a.width,
+        z: a.minZ + def.fz * a.height,
+        units: def.units,
+      })),
+      runes: RUNE_SPOT_DEFS.map((def) => ({
+        x: a.minX + def.fx * a.width,
+        z: a.minZ + def.fz * a.height,
+      })),
+      fountains: [0.25, 0.75].map((fx) => ({
+        pos: { x: a.minX + fx * a.width, z: a.centerZ },
+        healRadius: FOUNTAIN.healRadius,
+        healPerSecond: FOUNTAIN.healPerSecond,
+      })),
+      shops: [{ x: a.centerX, z: a.centerZ }],
     };
   }
   return loadCustomMap(name);
@@ -91,9 +116,9 @@ async function loadCustomMap(name: MapName): Promise<LoadedMap> {
     arena: custom.arena,
     spawns: custom.spawns.length > 0 ? custom.spawns : null,
     camps: custom.camps,
-    runes: custom.runes.length > 0 ? custom.runes : null,
-    fountains: custom.fountains.length > 0 ? custom.fountains : null,
-    shops: custom.shops.length > 0 ? custom.shops : null,
+    runes: custom.runes,
+    fountains: custom.fountains,
+    shops: custom.shops,
   };
 }
 

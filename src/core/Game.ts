@@ -43,11 +43,11 @@ import { spawnCamps } from '../sim/stepCreeps';
 import { spawnRunes } from '../sim/stepRunes';
 import type { CampPlacement } from '../sim/creepRules';
 import { RUNE_TYPES, RunePlacement } from '../sim/runeRules';
-import { SimWorld, sphereHitsObstacle, FountainDef, findWalkableNearOnGrid, findWalkableCellNear } from '../sim/world';
+import { SimWorld, sphereHitsObstacle, FountainDef, findWalkableNearOnGrid } from '../sim/world';
 import { advanceProjectile } from '../sim/projectiles';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
 import { AiController, AI_DIFFICULTY_PRESETS, type AiDifficulty } from '../sim/ai/AiController';
-import { HERO, ARROW, WARD, SCOUT, BLAST, FOUNTAIN, heroMaxHp } from '../sim/rules';
+import { HERO, ARROW, WARD, SCOUT, BLAST, heroMaxHp } from '../sim/rules';
 import { ABILITIES, ABILITY_ORDER, AbilityDef, abilityTooltip, canCast } from '../sim/abilities';
 import { GRAPPLE_ANCHOR_GAP, SHOP_ITEMS, SHOP_ITEMS_BY_ID } from '../sim/shopItems';
 
@@ -403,18 +403,13 @@ export class Game {
     );
     this._world.obstacles = buildObstaclesFromSolids(doodads.projectileSolids);
 
-    // ── Fountains: use authored placements or built-in default positions ──
-    if (this._mapFountains) {
-      this._world.fountains = this._mapFountains;
-    } else {
-      // Built-in maps: place two fountains at the arena's quarter-points.
-      this._world.fountains = buildDefaultFountains(this._arena, this._navGrid);
-    }
+    // ── Fountains: use authored placements (every map provides them now) ──
+    this._world.fountains = this._mapFountains ?? [];
 
-    // Shop positions: use authored map spots if available, else arena centre.
-    const shopSources: THREE.Vector3[] = this._mapShops && this._mapShops.length > 0
+    // Shop positions: use authored map spots if available, else none.
+    const shopSources: THREE.Vector3[] = this._mapShops
       ? this._mapShops.map((s) => this._findWalkableNear(s.x, s.z))
-      : [this._findWalkableNear(this._arena.centerX, this._arena.centerZ)];
+      : [];
 
     // Sync sim world shop positions to match
     this._world.shops = shopSources.map((src, i) => {
@@ -1533,11 +1528,11 @@ export class Game {
   }
 
   /** JSON-safe snapshot of the current client state for drivers. */
-  debugState(): { tick: number; playerId: string; shop: Vec2; heroes: { id: string; x: number; z: number; hp: number; alive: boolean; abilityLevel: number; abilityCooldown: number }[] } {
+  debugState(): { tick: number; playerId: string; shop: Vec2 | null; heroes: { id: string; x: number; z: number; hp: number; alive: boolean; abilityLevel: number; abilityCooldown: number }[] } {
     return {
       tick: this._state.tick,
       playerId: this._playerId,
-      shop: { ...this._world.shops[0].pos },
+      shop: this._world.shops.length > 0 ? { ...this._world.shops[0].pos } : null,
       heroes: this._state.heroes.map((h) => ({
         id: h.id, x: h.pos.x, z: h.pos.z, hp: h.hp, alive: h.alive,
         abilityLevel: h.abilities.arrow.level, abilityCooldown: h.abilities.arrow.cooldown,
@@ -2356,7 +2351,7 @@ export class Game {
 
   private _findRespawnPosition(): THREE.Vector3 {
     const arena = this._arena;
-    const anchor = this._world.shops[0].pos;
+    const anchor = this._world.shops.length > 0 ? this._world.shops[0].pos : { x: arena.centerX, z: arena.centerZ };
     for (let attempt = 0; attempt < 500; attempt++) {
       const wx = arena.minX + Math.random() * arena.width;
       const wz = arena.minZ + Math.random() * arena.height;
@@ -2428,28 +2423,6 @@ export class Game {
     this._debugPanel?.setDifficultyLabel(next);
     if (this._ai) this._ai = new AiController('dummy', AI_DIFFICULTY_PRESETS[next]);
   }
-}
-
-/**
- * Place two healing fountains at the arena's horizontal quarter-points,
- * snapped to walkable cells near the vertical center. Used by built-in
- * maps that don't author explicit fountain placements.
- */
-function buildDefaultFountains(arena: ArenaRect, navGrid: NavGrid): FountainDef[] {
-  const fountains: FountainDef[] = [];
-  // Place at 25% and 75% of the arena width, on the horizontal midline.
-  for (const fx of [0.25, 0.75]) {
-    const wx = arena.minX + fx * arena.width;
-    const pos = findWalkableCellNear(navGrid, wx, arena.centerZ);
-    if (pos) {
-      fountains.push({
-        pos,
-        healRadius: FOUNTAIN.healRadius,
-        healPerSecond: FOUNTAIN.healPerSecond,
-      });
-    }
-  }
-  return fountains;
 }
 
 /** Lerp between two angles (radians) taking the shortest path. */

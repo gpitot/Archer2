@@ -5,7 +5,6 @@
  * in offline mode, and in the test harness.
  */
 import {
-  CAMP_DEFS,
   CampPlacement,
   CREEP,
   CREEP_TYPES,
@@ -114,25 +113,20 @@ export function buildCamp(
 }
 
 /**
- * Populate `state.creeps` and `state.camps` from camp definitions. By default
- * camps come from `CAMP_DEFS` (centers as fractions of the arena rect, so the
- * same defs work on every built-in map); custom maps pass their authored
- * world-coordinate placements instead. Centers are snapped to the walkable
- * component reachable from the shop so a camp never lands on a cliff top or
- * islet. Ids (`c1`, `c2`, …) follow definition + pool order, so every peer
- * derives the same ids independently.
+ * Populate `state.creeps` and `state.camps` from camp definitions. Centers
+ * are snapped to the walkable component reachable from the nearest shop
+ * (or arena center) so a camp never lands on a cliff top or islet. Ids
+ * (`c1`, `c2`, …) follow definition + pool order, so every peer derives
+ * the same ids independently.
  */
 export function spawnCamps(state: MatchState, world: SimWorld, camps?: readonly CampPlacement[] | null): void {
-  const defs: readonly CampPlacement[] = camps ?? CAMP_DEFS.map((def) => ({
-    id: def.id,
-    x: world.arena.minX + def.fx * world.arena.width,
-    z: world.arena.minZ + def.fz * world.arena.height,
-    units: def.units,
-  }));
+  if (!camps || camps.length === 0) return;
+  const defs = camps;
   let nextId = 1;
+  const anchor = world.shops.length > 0 ? world.shops[0].pos : { x: world.arena.centerX, z: world.arena.centerZ };
   for (const def of defs) {
     const center =
-      findReachableNear(world, def.x, def.z, world.shops[0].pos.x, world.shops[0].pos.z) ??
+      findReachableNear(world, def.x, def.z, anchor.x, anchor.z) ??
       findWalkableNear(world, def.x, def.z);
     buildCamp(state, world, def.id, def.units, center, nextId);
     nextId += campPoolSize(def.units);

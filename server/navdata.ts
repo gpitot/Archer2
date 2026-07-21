@@ -30,7 +30,7 @@ export interface NavdataMap {
     centerX: number; centerZ: number; width: number; height: number;
   };
   shopPos: NavdataPoint;
-  /** Authored placements from custom maps; null → built-in defaults. */
+  /** Authored placements (null → none). */
   camps: readonly CampPlacement[] | null;
   spawns: readonly NavdataPoint[] | null;
   runes: readonly RunePlacement[] | null;
@@ -504,19 +504,19 @@ export const NAVDATA = {
 
     shopPos: { x: 784.0, z: 3088.0 },
 
-    /** Authored creep camps (custom maps); null → arena-fraction CAMP_DEFS. */
-    camps: null,
+    /** Authored creep camps (arena-fraction defaults baked in). */
+    camps: [{"id":"camp_w","x":-1704,"z":3104,"units":["ghoul","ghoul"]},{"id":"camp_e","x":3336,"z":3104,"units":["ghoul"]},{"id":"camp_nw","x":-1704,"z":572.8,"units":["ghost"]},{"id":"camp_ne","x":3336,"z":572.8,"units":["ghoul","ghost"]}],
 
     /** Fixed hero spawns (custom maps); null → random walkable spawns. */
     spawns: null,
 
-    /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
-    runes: null,
+    /** Authored rune spots (arena-fraction defaults baked in). */
+    runes: [{"x":816,"z":934.4},{"x":816,"z":5273.6}],
 
-    /** Authored fountain placements (custom maps); null → built-in defaults. */
+    /** Authored fountain placements. */
     fountains: null,
 
-    /** Authored shop placements (custom maps); null → arena-centre default. */
+    /** Authored shop placements. */
     shops: null,
   },
   "test": {
@@ -548,19 +548,19 @@ export const NAVDATA = {
 
     shopPos: { x: 16.0, z: 16.0 },
 
-    /** Authored creep camps (custom maps); null → arena-fraction CAMP_DEFS. */
-    camps: null,
+    /** Authored creep camps (arena-fraction defaults baked in). */
+    camps: [{"id":"camp_w","x":-627.2,"z":0,"units":["ghoul","ghoul"]},{"id":"camp_e","x":627.2,"z":0,"units":["ghoul"]},{"id":"camp_nw","x":-627.2,"z":-627.2,"units":["ghost"]},{"id":"camp_ne","x":627.2,"z":-627.2,"units":["ghoul","ghost"]}],
 
     /** Fixed hero spawns (custom maps); null → random walkable spawns. */
     spawns: null,
 
-    /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
-    runes: null,
+    /** Authored rune spots (arena-fraction defaults baked in). */
+    runes: [{"x":0,"z":-537.6},{"x":0,"z":537.6}],
 
-    /** Authored fountain placements (custom maps); null → built-in defaults. */
+    /** Authored fountain placements. */
     fountains: null,
 
-    /** Authored shop placements (custom maps); null → arena-centre default. */
+    /** Authored shop placements. */
     shops: null,
   },
   "1v1": {
