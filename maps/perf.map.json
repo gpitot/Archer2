@@ -72,13 +72,35 @@
     {"x":237,"z":54,"units":["ghoul","ghoul"]},
     {"x":205,"z":-412,"units":["ghoul","ghoul"]},
     {"x":49,"z":-549,"units":["ghoul","ghoul"]},
-    {"x":-228,"z":-549,"units":["ghoul","ghoul"]}
+    {"x":-228,"z":-549,"units":["ghoul","ghoul"]},
+    {"x":-745,"z":177,"units":["ghoul","ghoul"]},
+    {"x":-99,"z":386,"units":["ghoul","ghoul"]},
+    {"x":36,"z":629,"units":["ghoul","ghoul"]},
+    {"x":490,"z":676,"units":["ghoul","ghoul"]},
+    {"x":721,"z":597,"units":["ghoul","ghoul"]},
+    {"x":769,"z":297,"units":["ghoul","ghoul"]},
+    {"x":535,"z":221,"units":["ghoul","ghoul"]},
+    {"x":493,"z":-17,"units":["ghoul","ghoul"]},
+    {"x":727,"z":-277,"units":["ghoul","ghoul"]},
+    {"x":711,"z":-521,"units":["ghoul","ghoul"]},
+    {"x":379,"z":-628,"units":["ghoul","ghoul"]},
+    {"x":-83,"z":-666,"units":["ghoul","ghoul"]},
+    {"x":-441,"z":-818,"units":["ghoul","ghoul"]},
+    {"x":-856,"z":-697,"units":["ghoul","ghoul"]}
   ],
   "spawns": [
     {"x":-471,"z":-282},
     {"x":-447,"z":-16},
     {"x":-71,"z":-17},
-    {"x":-76,"z":-336}
+    {"x":-76,"z":-336},
+    {"x":-385,"z":528},
+    {"x":208,"z":403},
+    {"x":614,"z":20},
+    {"x":641,"z":-439},
+    {"x":-518,"z":-644},
+    {"x":347,"z":-717},
+    {"x":-751,"z":436},
+    {"x":586,"z":394}
   ],
   "runes": [
 
@@ -87,6 +109,6 @@
 
   ],
   "shops": [
-
+    {"x":-370,"z":-417}
   ]
 }

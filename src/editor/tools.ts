@@ -32,10 +32,10 @@ export const TOOLS: ToolInfo[] = [
   { id: 'rock', key: 'R', label: 'Solid rock', hint: 'blocks pathing, sight AND arrows' },
   { id: 'deco', key: 'T', label: 'Decoration', hint: 'cosmetic only ([ ] cycles bush/flower/mushroom)' },
   { id: 'camp', key: 'C', label: 'Creep camp', hint: 'places a jungle camp ([ ] cycles composition)' },
-  { id: 'spawn', key: 'P', label: 'Hero spawn', hint: 'numbered spawn points (max 4)' },
-  { id: 'rune', key: 'U', label: 'Rune spot', hint: 'power-up rune spawn location (max 6)' },
+  { id: 'spawn', key: 'P', label: 'Hero spawn', hint: 'numbered spawn points' },
+  { id: 'rune', key: 'U', label: 'Rune spot', hint: 'power-up rune spawn location' },
   { id: 'shop', key: 'S', label: 'Shop', hint: 'place a shop building where heroes can buy items' },
-  { id: 'fountain', key: 'F', label: 'Healing spring', hint: 'heals nearby heroes (max 4)' },
+  { id: 'fountain', key: 'F', label: 'Healing spring', hint: 'heals nearby heroes' },
   { id: 'erase', key: 'X', label: 'Erase', hint: 'click/drag removes the nearest placed object' },
 ];
 

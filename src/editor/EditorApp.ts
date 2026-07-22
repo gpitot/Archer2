@@ -33,11 +33,6 @@ import { EditorUI } from './ui';
 import { ToolId, TOOL_BY_KEY, CAMP_PRESETS, DECO_KINDS, TEXTURES } from './tools';
 import { listMaps, loadMapSource, saveMapSource, rememberLastMap, lastMapName } from './store';
 
-const MAX_SPAWNS = 4;
-const MAX_CAMPS = 8;
-const MAX_RUNES = 6;
-const MAX_SHOPS = 4;
-const MAX_FOUNTAINS = 4;
 /** Min distance between drag-scattered trees. */
 const SCATTER_SPACING = 70;
 const REBUILD_THROTTLE_MS = 130;
@@ -213,7 +208,7 @@ export class EditorApp {
 
   private async _playtest(): Promise<void> {
     if (await this._save()) {
-      window.open(`/?map=${encodeURIComponent(this._src.name)}`, '_blank');
+      window.open(`/?map=${encodeURIComponent(this._src.name)}&auto=1`, '_blank');
     }
   }
 
@@ -690,10 +685,6 @@ export class EditorApp {
   }
 
   private _placeCamp(): void {
-    if (this._src.camps.length >= MAX_CAMPS) {
-      this._ui.flash(`max ${MAX_CAMPS} camps`);
-      return;
-    }
     this._src.camps.push({
       x: this._hover!.wx,
       z: this._hover!.wz,
@@ -703,37 +694,21 @@ export class EditorApp {
   }
 
   private _placeSpawn(): void {
-    if (this._src.spawns.length >= MAX_SPAWNS) {
-      this._ui.flash(`max ${MAX_SPAWNS} spawns`);
-      return;
-    }
     this._src.spawns.push({ x: this._hover!.wx, z: this._hover!.wz });
     this._rebuild('doodads');
   }
 
   private _placeRune(): void {
-    if (this._src.runes.length >= MAX_RUNES) {
-      this._ui.flash(`max ${MAX_RUNES} rune spots`);
-      return;
-    }
     this._src.runes.push({ x: this._hover!.wx, z: this._hover!.wz });
     this._rebuild('doodads');
   }
 
   private _placeShop(): void {
-    if (this._src.shops.length >= MAX_SHOPS) {
-      this._ui.flash(`max ${MAX_SHOPS} shops`);
-      return;
-    }
     this._src.shops.push({ x: this._hover!.wx, z: this._hover!.wz });
     this._rebuild('doodads');
   }
 
   private _placeFountain(): void {
-    if (this._src.fountains.length >= MAX_FOUNTAINS) {
-      this._ui.flash(`max ${MAX_FOUNTAINS} fountains`);
-      return;
-    }
     this._src.fountains.push({ x: this._hover!.wx, z: this._hover!.wz });
     this._rebuild('doodads');
   }
