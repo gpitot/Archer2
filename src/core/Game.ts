@@ -40,7 +40,7 @@ import { HeroState, ProjectileState, WardState, BlastState, CreepState, RuneStat
 import { stepMatch, heroSpeed } from '../sim/stepMatch';
 import { stepStun } from '../sim/statusEffects';
 import { spawnCamps } from '../sim/stepCreeps';
-import { spawnCastles } from '../sim/buildings';
+import { currentWave, spawnCastles } from '../sim/buildings';
 import { BUILDING_TYPES } from '../sim/buildingRules';
 import type { CastlePlacement } from '../sim/buildingRules';
 import { spawnRunes } from '../sim/stepRunes';
@@ -237,6 +237,8 @@ export class Game {
   private _runeViews = new Map<string, RuneView>();
   private _fountainViews = new Map<number, FountainView>();
   private _buildingViews = new Map<string, BuildingView>();
+  /** Defenders wave number from the server (camps have no client-side tier). */
+  private _netWave = 1;
   private _projectilePool: ProjectileView[] = [];
 
   // ── Player helpers ──
@@ -481,6 +483,7 @@ export class Game {
     // Apply the initial snapshot to initialise our state and views.
     this._playerId = welcome.playerId;
     this._state.mode = init.mode ?? 'ffa';
+    this._netWave = init.snapshot.wave ?? 1;
     this._applySnapshot(init.snapshot, init.meta, init.creepMeta ?? [], init.runeMeta ?? [], init.buildingMeta ?? []);
     // Joined after the match already ended (rare) — show the result at once.
     if (init.outcome) {
@@ -971,6 +974,7 @@ export class Game {
       building.hp = sb.hp;
       if (sb.hp <= 0) building.alive = false;
     }
+    if (snap.wave !== undefined) this._netWave = snap.wave;
     this._state.tick = snap.tick;
   }
 
@@ -2417,6 +2421,10 @@ export class Game {
       camera: this._camera,
       isPlayerNearShop: this._isPlayerNearShop(),
       gameTime: this._state.tick / 60,
+      // Offline runs the camps locally; online the server sends the wave.
+      wave: this._state.mode === 'defenders'
+        ? (this._networkMode ? this._netWave : currentWave(this._state))
+        : undefined,
     };
     updateHud(ctx);
   }

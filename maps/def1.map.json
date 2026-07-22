@@ -113,9 +113,6 @@
 
   ],
   "camps": [
-    {"x":-108,"z":-1777,"units":["ghoul","ghoul"]},
-    {"x":1877,"z":47,"units":["ghoul","ghoul"]},
-    {"x":-1807,"z":80,"units":["ghoul","ghoul"]},
     {"x":25,"z":1737,"units":["ghoul","ghoul"]}
   ],
   "spawns": [

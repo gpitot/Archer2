@@ -20,7 +20,7 @@ import { MatchState, HeroInput, HeroState, SimEvent, ProjectileState, WardState,
 import { ABILITY_ORDER, AbilityId } from '../src/sim/abilities';
 import { stepMatch } from '../src/sim/stepMatch';
 import { spawnCamps } from '../src/sim/stepCreeps';
-import { spawnCastles } from '../src/sim/buildings';
+import { currentWave, spawnCastles } from '../src/sim/buildings';
 import { spawnRunes } from '../src/sim/stepRunes';
 import { CREEP } from '../src/sim/creepRules';
 import { SimWorld, ObstacleAABB, Rect, Shop, FountainDef, findRespawnPosition, findWalkableNear, findWalkableNearOnGrid } from '../src/sim/world';
@@ -536,6 +536,7 @@ export class GameRoom extends DurableObject<Env> {
         creeps: this._wireCreeps(),
       };
       if (this._state.buildings.length > 0) snapshot.buildings = this._wireBuildings();
+      if (this._mode === 'defenders') snapshot.wave = currentWave(this._state);
       if (this._pendingEvents.length > 0) {
         snapshot.events = this._pendingEvents.map((ev) =>
           ev.type === 'fire' ? { ...ev, projectile: this._wireProjectile(ev.projectile) } : ev,
@@ -584,6 +585,7 @@ export class GameRoom extends DurableObject<Env> {
       creeps: this._wireCreeps(),
     };
     if (this._state.buildings.length > 0) snap.buildings = this._wireBuildings();
+    if (this._mode === 'defenders') snap.wave = currentWave(this._state);
     return snap;
   }
 

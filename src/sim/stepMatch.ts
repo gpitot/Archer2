@@ -157,9 +157,9 @@ function respawnPositionFor(
 /**
  * Defenders end conditions, checked once per tick:
  *  - defeat: the map's castles are all razed.
- *  - victory: every camp has climbed `DEFENDERS.wavesToWin` tiers (each tier
- *    = one cleared wave) and the final wave is dead. Checked in the window
- *    between the last kill and the next respawn timer firing.
+ *  - victory: every camp has sent all `DEFENDERS.wavesToWin` waves (the wave
+ *    clock stops at tier `wavesToWin - 1`, see `stepCamps`) and the field is
+ *    clear — no timing window, since no further wave is coming.
  * Sets `state.outcome` and emits `matchOver`; the sim freezes next tick.
  */
 function checkDefendersOutcome(state: MatchState, events: SimEvent[]): void {

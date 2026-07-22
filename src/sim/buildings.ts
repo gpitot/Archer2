@@ -4,7 +4,7 @@
  * `stepCreeps` drives the attacks and `stepMatch` checks the end condition.
  * Pure and deterministic like the rest of the sim.
  */
-import { BUILDING_TYPES, CastlePlacement } from './buildingRules';
+import { BUILDING_TYPES, CastlePlacement, DEFENDERS } from './buildingRules';
 import * as V from './math';
 import { ARROW } from './rules';
 import { BuildingState, CreepState, MatchState, ProjectileState, SimEvent, createBuildingState } from './state';
@@ -26,6 +26,17 @@ export function spawnCastles(
     const pos = findWalkableNear(world, castles[i].x, castles[i].z);
     state.buildings.push(createBuildingState(`bldg${i + 1}`, 'castle', team, pos));
   }
+}
+
+/**
+ * Defenders wave number (1-based, capped at `wavesToWin`). Camps all ride the
+ * same fixed wave clock, so the deepest camp tier is the count of
+ * reinforcement waves sent; tier 0 (the opening spawn) is wave 1.
+ */
+export function currentWave(state: MatchState): number {
+  let tier = 0;
+  for (const c of state.camps) tier = Math.max(tier, c.tier);
+  return Math.min(tier + 1, DEFENDERS.wavesToWin);
 }
 
 /** Nearest alive building to `pos`, or null — the creeps' marching objective. */

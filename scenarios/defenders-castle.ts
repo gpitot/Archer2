@@ -1,8 +1,9 @@
 /**
  * Defenders mode: with no hero in aggro range, creeps march across the map
  * to the nearest castle, batter it down, and razing the last castle ends the
- * match in defeat. Also checks the mode's friendly-fire gate: allied arrows
- * pass through teammates.
+ * match in defeat. Also checks the mode's friendly-fire gate (allied arrows
+ * pass through teammates) and the fixed wave clock (the camp climbs a tier
+ * on schedule even while the previous wave is still alive).
  */
 import { SimHarness, expectEvent, expectTrue } from '../scripts/harness/SimHarness';
 import { spawnCastles } from '../src/sim/buildings';
@@ -44,6 +45,17 @@ export function run(h: SimHarness): void {
   );
   expectEvent(hitEvents, 'buildingHit');
   expectTrue(castle.hp < BUILDING_TYPES.castle.maxHp, 'castle is taking damage');
+
+  // Waves ride a fixed clock: the camp climbs a tier even though the ghoul
+  // is alive and mid-siege, and the survivor is left untouched (still a
+  // ghoul, still swinging) rather than being reset by the respawn.
+  const camp = h.state.camps.find((c) => c.id === 'camp_wave')!;
+  h.runUntil(
+    () => camp.tier >= 1,
+    h.seconds(20),
+    'wave clock ticks while the previous wave lives',
+  );
+  expectTrue(ghoul.alive && ghoul.type === 'ghoul', 'survivor untouched by the wave tick');
 
   // Let the wave finish the job (skip the grind — drop the castle low).
   castle.hp = 50;

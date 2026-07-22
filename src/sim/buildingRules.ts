@@ -34,9 +34,12 @@ export interface CastlePlacement {
 
 export const DEFENDERS = {
   /**
-   * Victory: every camp has climbed this many tiers (each tier = one cleared
-   * wave) and the final wave is dead. Camp tier N means N waves cleared, so
-   * the check is `tier >= wavesToWin - 1` on all camps with no creep alive.
+   * Total waves each camp sends. Waves arrive on a fixed clock (the creep
+   * `respawnInterval`) whether or not the previous one was cleared — each
+   * tick of the clock climbs the camp a tier and refills its dead slots.
+   * Camp tier N means N reinforcement waves sent (tier 0 is the opening
+   * spawn), the clock stops at `wavesToWin - 1`, and victory is every camp
+   * at that cap with no creep left alive.
    */
-  wavesToWin: 10,
+  wavesToWin: 100,
 } as const;

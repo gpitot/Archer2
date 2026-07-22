@@ -323,6 +323,9 @@ export interface SnapshotMessage {
   creeps: SnapshotCreep[];
   /** Buildings' current hp (absent when the match has none). */
   buildings?: SnapshotBuilding[];
+  /** Defenders only: current wave number (1-based; camps have no client-side
+   *  tier state, so the HUD counter rides the wire). */
+  wave?: number;
   /** Sim events since the previous snapshot, if any (piggybacked to save a WS frame). */
   events?: SimEvent[];
 }
@@ -351,6 +354,8 @@ export interface Snapshot {
   creeps: SnapshotCreep[];
   /** Buildings' current hp (absent when the match has none). */
   buildings?: SnapshotBuilding[];
+  /** Defenders only: current wave number (see SnapshotMessage.wave). */
+  wave?: number;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────

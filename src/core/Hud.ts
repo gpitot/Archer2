@@ -5,6 +5,7 @@
  * paths identically.
  */
 import { ABILITY_ORDER, ABILITIES } from '../sim/abilities';
+import { DEFENDERS } from '../sim/buildingRules';
 import { HERO, basicRankCap, ultimateRankCap } from '../sim/rules';
 import { RUNE_TYPES } from '../sim/runeRules';
 import { SHOP_ITEMS, SHOP_ITEMS_BY_ID } from '../sim/shopItems';
@@ -42,6 +43,8 @@ export interface HudContext {
   isPlayerNearShop: boolean;
   /** Game time in seconds (tick / tickRate). */
   gameTime: number;
+  /** Defenders only: current wave number (1-based); absent in other modes. */
+  wave?: number;
 }
 
 /** Update all HUD elements (minimap + bars) from current game state. */
@@ -151,6 +154,7 @@ export function updateHud(ctx: HudContext): void {
   }
   ctx.itemBar.update(p.inventory, charges, cdProgress, cdRemaining);
   ctx.kdDisplay.update(p.kills, p.deaths, p.gold, ctx.gameTime);
+  if (ctx.wave !== undefined) ctx.kdDisplay.setWave(ctx.wave, DEFENDERS.wavesToWin);
   ctx.statusBar.update(p.hp, p.level, p.xp, p.bonusHp);
 
   // ── Shop ─────────────────────────────────────────────────────────
