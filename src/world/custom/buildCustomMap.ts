@@ -26,7 +26,7 @@ import type { RunePlacement } from '../../sim/runeRules';
 import type { FountainDef } from '../../sim/world';
 import { FOUNTAIN } from '../../sim/rules';
 import {
-  MapSource, SpawnSource, ShopSource, SRC_FLAG_RAMP, SRC_FLAG_WATER, TYPE_ID_BY_KIND, pointsX, pointsZ,
+  MapSource, SpawnSource, ShopSource, CastleSource, SRC_FLAG_RAMP, SRC_FLAG_WATER, TYPE_ID_BY_KIND, pointsX, pointsZ,
 } from './mapSource';
 
 // Raw w3e height encoding (see testMap.ts): world = (raw − 8192) / 4 + (layer − 2) · 128.
@@ -54,6 +54,8 @@ export interface CustomMap {
   fountains: FountainDef[];
   /** Authored shop placements, world space. */
   shops: ShopSource[];
+  /** Authored castle placements (Defenders objectives), world space. */
+  castles: CastleSource[];
   /** Projectile-blocking AABBs (solid rocks), world space. */
   obstacles: ObstacleAABB[];
 }
@@ -105,6 +107,7 @@ export function buildCustomMap(src: MapSource): CustomMap {
       healPerSecond: FOUNTAIN.healPerSecond,
     })),
     shops: src.shops.map((s) => ({ x: s.x, z: s.z })),
+    castles: src.castles.map((c) => ({ x: c.x, z: c.z })),
     obstacles: buildObstacles(src),
   };
 }

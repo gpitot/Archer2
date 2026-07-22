@@ -39,6 +39,16 @@ function setMapInUrl(map: string): void {
   history.replaceState(null, '', `?${params.toString()}`);
 }
 
+/**
+ * Put the chosen game mode in the URL so a reload of the creator's tab
+ * re-creates the room with the same mode (joiners adopt the room's anyway).
+ */
+function setModeInUrl(mode: string): void {
+  const params = new URLSearchParams(location.search);
+  params.set('mode', mode);
+  history.replaceState(null, '', `?${params.toString()}`);
+}
+
 async function boot(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const game = new Game();
@@ -62,9 +72,14 @@ async function boot(): Promise<void> {
       ? (choice.roomCode ?? urlRoom!)
       : null;
   setRoomInUrl(roomCode);
-  // A created room's map comes from the start-screen dropdown; preload reads it
-  // off the URL, and it rides the shareable room link so joiners load it too.
-  if (choice.mode === 'create' && choice.map) setMapInUrl(choice.map);
+  // The chosen map (create room or offline practice) goes in the URL: preload
+  // reads it from there, and for created rooms it rides the shareable room
+  // link so joiners load it too.
+  if (choice.map) setMapInUrl(choice.map);
+  // Game mode: the dropdown choice, or (join/reload flows) whatever the URL
+  // carries — the room's actual mode arrives with the welcome either way.
+  const gameMode = choice.gameMode ?? params.get('mode') ?? undefined;
+  if (choice.mode === 'create' && gameMode) setModeInUrl(gameMode);
 
   // ── Lobby (also the loading screen) ──
   const net = online ? new NetworkClient() : null;
@@ -83,6 +98,7 @@ async function boot(): Promise<void> {
     },
   });
   lobby.open();
+  if (gameMode) lobby.setMode(gameMode);
 
   // Paint the lobby before preload blocks the main thread building terrain.
   await nextPaint();
@@ -98,9 +114,11 @@ async function boot(): Promise<void> {
     net.onClosed = (_code, reason) => {
       lobby.setStatus(reason ? `Disconnected: ${reason}` : 'Disconnected from the server.');
     };
-    const welcome = await net.connect(roomCode!, choice.name, game.mapName);
+    const welcome = await net.connect(roomCode!, choice.name, game.mapName, gameMode);
     names = new Map(welcome.roster.map((p) => [p.playerId, p.name]));
     lobby.setRoster(welcome.roster, welcome.playerId);
+    // The room's actual mode is authoritative (joiners adopt it).
+    if (welcome.mode) lobby.setMode(welcome.mode);
     net.onRoster = (players) => {
       names = new Map(players.map((p) => [p.playerId, p.name]));
       lobby.setRoster(players, net.playerId);
@@ -119,7 +137,7 @@ async function boot(): Promise<void> {
   lobby.dispose();
 
   if (net && init) game.startNetworkMatch(net, init, names);
-  else game.startOfflineMatch(choice.name);
+  else game.startOfflineMatch(choice.name, gameMode === 'defenders' ? 'defenders' : 'ffa');
 
   game.finish();
 }

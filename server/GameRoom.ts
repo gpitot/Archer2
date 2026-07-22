@@ -16,10 +16,11 @@
 // globals (see server/worker-configuration.d.ts) — only DurableObject is a
 // module export.
 import { DurableObject } from 'cloudflare:workers';
-import { MatchState, HeroInput, HeroState, SimEvent, ProjectileState, WardState, BlastState, AbilityRuntime, createMatchState, createHeroState } from '../src/sim/state';
+import { MatchState, HeroInput, HeroState, SimEvent, ProjectileState, WardState, BlastState, AbilityRuntime, GameMode, createMatchState, createHeroState, resolveGameMode } from '../src/sim/state';
 import { ABILITY_ORDER, AbilityId } from '../src/sim/abilities';
 import { stepMatch } from '../src/sim/stepMatch';
 import { spawnCamps } from '../src/sim/stepCreeps';
+import { spawnCastles } from '../src/sim/buildings';
 import { spawnRunes } from '../src/sim/stepRunes';
 import { CREEP } from '../src/sim/creepRules';
 import { SimWorld, ObstacleAABB, Rect, Shop, FountainDef, findRespawnPosition, findWalkableNear, findWalkableNearOnGrid } from '../src/sim/world';
@@ -30,6 +31,7 @@ import { HERO } from '../src/sim/rules';
 import {
   ClientMessage, ServerMessage, WelcomeMessage, SnapshotMessage,
   HeroMetaMessage, SnapshotHero, HeroMeta, SnapshotCreep, CreepMeta, RuneMeta, Snapshot,
+  BuildingMeta, SnapshotBuilding,
   RosterMessage, MatchStartMessage, MatchInit, LobbyPlayer, RoomPhase,
 } from '../src/sim/protocol';
 import { sanitizeName } from '../src/sim/names';
@@ -93,6 +95,8 @@ const q4 = (n: number) => Math.round(n * 10000) / 10000;
 export class GameRoom extends DurableObject<Env> {
   private _world!: SimWorld;
   private _mapName: NavdataMapName = 'arena';
+  /** Game mode; like the map, the first joiner of a fresh lobby sets it. */
+  private _mode: GameMode = 'ffa';
   private _state!: MatchState;
   private _tickTimer: ReturnType<typeof setInterval> | null = null;
   private _pendingInputs: HeroInput[] = [];
@@ -130,9 +134,13 @@ export class GameRoom extends DurableObject<Env> {
 
   /** Fresh match state for the current world — including creep camps and runes. */
   private _resetMatch(): void {
-    this._state = createMatchState();
+    this._state = createMatchState(this._mode);
     spawnCamps(this._state, this._world, NAVDATA[this._mapName].camps);
     spawnRunes(this._state, this._world, NAVDATA[this._mapName].runes);
+    // Defenders: the castles the creeps besiege, owned by the shared team 0.
+    if (this._mode === 'defenders') {
+      spawnCastles(this._state, this._world, NAVDATA[this._mapName].castles);
+    }
   }
 
   // ── HTTP / WebSocket upgrade ──────────────────────────────────────
@@ -171,13 +179,17 @@ export class GameRoom extends DurableObject<Env> {
           ws.close(1013, 'room full');
           return;
         }
-        // The first joiner picks the room's map; later joiners must match.
-        // Any map baked into navdata is joinable ('arena', 'test', customs).
+        // The first joiner picks the room's map and mode; later joiners must
+        // match the map (their client already loaded it) and simply adopt the
+        // mode (the welcome tells them which it is). Any map baked into
+        // navdata is joinable ('arena', 'test', customs).
         const requestedMap: NavdataMapName =
           msg.map && msg.map in NAVDATA ? (msg.map as NavdataMapName) : 'arena';
+        const requestedMode = resolveGameMode(msg.mode);
         if (this._phase === 'lobby' && this._players.size === 0) {
-          if (requestedMap !== this._mapName) {
-            this._buildWorld(requestedMap);
+          if (requestedMap !== this._mapName || requestedMode !== this._mode) {
+            this._mode = requestedMode;
+            if (requestedMap !== this._mapName) this._buildWorld(requestedMap);
             this._resetMatch();
           }
         } else if (requestedMap !== this._mapName) {
@@ -213,6 +225,7 @@ export class GameRoom extends DurableObject<Env> {
             tickRate: TICK_RATE,
             snapshotRate: SNAPSHOT_RATE,
             map: this._mapName,
+            mode: this._mode,
             phase: 'lobby',
             roster: this._roster(),
           };
@@ -222,7 +235,9 @@ export class GameRoom extends DurableObject<Env> {
         }
 
         // Match in progress — spawn straight in, skipping the lobby.
-        this._state.heroes.push(createHeroState(playerId, team, this._spawnPosFor(team)));
+        this._state.heroes.push(
+          createHeroState(playerId, team, this._spawnPosFor(team, this._state.heroes.length)),
+        );
         if (!this._tickTimer) this._startTick();
 
         const welcome: WelcomeMessage = {
@@ -231,6 +246,7 @@ export class GameRoom extends DurableObject<Env> {
           tickRate: TICK_RATE,
           snapshotRate: SNAPSHOT_RATE,
           map: this._mapName,
+          mode: this._mode,
           phase: 'playing',
           roster: this._roster(),
           init: this._matchInit(),
@@ -282,6 +298,8 @@ export class GameRoom extends DurableObject<Env> {
 
       case 'addBot': {
         // Only real players may manage bots, and only before the match starts.
+        // No bots in Defenders (v1): the AI only knows how to hunt heroes.
+        if (this._mode === 'defenders') return;
         if (!this._players.has(ws) || this._phase !== 'lobby') return;
         if (this._players.size + this._bots.size >= MAX_PLAYERS) return;
         const difficulty: AiDifficulty =
@@ -353,8 +371,10 @@ export class GameRoom extends DurableObject<Env> {
   /**
    * Lowest team id not currently claimed by a player or a bot. FFA gives every
    * participant its own team, so this is what keeps spawns from colliding.
+   * Defenders is fully co-op: everyone shares team 0.
    */
   private _lowestFreeTeam(): number {
+    if (this._mode === 'defenders') return 0;
     const used = new Set<number>();
     for (const p of this._players.values()) used.add(p.team);
     for (const b of this._bots.values()) used.add(b.team);
@@ -384,9 +404,11 @@ export class GameRoom extends DurableObject<Env> {
     this._phase = 'playing';
     this._resetMatch();
 
-    for (const info of this._roster()) {
+    const roster = this._roster();
+    for (let seat = 0; seat < roster.length; seat++) {
+      const info = roster[seat];
       this._state.heroes.push(
-        createHeroState(info.playerId, info.team, this._spawnPosFor(info.team)),
+        createHeroState(info.playerId, info.team, this._spawnPosFor(info.team, seat)),
       );
     }
 
@@ -405,25 +427,30 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   /**
-   * Maps with authored spawns place heroes there (by team, wrapping);
+   * Maps with authored spawns place heroes there (by team in FFA, by lobby
+   * seat in Defenders where everyone shares team 0 — both wrapping);
    * otherwise spawn on random walkable ground.
    */
-  private _spawnPosFor(team: number): { x: number; z: number } {
+  private _spawnPosFor(team: number, seat = 0): { x: number; z: number } {
     const fixed = NAVDATA[this._mapName].spawns;
     if (!fixed) return findRespawnPosition(this._world);
-    const spot = fixed[team % fixed.length];
+    const spot = fixed[(this._mode === 'defenders' ? seat : team) % fixed.length];
     return findWalkableNear(this._world, spot.x, spot.z);
   }
 
   /** Bootstrap payload for a starting match or a mid-match joiner. */
   private _matchInit(): MatchInit {
-    return {
+    const init: MatchInit = {
       map: this._mapName,
+      mode: this._mode,
       snapshot: this._currentSnapshot(),
       meta: this._heroMetas(),
       creepMeta: this._creepMetas(),
       runeMeta: this._runeMetas(),
     };
+    if (this._state.buildings.length > 0) init.buildingMeta = this._buildingMetas();
+    if (this._state.outcome !== 'playing') init.outcome = this._state.outcome;
+    return init;
   }
 
   async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): Promise<void> {
@@ -508,6 +535,7 @@ export class GameRoom extends DurableObject<Env> {
         blasts: this._wireBlasts(),
         creeps: this._wireCreeps(),
       };
+      if (this._state.buildings.length > 0) snapshot.buildings = this._wireBuildings();
       if (this._pendingEvents.length > 0) {
         snapshot.events = this._pendingEvents.map((ev) =>
           ev.type === 'fire' ? { ...ev, projectile: this._wireProjectile(ev.projectile) } : ev,
@@ -547,7 +575,7 @@ export class GameRoom extends DurableObject<Env> {
 
   /** Full state for the welcome handshake, including in-flight projectiles. */
   private _currentSnapshot(): Snapshot {
-    return {
+    const snap: Snapshot = {
       tick: this._state.tick,
       heroes: this._state.heroes.map((h) => this._wireHero(h)),
       projectiles: this._state.projectiles.map((p) => this._wireProjectile(p)),
@@ -555,6 +583,8 @@ export class GameRoom extends DurableObject<Env> {
       blasts: this._wireBlasts(),
       creeps: this._wireCreeps(),
     };
+    if (this._state.buildings.length > 0) snap.buildings = this._wireBuildings();
+    return snap;
   }
 
   private _wireProjectile(p: ProjectileState): ProjectileState {
@@ -612,6 +642,23 @@ export class GameRoom extends DurableObject<Env> {
       hp: q(c.hp),
       pos: { x: q(c.pos.x), z: q(c.pos.z) },
       spawnPos: { x: q(c.spawnPos.x), z: q(c.spawnPos.z) },
+    }));
+  }
+
+  /** Per-tick building hp (a handful of entries at most). */
+  private _wireBuildings(): SnapshotBuilding[] {
+    return this._state.buildings.map((b) => ({ id: b.id, hp: q(b.hp) }));
+  }
+
+  /** Building registry for the welcome handshake. */
+  private _buildingMetas(): BuildingMeta[] {
+    return this._state.buildings.map((b) => ({
+      id: b.id,
+      type: b.type,
+      team: b.team,
+      pos: { x: q(b.pos.x), z: q(b.pos.z) },
+      hp: q(b.hp),
+      alive: b.alive,
     }));
   }
 
@@ -768,7 +815,10 @@ export class GameRoom extends DurableObject<Env> {
       healPerSecond: 100,
     }));
 
+    // Authored hero spawn points (Defenders respawns land here).
+    const spawns = (data.spawns ?? []).map((s) => ({ x: s.x, z: s.z }));
+
     this._mapName = mapName;
-    this._world = { navGrid, pathfinder, obstacles, arena, shops, fountains };
+    this._world = { navGrid, pathfinder, obstacles, arena, shops, fountains, spawns };
   }
 }

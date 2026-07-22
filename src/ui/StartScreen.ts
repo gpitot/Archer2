@@ -14,6 +14,13 @@ export type StartMode = 'create' | 'join' | 'offline';
 const MAP_OPTIONS: readonly { value: string; label: string }[] = [
   { value: 'pentad', label: 'Pentad (5 players)' },
   { value: '2pv1', label: '2p v 1' },
+  { value: 'def1', label: 'Defenders v1' },
+];
+
+/** Game modes offered in the create-room dropdown. First entry is the default. */
+const MODE_OPTIONS: readonly { value: string; label: string }[] = [
+  { value: 'ffa', label: 'Classic (free-for-all)' },
+  { value: 'defenders', label: 'Defenders (co-op castle defense)' },
 ];
 
 export interface StartChoice {
@@ -21,8 +28,10 @@ export interface StartChoice {
   name: string;
   /** Present for 'join'; the caller generates one for 'create'. */
   roomCode?: string;
-  /** Chosen map for 'create' (from the dropdown); absent for join/offline. */
+  /** Chosen map for 'create'/'offline'; absent for join (room decides). */
   map?: string;
+  /** Chosen game mode for 'create'/'offline'; absent for join (room decides). */
+  gameMode?: string;
 }
 
 interface StartScreenOpts {
@@ -71,6 +80,7 @@ export class StartScreen {
   private _panel: HTMLDivElement;
   private _nameInput!: HTMLInputElement;
   private _mapSelect: HTMLSelectElement | null = null;
+  private _modeSelect: HTMLSelectElement | null = null;
   private _error!: HTMLDivElement;
   private _resolve: ((c: StartChoice) => void) | null = null;
 
@@ -156,8 +166,8 @@ export class StartScreen {
   }
 
   private _buildDefault(): void {
-    // Map picker — only relevant when creating a room (the first joiner sets
-    // the room's map). Its value rides the 'create' choice.
+    // Map picker — rides the 'create' choice (the first joiner sets the
+    // room's map) and offline practice alike; joiners adopt the room's.
     const mapLabel = document.createElement('div');
     mapLabel.textContent = 'Map';
     mapLabel.style.cssText = 'color:#998866; font-size:11px; font-weight:bold; margin-bottom:4px;';
@@ -174,6 +184,25 @@ export class StartScreen {
     }
     this._mapSelect = mapSelect;
     this._panel.appendChild(mapSelect);
+
+    // Game-mode picker — rides the 'create' choice like the map, and also
+    // applies to offline practice (a solo castle defense is playable).
+    const modeLabel = document.createElement('div');
+    modeLabel.textContent = 'Mode';
+    modeLabel.style.cssText = 'color:#998866; font-size:11px; font-weight:bold; margin-bottom:4px;';
+    this._panel.appendChild(modeLabel);
+
+    const modeSelect = document.createElement('select');
+    modeSelect.style.cssText = INPUT_CSS + 'margin-bottom:12px; cursor:pointer;';
+    for (const opt of MODE_OPTIONS) {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      o.style.cssText = 'background:#1a140a; color:#ffe9b0;';
+      modeSelect.appendChild(o);
+    }
+    this._modeSelect = modeSelect;
+    this._panel.appendChild(modeSelect);
 
     const create = button('Create room', true);
     create.onclick = () => this._pick('create');
@@ -224,8 +253,10 @@ export class StartScreen {
       this._nameInput.focus();
       return;
     }
-    const map = mode === 'create' ? (this._mapSelect?.value ?? undefined) : undefined;
-    this._resolve?.({ mode, name: sanitizeName(raw), roomCode, map });
+    // The room decides map and mode for joiners; creators and offline players pick.
+    const map = mode === 'join' ? undefined : (this._mapSelect?.value ?? undefined);
+    const gameMode = mode === 'join' ? undefined : (this._modeSelect?.value ?? undefined);
+    this._resolve?.({ mode, name: sanitizeName(raw), roomCode, map, gameMode });
     this._resolve = null;
     this.close();
   }

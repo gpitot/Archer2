@@ -21,7 +21,7 @@ import type { RunePlacement } from '../sim/runeRules';
 import { RUNE_SPOT_DEFS } from '../sim/runeRules';
 import type { FountainDef } from '../sim/world';
 import { FOUNTAIN } from '../sim/rules';
-import type { ShopSource } from './custom/mapSource';
+import type { ShopSource, CastleSource } from './custom/mapSource';
 
 export type MapName = string;
 
@@ -41,6 +41,8 @@ export interface LoadedMap {
   fountains: FountainDef[] | null;
   /** Authored shop placements (null → none). */
   shops: ShopSource[] | null;
+  /** Authored castle placements — Defenders objectives (null → none). */
+  castles: CastleSource[] | null;
 }
 
 /**
@@ -72,6 +74,7 @@ export async function loadMap(name: MapName): Promise<LoadedMap> {
       })),
       fountains: [{ pos: { x: -600, z: 200 }, healRadius: 200, healPerSecond: 100 }],
       shops: [{ x: a.centerX, z: a.centerZ }],
+      castles: null,
     };
   }
   if (name === 'arena') {
@@ -97,6 +100,7 @@ export async function loadMap(name: MapName): Promise<LoadedMap> {
         healPerSecond: FOUNTAIN.healPerSecond,
       })),
       shops: [{ x: a.centerX, z: a.centerZ }],
+      castles: null,
     };
   }
   return loadCustomMap(name);
@@ -119,6 +123,7 @@ async function loadCustomMap(name: MapName): Promise<LoadedMap> {
     runes: custom.runes,
     fountains: custom.fountains,
     shops: custom.shops,
+    castles: custom.castles.length > 0 ? custom.castles : null,
   };
 }
 

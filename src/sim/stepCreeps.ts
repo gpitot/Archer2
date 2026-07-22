@@ -20,7 +20,9 @@ import {
 } from './creepRules';
 import * as V from './math';
 import { ARROW } from './rules';
-import { CampState, CreepState, HeroState, MatchState, ProjectileState, SimEvent } from './state';
+import { BUILDING_TYPES } from './buildingRules';
+import { dealDamageToBuilding, nearestAliveBuilding } from './buildings';
+import { BuildingState, CampState, CreepState, HeroState, MatchState, ProjectileState, SimEvent } from './state';
 import { addXp, killHero, dealDamageToHero, dealDamageToCreep, stepBurn } from './damage';
 import { spawnProjectile } from './projectiles';
 import { findReachableNear, findWalkableNear, SimWorld } from './world';
@@ -198,10 +200,14 @@ export function stepCreeps(
 
     // Validate aggro every tick (cheap): target gone/dead/invulnerable/
     // invisible, or creep dragged past its leash → give up and go home.
+    // Defenders creeps are besiegers, not camp guards — no leash: chasing a
+    // kiting hero across the map is the defenders' tool for peeling a wave.
     let target: HeroState | null = null;
     if (creep.aggroTargetId !== null) {
       target = state.heroes.find((h) => h.id === creep.aggroTargetId) ?? null;
-      const leashed = V.distanceSq(creep.pos, creep.spawnPos) > CREEP.leashRange * CREEP.leashRange;
+      const leashed =
+        state.mode !== 'defenders' &&
+        V.distanceSq(creep.pos, creep.spawnPos) > CREEP.leashRange * CREEP.leashRange;
       if (!target || !target.alive || target.invulnerable || target.invisTimer > 0 || leashed) {
         creep.aggroTargetId = null;
         // Dragged past the leash → commit to walking home before re-aggroing.
@@ -209,6 +215,10 @@ export function stepCreeps(
         target = null;
       }
     }
+
+    // Defenders: with no hero to fight, the standing order is "raze the
+    // nearest castle" — the march is what makes a wave a threat.
+    const objective = state.mode === 'defenders' ? nearestAliveBuilding(state, creep.pos) : null;
 
     if (target) {
       const dist = V.distance(creep.pos, target.pos);
@@ -229,12 +239,16 @@ export function stepCreeps(
               applyCreepDamageToHero(state, target, creepDamage(creep.type, creep.level), creep, creep.id, events);
             }
           } else {
-            fireCreepProjectile(state, creep, def, target, events);
+            fireCreepProjectile(state, creep, def, target.pos, events);
           }
           creep.attackCooldown = def.attackCooldown;
         }
         creep.lastActiveTick = state.tick;
       }
+    } else if (objective) {
+      // March on the castle; batter it once within reach. Range is measured
+      // to the building's edge — its body is far wider than any hero's.
+      besiege(state, creep, def, objective, dt, world, i, events);
     } else if (V.distanceSq(creep.pos, creep.spawnPos) > CREEP.arriveEpsilon * CREEP.arriveEpsilon) {
       moveCreepTo(creep, creep.spawnPos, def, dt, world, state.tick, i);
       creep.lastActiveTick = state.tick;
@@ -346,17 +360,52 @@ function repathCreep(creep: CreepState, goal: V.Vec2, world: SimWorld): void {
   creep.path = computePath(world, creep.pos, goal);
 }
 
+/**
+ * Defenders mode: no hero target, so advance on `objective` (the nearest
+ * alive castle) and attack it from the creep's usual range — melee swings
+ * apply damage directly, ranged creeps lob the same sidesteppable fireball
+ * they use on heroes (it collides with buildings in stepProjectiles).
+ */
+function besiege(
+  state: MatchState,
+  creep: CreepState,
+  def: CreepTypeDef,
+  objective: BuildingState,
+  dt: number,
+  world: SimWorld,
+  index: number,
+  events: SimEvent[],
+): void {
+  const edgeDist = V.distance(creep.pos, objective.pos) - BUILDING_TYPES[objective.type].bodyRadius;
+  if (edgeDist > def.attackRange) {
+    moveCreepTo(creep, objective.pos, def, dt, world, state.tick, index);
+  } else {
+    creep.path.length = 0;
+    const dir = V.normalize(V.sub(objective.pos, creep.pos));
+    if (dir.x !== 0 || dir.z !== 0) creep.facing = V.heading(dir);
+    if (creep.attackCooldown <= 0) {
+      if (def.kind === 'melee') {
+        dealDamageToBuilding(state, objective, creep, creepDamage(creep.type, creep.level), events);
+      } else {
+        fireCreepProjectile(state, creep, def, objective.pos, events);
+      }
+      creep.attackCooldown = def.attackCooldown;
+    }
+  }
+  creep.lastActiveTick = state.tick;
+}
+
 function fireCreepProjectile(
   state: MatchState,
   creep: CreepState,
   def: CreepTypeDef,
-  target: HeroState,
+  targetPos: V.Vec2,
   events: SimEvent[],
 ): void {
   // Aim at the target's position at fire time — straight flight at a speed
   // below ARROW.speed makes the fireball sidesteppable. Fireballs announce
   // themselves on the wire via the same `fire` event as hero arrows.
-  const dir = V.normalize(V.sub(target.pos, creep.pos));
+  const dir = V.normalize(V.sub(targetPos, creep.pos));
   spawnProjectile(state, events, {
     ownerId: creep.id,
     ownerKind: 'creep',

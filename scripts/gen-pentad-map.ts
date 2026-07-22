@@ -237,6 +237,7 @@ function build(): MapSource {
     runes: ring(RUNE.a, RUNE.r),
     fountains: ring(FOUNTAIN.a, FOUNTAIN.r),
     shops: ring(SHOP.a, SHOP.r),
+    castles: [],
   };
 }
 

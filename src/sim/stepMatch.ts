@@ -53,6 +53,8 @@ import {
   stepCreeps,
 } from './stepCreeps';
 import { CREEP_TYPES } from './creepRules';
+import { DEFENDERS } from './buildingRules';
+import { findHitBuilding, dealDamageToBuilding } from './buildings';
 import { findReachableNear, findRespawnPosition, SimWorld } from './world';
 import {
   GRAPPLE_ANCHOR_GAP,
@@ -93,12 +95,20 @@ export function stepMatch(
 ): SimEvent[] {
   const events: SimEvent[] = [];
 
+  // A decided match is frozen: the tick still advances (snapshot timelines
+  // stay coherent) but nothing moves, fires, or dies after `matchOver`.
+  if (state.outcome !== 'playing') {
+    state.tick++;
+    return events;
+  }
+
   for (const input of inputs) {
     const hero = state.heroes.find((h) => h.id === input.heroId);
     if (hero) applyCommand(state, hero, input.cmd, world, events);
   }
 
-  for (const hero of state.heroes) {
+  for (let i = 0; i < state.heroes.length; i++) {
+    const hero = state.heroes[i];
     stepHero(hero, dt);
     stepHeroBurn(state, hero, dt, events);
     // Resolve any in-progress arrow cast point (spawns the arrow when the
@@ -106,7 +116,7 @@ export function stepMatch(
     // advances this same tick, like a fireball spawned in stepCreeps.
     stepArrowWindup(state, hero, events, dt);
     if (!hero.alive && hero.respawnTimer <= 0) {
-      respawn(hero, findRespawnPosition(world, rng));
+      respawn(hero, respawnPositionFor(state, i, world, rng));
       events.push({ type: 'respawn', heroId: hero.id });
     }
   }
@@ -121,8 +131,51 @@ export function stepMatch(
   stepFountains(state, dt, world);
   stepIncome(state, dt);
 
+  if (state.mode === 'defenders') checkDefendersOutcome(state, events);
+
   state.tick++;
   return events;
+}
+
+/**
+ * Where a dead hero comes back. Defenders respawn at the map's authored
+ * spawn points (indexed by hero slot so a full team doesn't stack on one
+ * spot); FFA keeps its random walkable position.
+ */
+function respawnPositionFor(
+  state: MatchState,
+  heroIndex: number,
+  world: SimWorld,
+  rng: () => number,
+): V.Vec2 {
+  if (state.mode === 'defenders' && world.spawns.length > 0) {
+    return world.spawns[heroIndex % world.spawns.length];
+  }
+  return findRespawnPosition(world, rng);
+}
+
+/**
+ * Defenders end conditions, checked once per tick:
+ *  - defeat: the map's castles are all razed.
+ *  - victory: every camp has climbed `DEFENDERS.wavesToWin` tiers (each tier
+ *    = one cleared wave) and the final wave is dead. Checked in the window
+ *    between the last kill and the next respawn timer firing.
+ * Sets `state.outcome` and emits `matchOver`; the sim freezes next tick.
+ */
+function checkDefendersOutcome(state: MatchState, events: SimEvent[]): void {
+  if (state.buildings.length > 0 && state.buildings.every((b) => !b.alive)) {
+    state.outcome = 'defeat';
+    events.push({ type: 'matchOver', outcome: 'defeat' });
+    return;
+  }
+  if (
+    state.camps.length > 0 &&
+    state.camps.every((c) => c.tier >= DEFENDERS.wavesToWin - 1) &&
+    state.creeps.every((c) => !c.alive)
+  ) {
+    state.outcome = 'victory';
+    events.push({ type: 'matchOver', outcome: 'victory' });
+  }
 }
 
 // ── Commands ──────────────────────────────────────────────────────────
@@ -427,6 +480,15 @@ function stepProjectiles(
         const creep = state.creeps.find((c) => c.id === p.ownerId);
         state.projectiles.splice(i, 1);
         if (creep) applyCreepDamageToHero(state, target, p.damage, creep, p.id, events);
+        continue;
+      }
+      // Buildings second, so a defender body-blocking their castle eats the
+      // fireball instead of it flying through them into the walls.
+      const building = findHitBuilding(state, p);
+      if (building) {
+        const creep = state.creeps.find((c) => c.id === p.ownerId);
+        state.projectiles.splice(i, 1);
+        if (creep) dealDamageToBuilding(state, building, creep, p.damage, events);
       }
       continue;
     }
@@ -442,6 +504,9 @@ function stepProjectiles(
 
     for (const hero of state.heroes) {
       if (hero.id === p.ownerId) continue;
+      // Allied arrows pierce through teammates (Defenders; a no-op in FFA
+      // where every hero has its own team).
+      if (hero.team === p.team) continue;
       if (!hero.alive || hero.invulnerable) continue;
       if (hero.abilities.dodge.active) continue; // dodge evades — don't mark as hit
       if (hitIds.includes(hero.id)) continue;
