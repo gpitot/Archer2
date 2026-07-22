@@ -17,6 +17,7 @@ import {
   MatchInit,
   RoomPhase,
 } from '../sim/protocol';
+import type { AiDifficulty } from '../sim/ai/AiController';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected';
 
@@ -132,6 +133,12 @@ export class NetworkClient {
 
   /** Ask the server to start. Ignored unless every player is ready. */
   startGame(): void { this._send({ type: 'startGame' }); }
+
+  /** Add an AI bot to the lobby at the given difficulty. Lobby only. */
+  addBot(difficulty: AiDifficulty): void { this._send({ type: 'addBot', difficulty }); }
+
+  /** Remove a previously added AI bot by its roster player id. Lobby only. */
+  removeBot(playerId: string): void { this._send({ type: 'removeBot', playerId }); }
 
   /**
    * Resolve once the match state is available — immediately if the welcome

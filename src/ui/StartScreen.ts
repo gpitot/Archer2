@@ -10,11 +10,19 @@ import { normalizeRoomCode } from '../core/roomCode';
 
 export type StartMode = 'create' | 'join' | 'offline';
 
+/** Maps offered in the create-room dropdown. First entry is the default. */
+const MAP_OPTIONS: readonly { value: string; label: string }[] = [
+  { value: 'pentad', label: 'Pentad (5 players)' },
+  { value: '2pv1', label: '2p v 1' },
+];
+
 export interface StartChoice {
   mode: StartMode;
   name: string;
   /** Present for 'join'; the caller generates one for 'create'. */
   roomCode?: string;
+  /** Chosen map for 'create' (from the dropdown); absent for join/offline. */
+  map?: string;
 }
 
 interface StartScreenOpts {
@@ -62,6 +70,7 @@ export class StartScreen {
   private _overlay: HTMLDivElement;
   private _panel: HTMLDivElement;
   private _nameInput!: HTMLInputElement;
+  private _mapSelect: HTMLSelectElement | null = null;
   private _error!: HTMLDivElement;
   private _resolve: ((c: StartChoice) => void) | null = null;
 
@@ -147,6 +156,25 @@ export class StartScreen {
   }
 
   private _buildDefault(): void {
+    // Map picker — only relevant when creating a room (the first joiner sets
+    // the room's map). Its value rides the 'create' choice.
+    const mapLabel = document.createElement('div');
+    mapLabel.textContent = 'Map';
+    mapLabel.style.cssText = 'color:#998866; font-size:11px; font-weight:bold; margin-bottom:4px;';
+    this._panel.appendChild(mapLabel);
+
+    const mapSelect = document.createElement('select');
+    mapSelect.style.cssText = INPUT_CSS + 'margin-bottom:12px; cursor:pointer;';
+    for (const opt of MAP_OPTIONS) {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      o.style.cssText = 'background:#1a140a; color:#ffe9b0;';
+      mapSelect.appendChild(o);
+    }
+    this._mapSelect = mapSelect;
+    this._panel.appendChild(mapSelect);
+
     const create = button('Create room', true);
     create.onclick = () => this._pick('create');
     this._panel.appendChild(create);
@@ -196,7 +224,8 @@ export class StartScreen {
       this._nameInput.focus();
       return;
     }
-    this._resolve?.({ mode, name: sanitizeName(raw), roomCode });
+    const map = mode === 'create' ? (this._mapSelect?.value ?? undefined) : undefined;
+    this._resolve?.({ mode, name: sanitizeName(raw), roomCode, map });
     this._resolve = null;
     this.close();
   }

@@ -33,6 +33,7 @@ import {
   RosterMessage, MatchStartMessage, MatchInit, LobbyPlayer, RoomPhase,
 } from '../src/sim/protocol';
 import { sanitizeName } from '../src/sim/names';
+import { AiController, AI_DIFFICULTY_PRESETS, type AiDifficulty } from '../src/sim/ai/AiController';
 
 // ── Compact navdata (auto-generated) ─────────────────────────────────
 import { NAVDATA, NavdataMap, NavdataMapName } from './navdata';
@@ -52,6 +53,17 @@ interface PlayerInfo {
   name: string;
   ready: boolean;
   team: number;
+}
+
+// ── AI bots ──────────────────────────────────────────────────────────
+// Bots have no socket: they're server-driven roster entries whose commands
+// are produced by an AiController each tick. Kept in-memory only (like the
+// match state) — a hibernated room returns to an empty lobby anyway.
+interface BotInfo {
+  playerId: string;
+  name: string;
+  team: number;
+  difficulty: AiDifficulty;
 }
 
 const TICK_RATE = 60;
@@ -87,6 +99,11 @@ export class GameRoom extends DurableObject<Env> {
   /** Events from ticks since the last snapshot broadcast. */
   private _pendingEvents: SimEvent[] = [];
   private _players = new Map<WebSocket, PlayerInfo>();
+  /** AI bots added in the lobby, keyed by bot playerId. */
+  private _bots = new Map<string, BotInfo>();
+  /** Live AiControllers for bots in a running match, keyed by bot playerId. */
+  private _botAI = new Map<string, AiController>();
+  private _nextBotId = 1;
   /** playerId → WebSocket for targeted messages. */
   private _playerSockets = new Map<string, WebSocket>();
   /** Last-broadcast serialized meta per hero, so scheduled sends can skip
@@ -150,7 +167,7 @@ export class GameRoom extends DurableObject<Env> {
     switch (msg.type) {
       case 'join': {
         if (this._players.has(ws)) return; // duplicate join on one socket
-        if (this._players.size >= MAX_PLAYERS) {
+        if (this._players.size + this._bots.size >= MAX_PLAYERS) {
           ws.close(1013, 'room full');
           return;
         }
@@ -168,13 +185,11 @@ export class GameRoom extends DurableObject<Env> {
           return;
         }
 
-        // Assign the lowest free team id (FFA = one team per player) so a
+        // Assign the lowest free team id (FFA = one team per player/bot) so a
         // leave-then-join never hands a newcomer a team that's still in use.
-        // Read it off `_players`, not `_state.heroes` — in a lobby no heroes
+        // Read it off the roster, not `_state.heroes` — in a lobby no heroes
         // exist yet.
-        const used = new Set([...this._players.values()].map((p) => p.team));
-        let team = 0;
-        while (used.has(team)) team++;
+        const team = this._lowestFreeTeam();
 
         const playerId = `p${this._nextPlayerId++}`;
         const info: PlayerInfo = {
@@ -265,6 +280,29 @@ export class GameRoom extends DurableObject<Env> {
         break;
       }
 
+      case 'addBot': {
+        // Only real players may manage bots, and only before the match starts.
+        if (!this._players.has(ws) || this._phase !== 'lobby') return;
+        if (this._players.size + this._bots.size >= MAX_PLAYERS) return;
+        const difficulty: AiDifficulty =
+          msg.difficulty in AI_DIFFICULTY_PRESETS ? msg.difficulty : 'medium';
+        const botId = `b${this._nextBotId++}`;
+        this._bots.set(botId, {
+          playerId: botId,
+          name: `Bot ${botId.slice(1)} (${difficulty})`,
+          team: this._lowestFreeTeam(),
+          difficulty,
+        });
+        this._broadcastRoster();
+        break;
+      }
+
+      case 'removeBot': {
+        if (!this._players.has(ws) || this._phase !== 'lobby') return;
+        if (this._bots.delete(msg.playerId)) this._broadcastRoster();
+        break;
+      }
+
       default:
         // Unknown message type — ignore
         break;
@@ -301,9 +339,28 @@ export class GameRoom extends DurableObject<Env> {
   // ── Lobby ─────────────────────────────────────────────────────────
 
   private _roster(): LobbyPlayer[] {
-    return [...this._players.values()]
-      .map((p) => ({ playerId: p.playerId, name: p.name, ready: p.ready, team: p.team }))
-      .sort((a, b) => a.playerId.localeCompare(b.playerId, undefined, { numeric: true }));
+    const humans: LobbyPlayer[] = [...this._players.values()].map((p) => ({
+      playerId: p.playerId, name: p.name, ready: p.ready, team: p.team,
+    }));
+    const bots: LobbyPlayer[] = [...this._bots.values()].map((b) => ({
+      playerId: b.playerId, name: b.name, team: b.team,
+      ready: true, isBot: true, difficulty: b.difficulty,
+    }));
+    return [...humans, ...bots].sort((a, b) =>
+      a.playerId.localeCompare(b.playerId, undefined, { numeric: true }));
+  }
+
+  /**
+   * Lowest team id not currently claimed by a player or a bot. FFA gives every
+   * participant its own team, so this is what keeps spawns from colliding.
+   */
+  private _lowestFreeTeam(): number {
+    const used = new Set<number>();
+    for (const p of this._players.values()) used.add(p.team);
+    for (const b of this._bots.values()) used.add(b.team);
+    let team = 0;
+    while (used.has(team)) team++;
+    return team;
   }
 
   private _broadcastRoster(exclude?: WebSocket): void {
@@ -331,6 +388,12 @@ export class GameRoom extends DurableObject<Env> {
       this._state.heroes.push(
         createHeroState(info.playerId, info.team, this._spawnPosFor(info.team)),
       );
+    }
+
+    // Spin up an AI brain per bot; the tick loop feeds their commands in.
+    this._botAI.clear();
+    for (const bot of this._bots.values()) {
+      this._botAI.set(bot.playerId, new AiController(bot.playerId, AI_DIFFICULTY_PRESETS[bot.difficulty]));
     }
 
     this._stopLobbyKeepalive();
@@ -389,6 +452,9 @@ export class GameRoom extends DurableObject<Env> {
       this._stopLobbyKeepalive();
       this._phase = 'lobby';
       this._nextPlayerId = 1;
+      this._nextBotId = 1;
+      this._bots.clear();
+      this._botAI.clear();
       this._lastMetaJson.clear();
       this._resetMatch();
     }
@@ -417,6 +483,14 @@ export class GameRoom extends DurableObject<Env> {
     // Drain pending inputs.
     const inputs = this._pendingInputs;
     this._pendingInputs = [];
+
+    // Bots produce their commands from the authoritative state, alongside the
+    // human inputs drained above — stepMatch treats them identically.
+    if (this._botAI.size > 0) {
+      for (const ai of this._botAI.values()) {
+        inputs.push(...ai.think(this._state, this._world, 1 / TICK_RATE));
+      }
+    }
 
     // Step the simulation.
     const events = stepMatch(this._state, inputs, 1 / TICK_RATE, this._world);

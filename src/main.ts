@@ -29,6 +29,16 @@ function setRoomInUrl(code: string | null): void {
   history.replaceState(null, '', query ? `?${query}` : location.pathname);
 }
 
+/**
+ * Put the chosen map in the URL so `Game.preload()` (which reads `?map=`) and
+ * the room-share link both pick it up. Used for the create flow only.
+ */
+function setMapInUrl(map: string): void {
+  const params = new URLSearchParams(location.search);
+  params.set('map', map);
+  history.replaceState(null, '', `?${params.toString()}`);
+}
+
 async function boot(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const game = new Game();
@@ -52,6 +62,9 @@ async function boot(): Promise<void> {
       ? (choice.roomCode ?? urlRoom!)
       : null;
   setRoomInUrl(roomCode);
+  // A created room's map comes from the start-screen dropdown; preload reads it
+  // off the URL, and it rides the shareable room link so joiners load it too.
+  if (choice.mode === 'create' && choice.map) setMapInUrl(choice.map);
 
   // ── Lobby (also the loading screen) ──
   const net = online ? new NetworkClient() : null;
@@ -59,10 +72,14 @@ async function boot(): Promise<void> {
     room: roomCode,
     // Nobody to wait for offline, so readying up is just an extra click.
     showReady: online,
+    // Bots run server-side, so they're only offered in online rooms.
+    showBots: online,
     cb: {
       onToggleReady: (ready) => net?.setReady(ready),
       onStart: () => net?.startGame(),
       onLeave: () => { net?.disconnect(); location.reload(); },
+      onAddBot: (difficulty) => net?.addBot(difficulty),
+      onRemoveBot: (playerId) => net?.removeBot(playerId),
     },
   });
   lobby.open();

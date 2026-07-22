@@ -27,6 +27,7 @@ import type { AbilityId } from './abilities';
 import { CreepTypeId } from './creepRules';
 import { RuneTypeId } from './runeRules';
 import { Vec2 } from './math';
+import type { AiDifficulty } from './ai/AiController';
 
 // ── Client → Server ──────────────────────────────────────────────────
 
@@ -64,12 +65,26 @@ export interface StartGameMessage {
   type: 'startGame';
 }
 
+/** Add an AI bot to the lobby at the given difficulty. Ignored mid-match. */
+export interface AddBotMessage {
+  type: 'addBot';
+  difficulty: AiDifficulty;
+}
+
+/** Remove a previously added AI bot by its player id. Ignored mid-match. */
+export interface RemoveBotMessage {
+  type: 'removeBot';
+  playerId: string;
+}
+
 export type ClientMessage =
   | JoinMessage
   | InputMessage
   | SetNameMessage
   | SetReadyMessage
-  | StartGameMessage;
+  | StartGameMessage
+  | AddBotMessage
+  | RemoveBotMessage;
 
 // ── Lobby ────────────────────────────────────────────────────────────
 
@@ -81,6 +96,10 @@ export interface LobbyPlayer {
   name: string;
   ready: boolean;
   team: number;
+  /** True for AI bots (no socket); they are always ready and server-driven. */
+  isBot?: boolean;
+  /** Present for bots — the difficulty preset the server runs them at. */
+  difficulty?: AiDifficulty;
 }
 
 // ── Wire hero representations ────────────────────────────────────────

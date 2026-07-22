@@ -9,12 +9,17 @@
  * `waitForLocalStart` stands in for the server's `matchStart`.
  */
 import type { LobbyPlayer } from '../sim/protocol';
+import type { AiDifficulty } from '../sim/ai/AiController';
 import { playerColorCss } from './colors';
 
 export interface LobbyCallbacks {
   onToggleReady: (ready: boolean) => void;
   onStart: () => void;
   onLeave: () => void;
+  /** Add an AI bot at the given difficulty (online rooms only). */
+  onAddBot?: (difficulty: AiDifficulty) => void;
+  /** Remove a bot by its roster player id (online rooms only). */
+  onRemoveBot?: (playerId: string) => void;
 }
 
 interface LobbyOpts {
@@ -22,8 +27,12 @@ interface LobbyOpts {
   room: string | null;
   /** Offline has nobody to wait for, so it hides the Ready toggle. */
   showReady: boolean;
+  /** Whether to offer the "add AI bot" control (online rooms only). */
+  showBots?: boolean;
   cb: LobbyCallbacks;
 }
+
+const DIFFICULTIES: readonly AiDifficulty[] = ['easy', 'medium', 'hard'];
 
 export class LobbyScreen {
   private _overlay: HTMLDivElement;
@@ -66,6 +75,8 @@ export class LobbyScreen {
     this._status = document.createElement('div');
     this._status.style.cssText = 'color:#998866; font-size:11px; min-height:14px; margin-bottom:8px;';
     panel.appendChild(this._status);
+
+    if (_opts.showBots) panel.appendChild(this._buildBotControl());
 
     this._readyBtn = this._button('Ready', false);
     this._readyBtn.onclick = () => {
@@ -156,13 +167,36 @@ export class LobbyScreen {
       `;
       row.appendChild(name);
 
-      const pill = document.createElement('span');
-      pill.textContent = p.ready ? '✓ Ready' : 'Waiting…';
-      pill.style.cssText = `
-        font-size: 11px; font-weight: bold;
-        color: ${p.ready ? '#66dd88' : '#887766'};
-      `;
-      row.appendChild(pill);
+      if (p.isBot) {
+        const pill = document.createElement('span');
+        pill.textContent = `Bot · ${p.difficulty ?? 'medium'}`;
+        pill.style.cssText = 'font-size:11px; font-weight:bold; color:#88aacc;';
+        row.appendChild(pill);
+
+        // Any player may drop a bot, mirroring the server (which only gates on
+        // being a real player in the lobby). Hidden when no handler is wired.
+        if (this._opts.cb.onRemoveBot) {
+          const remove = document.createElement('button');
+          remove.textContent = '✕';
+          remove.title = 'Remove bot';
+          remove.style.cssText = `
+            padding: 2px 7px; background: rgba(120,40,30,0.5);
+            border: 1px solid #aa5544; border-radius: 4px;
+            color: #ffbbaa; font-size: 12px; font-weight: bold;
+            font-family: inherit; cursor: pointer; flex-shrink: 0;
+          `;
+          remove.onclick = () => this._opts.cb.onRemoveBot?.(p.playerId);
+          row.appendChild(remove);
+        }
+      } else {
+        const pill = document.createElement('span');
+        pill.textContent = p.ready ? '✓ Ready' : 'Waiting…';
+        pill.style.cssText = `
+          font-size: 11px; font-weight: bold;
+          color: ${p.ready ? '#66dd88' : '#887766'};
+        `;
+        row.appendChild(pill);
+      }
 
       this._rows.appendChild(row);
     }
@@ -211,6 +245,35 @@ export class LobbyScreen {
     }
 
     return header;
+  }
+
+  /** A difficulty dropdown + "Add bot" button, side by side. */
+  private _buildBotControl(): HTMLDivElement {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; gap:8px; margin-bottom:8px;';
+
+    const select = document.createElement('select');
+    select.style.cssText = `
+      flex: 1; box-sizing: border-box; padding: 8px 10px;
+      background: rgba(0,0,0,0.5); border: 1px solid #886622; border-radius: 4px;
+      color: #ffe9b0; font-size: 13px; font-family: inherit; cursor: pointer;
+    `;
+    for (const d of DIFFICULTIES) {
+      const o = document.createElement('option');
+      o.value = d;
+      o.textContent = `${d[0].toUpperCase()}${d.slice(1)}`;
+      o.style.cssText = 'background:#1a140a; color:#ffe9b0;';
+      if (d === 'medium') o.selected = true;
+      select.appendChild(o);
+    }
+    row.appendChild(select);
+
+    const add = this._button('Add bot', false);
+    add.style.cssText += 'width:auto; margin-top:0; padding:8px 14px;';
+    add.onclick = () => this._opts.cb.onAddBot?.(select.value as AiDifficulty);
+    row.appendChild(add);
+
+    return row;
   }
 
   private _button(label: string, primary: boolean): HTMLButtonElement {
