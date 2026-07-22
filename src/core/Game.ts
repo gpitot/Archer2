@@ -36,7 +36,7 @@ import { DEFAULT_NAME, loadPlayerName } from './playerPrefs';
 import { SoundManager, STREAK_SOUNDS, MULTI_KILL_SOUNDS } from '../audio/SoundManager';
 
 // ── Sim layer ──
-import { HeroState, ProjectileState, WardState, BlastState, CreepState, RuneState, BuildingState, MatchState, Command, GameMode, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
+import { HeroState, ProjectileState, WardState, BlastState, CreepState, RuneState, BuildingState, MatchState, Command, GameMode, HeroInput, SimEvent, createHeroState, createMatchState, resolveCampCount } from '../sim/state';
 import { stepMatch, heroSpeed } from '../sim/stepMatch';
 import { stepStun } from '../sim/statusEffects';
 import { spawnCamps } from '../sim/stepCreeps';
@@ -512,14 +512,17 @@ export class Game {
    * Offline practice: local sim, one player plus a dummy bot (FFA), or a
    * solo castle defense with no bot (Defenders — v1 has no allied AI).
    */
-  startOfflineMatch(playerName: string, mode: GameMode = 'ffa'): void {
+  startOfflineMatch(playerName: string, mode: GameMode = 'ffa', campCount?: number): void {
     this._state.mode = mode;
     this._names = mode === 'defenders'
       ? new Map([['player', playerName]])
       : new Map([['player', playerName], ['dummy', 'Bot']]);
 
     // ── Offline mode: jungle creep camps, simulated by the local stepMatch ──
-    spawnCamps(this._state, this._world, this._mapCamps);
+    // The player can enable just the first 1–4 of the map's camps (solo games).
+    const campLimit = resolveCampCount(campCount);
+    spawnCamps(this._state, this._world,
+      campLimit !== null ? this._mapCamps?.slice(0, campLimit) : this._mapCamps);
 
     // ── Offline mode: power-up rune spots ──
     spawnRunes(this._state, this._world, this._mapRunes);

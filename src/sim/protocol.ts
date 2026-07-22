@@ -45,6 +45,11 @@ export interface JoinMessage {
    * later joiners simply adopt it (the welcome tells them which it is).
    */
   mode?: string;
+  /**
+   * How many of the map's creep camps to enable, 1–4 (all when absent or out
+   * of range — see `resolveCampCount`). First join decides, like the mode.
+   */
+  campCount?: number;
 }
 
 export interface InputMessage {

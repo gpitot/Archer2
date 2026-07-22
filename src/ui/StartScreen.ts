@@ -32,6 +32,9 @@ export interface StartChoice {
   map?: string;
   /** Chosen game mode for 'create'/'offline'; absent for join (room decides). */
   gameMode?: string;
+  /** Enabled creep camps (first 1–4 of the map's) for 'create'/'offline';
+   *  absent = all camps (and always absent for join — room decides). */
+  campCount?: number;
 }
 
 interface StartScreenOpts {
@@ -81,6 +84,7 @@ export class StartScreen {
   private _nameInput!: HTMLInputElement;
   private _mapSelect: HTMLSelectElement | null = null;
   private _modeSelect: HTMLSelectElement | null = null;
+  private _campsSelect: HTMLSelectElement | null = null;
   private _error!: HTMLDivElement;
   private _resolve: ((c: StartChoice) => void) | null = null;
 
@@ -204,6 +208,31 @@ export class StartScreen {
     this._modeSelect = modeSelect;
     this._panel.appendChild(modeSelect);
 
+    // Camp-count picker — lets the creator enable just the first 1–4 of the
+    // map's creep camps (one camp keeps a solo defenders game survivable).
+    const campsLabel = document.createElement('div');
+    campsLabel.textContent = 'Creep camps';
+    campsLabel.style.cssText = 'color:#998866; font-size:11px; font-weight:bold; margin-bottom:4px;';
+    this._panel.appendChild(campsLabel);
+
+    const campsSelect = document.createElement('select');
+    campsSelect.style.cssText = INPUT_CSS + 'margin-bottom:12px; cursor:pointer;';
+    for (const opt of [
+      { value: '', label: 'All' },
+      { value: '1', label: '1' },
+      { value: '2', label: '2' },
+      { value: '3', label: '3' },
+      { value: '4', label: '4' },
+    ]) {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      o.style.cssText = 'background:#1a140a; color:#ffe9b0;';
+      campsSelect.appendChild(o);
+    }
+    this._campsSelect = campsSelect;
+    this._panel.appendChild(campsSelect);
+
     const create = button('Create room', true);
     create.onclick = () => this._pick('create');
     this._panel.appendChild(create);
@@ -256,7 +285,9 @@ export class StartScreen {
     // The room decides map and mode for joiners; creators and offline players pick.
     const map = mode === 'join' ? undefined : (this._mapSelect?.value ?? undefined);
     const gameMode = mode === 'join' ? undefined : (this._modeSelect?.value ?? undefined);
-    this._resolve?.({ mode, name: sanitizeName(raw), roomCode, map, gameMode });
+    const campsRaw = mode === 'join' ? '' : (this._campsSelect?.value ?? '');
+    const campCount = campsRaw ? parseInt(campsRaw, 10) : undefined;
+    this._resolve?.({ mode, name: sanitizeName(raw), roomCode, map, gameMode, campCount });
     this._resolve = null;
     this.close();
   }

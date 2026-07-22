@@ -16,7 +16,7 @@
 // globals (see server/worker-configuration.d.ts) — only DurableObject is a
 // module export.
 import { DurableObject } from 'cloudflare:workers';
-import { MatchState, HeroInput, HeroState, SimEvent, ProjectileState, WardState, BlastState, AbilityRuntime, GameMode, createMatchState, createHeroState, resolveGameMode } from '../src/sim/state';
+import { MatchState, HeroInput, HeroState, SimEvent, ProjectileState, WardState, BlastState, AbilityRuntime, GameMode, createMatchState, createHeroState, resolveCampCount, resolveGameMode } from '../src/sim/state';
 import { ABILITY_ORDER, AbilityId } from '../src/sim/abilities';
 import { stepMatch } from '../src/sim/stepMatch';
 import { spawnCamps } from '../src/sim/stepCreeps';
@@ -97,6 +97,8 @@ export class GameRoom extends DurableObject<Env> {
   private _mapName: NavdataMapName = 'arena';
   /** Game mode; like the map, the first joiner of a fresh lobby sets it. */
   private _mode: GameMode = 'ffa';
+  /** Enabled creep camps (first N of the map's; null = all). First joiner sets it. */
+  private _campCount: number | null = null;
   private _state!: MatchState;
   private _tickTimer: ReturnType<typeof setInterval> | null = null;
   private _pendingInputs: HeroInput[] = [];
@@ -135,7 +137,9 @@ export class GameRoom extends DurableObject<Env> {
   /** Fresh match state for the current world — including creep camps and runes. */
   private _resetMatch(): void {
     this._state = createMatchState(this._mode);
-    spawnCamps(this._state, this._world, NAVDATA[this._mapName].camps);
+    // The creator can enable just the first N of the map's camps (solo games).
+    const camps = NAVDATA[this._mapName].camps;
+    spawnCamps(this._state, this._world, this._campCount !== null ? camps?.slice(0, this._campCount) : camps);
     spawnRunes(this._state, this._world, NAVDATA[this._mapName].runes);
     // Defenders: the castles the creeps besiege, owned by the shared team 0.
     if (this._mode === 'defenders') {
@@ -186,9 +190,11 @@ export class GameRoom extends DurableObject<Env> {
         const requestedMap: NavdataMapName =
           msg.map && msg.map in NAVDATA ? (msg.map as NavdataMapName) : 'arena';
         const requestedMode = resolveGameMode(msg.mode);
+        const requestedCamps = resolveCampCount(msg.campCount);
         if (this._phase === 'lobby' && this._players.size === 0) {
-          if (requestedMap !== this._mapName || requestedMode !== this._mode) {
+          if (requestedMap !== this._mapName || requestedMode !== this._mode || requestedCamps !== this._campCount) {
             this._mode = requestedMode;
+            this._campCount = requestedCamps;
             if (requestedMap !== this._mapName) this._buildWorld(requestedMap);
             this._resetMatch();
           }

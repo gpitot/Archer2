@@ -29,6 +29,15 @@ export function resolveGameMode(raw: string | null | undefined): GameMode {
   return raw === 'defenders' ? 'defenders' : 'ffa';
 }
 
+/**
+ * Sanitize a requested creep-camp count (the room creator can enable just the
+ * first 1–4 of the map's camps, e.g. one camp for a solo defenders game).
+ * Anything outside 1–4 — including absent — means "all of the map's camps".
+ */
+export function resolveCampCount(raw: number | null | undefined): number | null {
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= 1 && raw <= 4 ? raw : null;
+}
+
 /** 'playing' until a mode's end condition fires; the sim freezes after. */
 export type MatchOutcome = 'playing' | 'victory' | 'defeat';
 

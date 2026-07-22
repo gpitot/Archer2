@@ -49,6 +49,13 @@ function setModeInUrl(mode: string): void {
   history.replaceState(null, '', `?${params.toString()}`);
 }
 
+/** Same again for the enabled-camp count — survives the creator's reload. */
+function setCampsInUrl(count: number): void {
+  const params = new URLSearchParams(location.search);
+  params.set('camps', String(count));
+  history.replaceState(null, '', `?${params.toString()}`);
+}
+
 async function boot(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const game = new Game();
@@ -80,6 +87,10 @@ async function boot(): Promise<void> {
   // carries — the room's actual mode arrives with the welcome either way.
   const gameMode = choice.gameMode ?? params.get('mode') ?? undefined;
   if (choice.mode === 'create' && gameMode) setModeInUrl(gameMode);
+  // Enabled-camp count: dropdown choice, else the URL (creator reload). The
+  // server sanitizes (1–4, first joiner only), offline sanitizes locally.
+  const campCount = choice.campCount ?? (Number(params.get('camps')) || undefined);
+  if (choice.mode === 'create' && campCount) setCampsInUrl(campCount);
 
   // ── Lobby (also the loading screen) ──
   const net = online ? new NetworkClient() : null;
@@ -114,7 +125,7 @@ async function boot(): Promise<void> {
     net.onClosed = (_code, reason) => {
       lobby.setStatus(reason ? `Disconnected: ${reason}` : 'Disconnected from the server.');
     };
-    const welcome = await net.connect(roomCode!, choice.name, game.mapName, gameMode);
+    const welcome = await net.connect(roomCode!, choice.name, game.mapName, gameMode, campCount);
     names = new Map(welcome.roster.map((p) => [p.playerId, p.name]));
     lobby.setRoster(welcome.roster, welcome.playerId);
     // The room's actual mode is authoritative (joiners adopt it).
@@ -137,7 +148,7 @@ async function boot(): Promise<void> {
   lobby.dispose();
 
   if (net && init) game.startNetworkMatch(net, init, names);
-  else game.startOfflineMatch(choice.name, gameMode === 'defenders' ? 'defenders' : 'ffa');
+  else game.startOfflineMatch(choice.name, gameMode === 'defenders' ? 'defenders' : 'ffa', campCount);
 
   game.finish();
 }
