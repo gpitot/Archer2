@@ -201,8 +201,16 @@ export class NetworkClient {
         this._state = 'connected';
         this._phase = msg.phase;
         this._roster = msg.roster ?? [];
-        // Present only when we joined a match already in progress.
-        if (msg.init) this._matchInit = msg.init;
+        // Present only when we joined a match already in progress. There's no
+        // separate `matchStart` for a mid-match joiner, so resolve any
+        // waitForMatchStart that was registered before the welcome landed.
+        if (msg.init) {
+          this._matchInit = msg.init;
+          if (this._pendingMatchStart) {
+            this._pendingMatchStart(msg.init);
+            this._pendingMatchStart = null;
+          }
+        }
         if (this._pendingWelcome) {
           this._pendingWelcome(msg);
           this._pendingWelcome = null;

@@ -30,7 +30,7 @@ export interface NavdataMap {
     centerX: number; centerZ: number; width: number; height: number;
   };
   shopPos: NavdataPoint;
-  /** Authored placements (null → none). */
+  /** Authored creep camp placements (null → none). */
   camps: readonly CampPlacement[] | null;
   spawns: readonly NavdataPoint[] | null;
   runes: readonly RunePlacement[] | null;
@@ -504,20 +504,20 @@ export const NAVDATA = {
 
     shopPos: { x: 784.0, z: 3088.0 },
 
-    /** Authored creep camps (arena-fraction defaults baked in). */
+    /** Authored creep camp placements (null → none). */
     camps: [{"id":"camp_w","x":-1704,"z":3104,"units":["ghoul","ghoul"]},{"id":"camp_e","x":3336,"z":3104,"units":["ghoul"]},{"id":"camp_nw","x":-1704,"z":572.8,"units":["ghost"]},{"id":"camp_ne","x":3336,"z":572.8,"units":["ghoul","ghost"]}],
 
-    /** Fixed hero spawns (custom maps); null → random walkable spawns. */
+    /** Fixed hero spawns (null → random walkable spawns). */
     spawns: null,
 
-    /** Authored rune spots (arena-fraction defaults baked in). */
+    /** Authored rune spots (null → none). */
     runes: [{"x":816,"z":934.4},{"x":816,"z":5273.6}],
 
-    /** Authored fountain placements. */
-    fountains: null,
+    /** Authored fountain placements (null → none). */
+    fountains: [{"x":-984,"z":3104},{"x":2616,"z":3104}],
 
-    /** Authored shop placements. */
-    shops: null,
+    /** Authored shop placements (null → none). */
+    shops: [{"x":816,"z":3104}],
   },
   "test": {
     /** Bit-packed walkable cells, 1 bit per cell, row-major (south-to-north). */
@@ -528,7 +528,7 @@ export const NAVDATA = {
       originX: -1024,
       originZ: -1024,
       /** Base64-encoded Uint8Array of bit-packed walkable booleans. */
-      cellsBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADw////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w//7/////D/D//v////8P8P///w8A/wDw////DwD/APC/8/8PAP8A8P/z/w8A/wDw////D///D/D///8P//8P8P///w///w/w////D///D/D///gP//8P8P//+A///w/w////D///D/D///8P//8P8P///w///w/w////D///D/D///8P//8P8P///w///w/w////D///D/D///8P//8P8P///w///w/w////D///D/D///8P//8P8P///w///w/w////D///D/D///8P//8PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      cellsBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADw////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/w////////D/D///////8P8P///////w/wf/7/////D/B//v////8P8P///w8A/wDw////DwD/APAf8/8PAP8A8B/z/w8A/wDw////D///D/D///8P//8P8P///w///w/w////D///D/D///gP//8P8P//+A///w/w////D///D/D///8P//8P8P///w///w/w////D///D/D///8P//8P8P///w///w/w////D///D/D///8P//8P8P///w///w/w////D///D/D///8P//8P8P///w///w/w////D///D/D///8P//8PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     },
 
     /** Full-resolution height grid (Float32Array). */
@@ -548,20 +548,20 @@ export const NAVDATA = {
 
     shopPos: { x: 16.0, z: 16.0 },
 
-    /** Authored creep camps (arena-fraction defaults baked in). */
+    /** Authored creep camp placements (null → none). */
     camps: [{"id":"camp_w","x":-627.2,"z":0,"units":["ghoul","ghoul"]},{"id":"camp_e","x":627.2,"z":0,"units":["ghoul"]},{"id":"camp_nw","x":-627.2,"z":-627.2,"units":["ghost"]},{"id":"camp_ne","x":627.2,"z":-627.2,"units":["ghoul","ghost"]}],
 
-    /** Fixed hero spawns (custom maps); null → random walkable spawns. */
+    /** Fixed hero spawns (null → random walkable spawns). */
     spawns: null,
 
-    /** Authored rune spots (arena-fraction defaults baked in). */
+    /** Authored rune spots (null → none). */
     runes: [{"x":0,"z":-537.6},{"x":0,"z":537.6}],
 
-    /** Authored fountain placements. */
-    fountains: null,
+    /** Authored fountain placements (null → none). */
+    fountains: [{"x":-600,"z":200}],
 
-    /** Authored shop placements. */
-    shops: null,
+    /** Authored shop placements (null → none). */
+    shops: [{"x":0,"z":0}],
   },
   "1v1": {
     /** Bit-packed walkable cells, 1 bit per cell, row-major (south-to-north). */
@@ -572,7 +572,7 @@ export const NAVDATA = {
       originX: -1024,
       originZ: -1024,
       /** Base64-encoded Uint8Array of bit-packed walkable booleans. */
-      cellsBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADw//////9/DsD///////8O8P///////wvA////////C8D///////8D8P9//v///wPw/x/+////D/D/lP////8P8P/0//D//w/w////8P//D/D////w//8P8P////D/zw/w//8P8P+/D/D//w/w/78P8P//D/D//w/w//8P8P8/D/D9/wD///8PcP3/AP//Pw9w8/8A////D/D+/wD//38PcPoP8P/wfw/w/g/w//D/D/D/D/D/8H8P8P8P8P/w/w/w/w//D/D/D/D/D/8P8P8P8P8P/w/w/w/w/w//D/D/D/D/AP8P//8P8P8A/w///w/w/wD/D///D/D/AP8P//8P8P/w/w///w/w//D/D///D/D/8P8P//8P8P/w/w///wvw//D/AP//CvD/8P8A/58P8P/w/wD/lw3w//D/AP/XA/D////w/38D8P////D/fw/w////8P//APD////w//8D8P////D//wnw////8P//D/D////w//8P0P////D//wvw//8P8P//D9D//w/w//8L0P//D/D//wvw//8P8P//DED/////HwoM8P////8fyg8Q/////8f/DxD/////9/8PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      cellsBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACQ//////9/DMD//////38MwP///////wnA////////CcD///////8D8P9//v///wPw/x/+////D/D/kP////8P8P/w//D//w/w////8P//D/D////w/88P8P////D/zw/w//8P8P+fD/D//w/w/58P8P//D/D/Pw/w//8P8P8/D/D4/wD//z8PcPD/AP//Pw9w8v8A//8/D3Dw/wD//z8PcPAP8P/wPw9w/g/w//B/DvD/D/D/8H8O8P8P8P/w/w/w/w//D/D/D/D/D/8P8P8P8P8P/w/w/w/w/w//D/D/D/D/AP8P//8P8P8A/w///w/w/wD/D///D/D/AP8P//8P8P/w/w///w/w//D/D///D/D/8P8P//8P8P/w/w///wDw//D/AP//APD/8P8A/58M8P/w/wD/kwzw//D/AP+DA/D////w/w8C8P////D/fwzw////8P//APD////w//8A8P////D//wnw////8P//CfD////w//8DwP////D//wPA//8P8P//D8D//w/w//8JwP//D/D//wnA//8P8P//DAD/////HwIMMP////8PAg8Q/////8P/DxD/////8/8PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     },
 
     /** Full-resolution height grid (Float32Array). */
@@ -592,20 +592,64 @@ export const NAVDATA = {
 
     shopPos: { x: -656.0, z: -656.0 },
 
-    /** Authored creep camps (custom maps); null → arena-fraction CAMP_DEFS. */
+    /** Authored creep camp placements (null → none). */
     camps: [{"id":"camp_1","x":-409,"z":736,"units":["ghoul","ghoul","dragon"]},{"id":"camp_2","x":684,"z":-639,"units":["ghoul","ghoul","dragon"]}],
 
-    /** Fixed hero spawns (custom maps); null → random walkable spawns. */
+    /** Fixed hero spawns (null → random walkable spawns). */
     spawns: [{"x":-43,"z":-863},{"x":11,"z":832}],
 
-    /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
+    /** Authored rune spots (null → none). */
     runes: [{"x":-766,"z":-175},{"x":677,"z":727}],
 
-    /** Authored fountain placements (custom maps); null → built-in defaults. */
+    /** Authored fountain placements (null → none). */
     fountains: null,
 
-    /** Authored shop placements (custom maps); null → arena-centre default. */
+    /** Authored shop placements (null → none). */
     shops: [{"x":-666,"z":-662},{"x":613,"z":231}],
+  },
+  "2pv1": {
+    /** Bit-packed walkable cells, 1 bit per cell, row-major (south-to-north). */
+    navGrid: {
+      width: 80,
+      height: 80,
+      cellSize: 32,
+      originX: -1280,
+      originZ: -1280,
+      /** Base64-encoded Uint8Array of bit-packed walkable booleans. */
+      cellsBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPD//////////w/w//////////8P8P//////////D/D//////////w/w//////////8P8P//////////D/D//////////w/w//////////8P8P//////////D/D//////////w/w////////+f8P8P/P//////n/D/D/j//////w/w/w/4f/////8P8P8P/D/////+P/D/D/4//////j/w/w//D/////g/8P8D/4/////w//D/An+P////8/+Q/wAf7/////P+AP8In////////gD/DD////////8w/w8/////////8P8P//////////D/D///8AAP///w/w////AAD///8P8P///wAA////D/D///8AAP///w/w///w/w/w//8P8P//8P8P8P//D/D///D/D/D//w/w///w/w/w//8P8P//8P//8P//D/D///D///D//w/w///w///w//8P8P//8P//8P//D/D///D///D//w/w///w///w//8P8P//8P//8P//D/D///D///D//w/w//8A///w//8P8P//AP//8P//D/D//wD///D//w/w//8A///w//8P8P//D/D/////D/D//w/w/////w/w//8P8P////8P8P//D/D/////D/D///8A/////w/w////AP////8P8P///wD////zD/D///8A////8A/w////////P/gP8P///////z//D/D///////8f/w/w////////n/8P8IP//////4//D/AD+P////+P/w/wf/j/////z/8P8P/h/////8f/D/D/wf/////j/w/w/wP/////8/8P8P8n//////P/D/D/D//////x/w/w/w//////+P8P8P8f//////j/D/D/H//////5/w/w////////8f8P8P////////H/D/D////////4/w/w////////+P8P8P//////////DwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    },
+
+    /** Full-resolution height grid (Float32Array). */
+    heightGrid: {
+      width: 21,
+      height: 21,
+      /** Base64-encoded Float32Array of world-space elevations. */
+      heightsBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAQwAAAEMAAABDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAQwAAAEMAAABDAAAAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAQwAAAEMAAABDAAAAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAQwAAAEMAAABDAAAAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDAAAAQwAAAEMAAABDAAAAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQwAAAEMAAABDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    },
+
+    /** Solid doodad AABBs (projectile collision). */
+    obstacles: [
+
+    ],
+
+    arena: {"minX":-1152,"minZ":-1152,"maxX":1152,"maxZ":1152,"centerX":0,"centerZ":0,"width":2304,"height":2304},
+
+    shopPos: { x: 912.0, z: -912.0 },
+
+    /** Authored creep camp placements (null → none). */
+    camps: [{"id":"camp_1","x":839,"z":761,"units":["ghoul","ghoul"]},{"id":"camp_2","x":-945,"z":-970,"units":["ghoul","ghoul"]}],
+
+    /** Fixed hero spawns (null → random walkable spawns). */
+    spawns: [{"x":-53,"z":811},{"x":-238,"z":-1007}],
+
+    /** Authored rune spots (null → none). */
+    runes: null,
+
+    /** Authored fountain placements (null → none). */
+    fountains: null,
+
+    /** Authored shop placements (null → none). */
+    shops: [{"x":919,"z":-907},{"x":-958,"z":707}],
   },
   "glade": {
     /** Bit-packed walkable cells, 1 bit per cell, row-major (south-to-north). */
@@ -616,7 +660,7 @@ export const NAVDATA = {
       originX: -1536,
       originZ: -1536,
       /** Base64-encoded Uint8Array of bit-packed walkable booleans. */
-      cellsBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P//f/z///////8P8P//f/z///////8P8P//f/z/////+f8P8P//////////+f8P8P////////////8P8P////////////8P8P////////+f//8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8O////////////8P8P////////////8P8P////////////8P8P////////////8P8PP///////////8P8PP///////////8P8P////////////8P8P////////////8P8M////////////8P8M////////P///8P8P////////P///8P8P////////P///8P8PP///////////8P8PP///////////8P8P////////////8P8P////////////8P8Of///////////8P8Of///////////8P8P///////w8A/wAA8P///////w8A/wAA8P///////w8A/wAA8P///////w8A/wAA8P///////w////8P8P///////w////8P8P/////P/w////8P8P/////P/w////8P8P///////w////8P8P/////z+Q////8P8P/////z/w////8P8P////8//w////8P8P////8//w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      cellsBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P//f/z///////8P8P//f/z/////+f8P8P//f/z/////+f8P8P//////////+f8P8P////////////8P8P////////+f//8P8P////////+f//8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8P////////////8P8M////////////8P8M////////////8P8P////////////8P8P////////////8P8PP///////////8P8PP///////////8P8P////////////8P8P////////////8P8M////////////8P8M////////P///8P8P////////P///8P8P////////P///8P8PP///////////8P8PP///////////8P8P////////////8P8P////////////8P8Of///////////8P8Of///////////8P8P///////w8A/wAA8P///////w8A/wAA8P///////w8A/wAA8P///////w8A/wAA8P///////w////8P8P///////w////8P8P/////P/w////8P8P/////P/w////8P8P///////w////8P8P/////z+Q////8P8P/////z/w////8P8P////8//w////8P8P////8//w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8P8P///////w////8PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     },
 
     /** Full-resolution height grid (Float32Array). */
@@ -637,20 +681,73 @@ export const NAVDATA = {
 
     shopPos: { x: 16.0, z: 16.0 },
 
-    /** Authored creep camps (custom maps); null → arena-fraction CAMP_DEFS. */
+    /** Authored creep camp placements (null → none). */
     camps: [{"id":"camp_1","x":-900,"z":-900,"units":["dragon"]},{"id":"camp_2","x":1050,"z":150,"units":["ghoul","ghoul"]},{"id":"camp_3","x":1000,"z":-1000,"units":["ghoul","dragon"]}],
 
-    /** Fixed hero spawns (custom maps); null → random walkable spawns. */
+    /** Fixed hero spawns (null → random walkable spawns). */
     spawns: [{"x":-600,"z":1200},{"x":600,"z":1200}],
 
-    /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
+    /** Authored rune spots (null → none). */
     runes: null,
 
-    /** Authored fountain placements (custom maps); null → built-in defaults. */
+    /** Authored fountain placements (null → none). */
     fountains: null,
 
-    /** Authored shop placements (custom maps); null → arena-centre default. */
+    /** Authored shop placements (null → none). */
     shops: null,
+  },
+  "pentad": {
+    /** Bit-packed walkable cells, 1 bit per cell, row-major (south-to-north). */
+    navGrid: {
+      width: 128,
+      height: 128,
+      cellSize: 32,
+      originX: -2048,
+      originZ: -2048,
+      /** Base64-encoded Uint8Array of bit-packed walkable booleans. */
+      cellsBase64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPD/////DwAAAADw/////w/w/////w8AAAAA8P////8P8P////8PAAAAAPD/////D/D/////DwAAAADw/////w/w////DwDneZ7nAPD///8P8P///w8A5///5wDw////D/D///8PAP////8A8P///w/w////DwD/////APD///8P8P//DwD8/////z8A8P//D/D//w8A/P////8/APD//w/w//8PAP///////wDw//8P8P//DwD///////8A8P//D/D//wDn////////5wD//w/w//8A//////////8A//8P8P//AP//////////AP//D/D//wD//////////wD//w/w/w/w//////////8P8P8P8P8P8P//////////D/D/D/D/D/D//////////w/w/w/w/w/w//////////8P8P8P8P8A/////////////wD/D/D/AP////////////8A/w/w/wD//8//////8///AP8P8P8A///P//////P//wD/D/AP8P8PAOD//wcA8P8P8A/wD/D/DwDg//8HAPD/D/AP8A/w/w8A4P//BwDw/w/wD/AP8P8PAPD//w8A8P8P8A/wD///D//w//8P//D///AP8A///wn/8M/zD/+Q///wD/AP//8J//DP8w//kP//8A/wD/7/D//w//8P//D/f/AP8AD+/w8P8P//D/Dw/38AD/AA//8PD/D//w/w8P//AA/wAP//Dw/w//8P8PD//wAP8AD//w8P8P//D/Dw//8AD/DA//8DAP////8AwP//Aw/wwP//AwD/////AMD//wMP8PD//wMA/////wDA//8PD/Dw//8PAP////8A8P//Dw8A8P///////////////w8AAPD///////////////8PAADw////////////////DwAA8P///////////////w8AAP///////w/w////////AAD///////8P8P///////wAA////////D/D///////8AAPz//8///w/w///z//8/AAD8///P////////8///PwAA//////////////////8AAP//////////////////AAD//////////////////wAA//////8A//8A//////8AAP7///P/AP//AP/P//9/AAD+///z/wD//wD/z///fwAA//////8A//8A//////8AAP//////////////////AAD//////////////////wAA//////////////////8AAP7///////////////9/AAD+/+P//////////8f/fwAA///j///////////H//8AAP//4///////////x///AAD//////////////////wAA//8AAP///////wAA//8AAP7/AAD///////8AAP9/AAD+HwAA////////AAD4fwAA/x8AAP///////wAA+P8AAP//8A//D/AP8P/wD///AAD///AP/w/wD/D/8A///wAA///wD/8P8A/w//AP//8AAPz/8A//D/AP8P/wD/8/AAD8//AA////////AA//PwAA///wAP///////wAP//8AAP//8AD///////8AD///AAD///AA////////AA///wAA8P8A8P///////w8A/w8AAPD/APD///////8PAP8PAADw/wDw////////DwD/DwAA8P8A8P///////w8A/w8A8PD///j///////8f//8PD/Dw///45//////nH///Dw/wwP///+f/////5////wMP8MD///////////////8DD/AA////////////////AA/wAP/////8//8//////wAP8AD//////P//P/////8AD/AA/v////////////9/AA/wD/7/////AAD/////f/AP8A///////wAA///////wD/AP//////8AAP//////8A/wD///////AAD///////AP8A/w//////AP/////w/wD/AP8P/////wD/////8P8A/wD/D///+P8A/x////D/AP8A/w////j/AP8f///w/wD/D/AP///48AAPH///8A/w/w/wD/////AAD/////AP8P8P8A/////wAA/////wD/D/D/AP////8AAP////8A/w/w/w/w////DDD///8P8P8P8P8P8P///www////D/D/D/D/D/D///8MMP///w/w/w/w/w/w////D/D///8P8P8P8P//AP//////////AP//D/D//wD//////////wD//w/w//8A//////////8A//8P8P//AOf////////nAP//D/D//w8A////////APD//w/w//8PAP///////wDw//8P8P//DwD8/////z8A8P//D/D//w8A/P////8/APD//w/w////DwD/////APD///8P8P///w8A/////wDw////D/D///8PAOf//+cA8P///w/w////DwDneZ7nAPD///8P8P////8PAAAAAPD/////D/D/////DwAAAADw/////w/w/////w8AAAAA8P////8P8P////8PAAAAAPD/////DwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    },
+
+    /** Full-resolution height grid (Float32Array). */
+    heightGrid: {
+      width: 33,
+      height: 33,
+      /** Base64-encoded Float32Array of world-space elevations. */
+      heightsBase64: "AACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAADIwQAAyMEAAMjBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADIwQAAgMIAAMjBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADIwQAAyMEAAMjBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDAAAAQwAAAEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDAAAAQwAAAEMAAAAAAADIwQAAyMEAAMjBAAAAAAAAAAAAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQwAAAEMAAMjBAADIwQAAyMEAAMjBAAAAAAAAAAAAAAAAAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADIwQAAyMEAAAAAAAAAAAAAAAAAAAAAAACAQwAAgEMAAIBDAACAQwAAgEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgEMAAIBDAACAQwAAgEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQwAAAEMAAABDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgEMAAIBDAACAQwAAgEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDAAAAQwAAAEMAAABDAAAAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgEMAAIBDAACAQwAAgEMAAAAAAAAAAAAAAAAAAMjBAADIwQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAQwAAAEMAAABDAAAAQwAAAEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgEMAAIBDAACAQwAAgEMAAAAAAAAAAAAAyMEAAMjBAADIwQAAyMEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAQwAAAEMAAABDAAAAQwAAAEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgEMAAIBDAACAQwAAgEMAAAAAAAAAAAAAAAAAAMjBAADIwQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAQwAAAEMAAABDAAAAQwAAAEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgEMAAIBDAACAQwAAgEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAQwAAAAAAAAAAAAAAAAAAAAAAAABDAAAAQwAAAEMAAABDAAAAQwAAAAAAAAAAAAAAAAAAAAAAAABDAAAAQwAAAEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgEMAAIBDAACAQwAAgEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQwAAAEMAAABDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDAAAAQwAAAEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgEMAAIBDAACAQwAAgEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEMAAABDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQwAAAEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgEMAAIBDAACAQwAAgEMAAIBDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADIwQAAyMEAAAAAAAAAAAAAAAAAAAAAAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMjBAADIwQAAyMEAAMjBAAAAAAAAAAAAAAAAAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADIwQAAyMEAAMjBAAAAAAAAAAAAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQwAAAEMAAABDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADIwQAAyMEAAMjBAAAAQwAAAEMAAABDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADIwQAAgMIAAMjBAAAAAAAAAEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAADIwQAAyMEAAMjBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBDAACAQwAAgEMAAIBD",
+    },
+
+    /** Solid doodad AABBs (projectile collision). */
+    obstacles: [
+      { minX: -369.0, minZ: -1178.0, maxX: -281.0, maxZ: -1090.0 },
+      { minX: 281.0, minZ: -1178.0, maxX: 369.0, maxZ: -1090.0 },
+      { minX: 934.0, minZ: -704.0, maxX: 1022.0, maxZ: -616.0 },
+      { minX: 1135.0, minZ: -85.0, maxX: 1223.0, maxZ: 3.0 },
+      { minX: 886.0, minZ: 682.0, maxX: 974.0, maxZ: 770.0 },
+      { minX: 360.0, minZ: 1065.0, maxX: 448.0, maxZ: 1153.0 },
+      { minX: -448.0, minZ: 1065.0, maxX: -360.0, maxZ: 1153.0 },
+      { minX: -974.0, minZ: 682.0, maxX: -886.0, maxZ: 770.0 },
+      { minX: -1223.0, minZ: -85.0, maxX: -1135.0, maxZ: 3.0 },
+      { minX: -1022.0, minZ: -704.0, maxX: -934.0, maxZ: -616.0 }
+    ],
+
+    arena: {"minX":-1920,"minZ":-1920,"maxX":1920,"maxZ":1920,"centerX":0,"centerZ":0,"width":3840,"height":3840},
+
+    shopPos: { x: 16.0, z: -1712.0 },
+
+    /** Authored creep camp placements (null → none). */
+    camps: [{"id":"camp_1","x":0,"z":0,"units":["orc","orc","dino","dragon"]},{"id":"camp_2","x":0,"z":-700,"units":["ghoul","ghoul","ghoul"]},{"id":"camp_3","x":666,"z":-216,"units":["ghoul","ghoul","ghoul"]},{"id":"camp_4","x":411,"z":566,"units":["ghoul","ghoul","ghoul"]},{"id":"camp_5","x":-411,"z":566,"units":["ghoul","ghoul","ghoul"]},{"id":"camp_6","x":-666,"z":-216,"units":["ghoul","ghoul","ghoul"]},{"id":"camp_7","x":676,"z":-930,"units":["cactoro","cactoro","ghost"]},{"id":"camp_8","x":1094,"z":355,"units":["cactoro","cactoro","ghost"]},{"id":"camp_9","x":0,"z":1150,"units":["cactoro","cactoro","ghost"]},{"id":"camp_10","x":-1094,"z":355,"units":["cactoro","cactoro","ghost"]},{"id":"camp_11","x":-676,"z":-930,"units":["cactoro","cactoro","ghost"]}],
+
+    /** Fixed hero spawns (null → random walkable spawns). */
+    spawns: [{"x":0,"z":-1500},{"x":1427,"z":-464},{"x":882,"z":1214},{"x":-882,"z":1214},{"x":-1427,"z":-464}],
+
+    /** Authored rune spots (null → none). */
+    runes: [{"x":417,"z":-1284},{"x":1350,"z":0},{"x":417,"z":1284},{"x":-1092,"z":794},{"x":-1092,"z":-794}],
+
+    /** Authored fountain placements (null → none). */
+    fountains: [{"x":999,"z":-1375},{"x":1617,"z":525},{"x":0,"z":1700},{"x":-1617,"z":525},{"x":-999,"z":-1375}],
+
+    /** Authored shop placements (null → none). */
+    shops: [{"x":0,"z":-1700},{"x":1617,"z":-525},{"x":999,"z":1375},{"x":-999,"z":1375},{"x":-1617,"z":-525}],
   },
   "perf": {
     /** Bit-packed walkable cells, 1 bit per cell, row-major (south-to-north). */
@@ -681,19 +778,19 @@ export const NAVDATA = {
 
     shopPos: { x: 16.0, z: 16.0 },
 
-    /** Authored creep camps (custom maps); null → arena-fraction CAMP_DEFS. */
+    /** Authored creep camp placements (null → none). */
     camps: [{"id":"camp_1","x":-658,"z":-400,"units":["ghoul","ghoul"]},{"id":"camp_2","x":-621,"z":-19,"units":["ghoul","ghoul"]},{"id":"camp_3","x":-485,"z":177,"units":["ghoul","ghoul"]},{"id":"camp_4","x":-21,"z":246,"units":["ghoul","ghoul"]},{"id":"camp_5","x":237,"z":54,"units":["ghoul","ghoul"]},{"id":"camp_6","x":205,"z":-412,"units":["ghoul","ghoul"]},{"id":"camp_7","x":49,"z":-549,"units":["ghoul","ghoul"]},{"id":"camp_8","x":-228,"z":-549,"units":["ghoul","ghoul"]}],
 
-    /** Fixed hero spawns (custom maps); null → random walkable spawns. */
+    /** Fixed hero spawns (null → random walkable spawns). */
     spawns: [{"x":-471,"z":-282},{"x":-447,"z":-16},{"x":-71,"z":-17},{"x":-76,"z":-336}],
 
-    /** Authored rune spots (custom maps); null → arena-fraction RUNE_SPOT_DEFS. */
+    /** Authored rune spots (null → none). */
     runes: null,
 
-    /** Authored fountain placements (custom maps); null → built-in defaults. */
+    /** Authored fountain placements (null → none). */
     fountains: null,
 
-    /** Authored shop placements (custom maps); null → arena-centre default. */
+    /** Authored shop placements (null → none). */
     shops: null,
   }
 } as const satisfies Record<string, NavdataMap>;

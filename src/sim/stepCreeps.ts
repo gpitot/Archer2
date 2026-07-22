@@ -189,7 +189,7 @@ export function stepCreeps(
     // a full camp never scans on the same tick. A leashing creep won't
     // re-aggro until it's home again (prevents oscillation at the leash edge).
     if (creep.aggroTargetId === null && !creep.leashing && state.tick % CREEP.aggroScanEvery === i % CREEP.aggroScanEvery) {
-      const target = closestHeroInRange(state, creep.pos, def.aggroRange);
+      const target = closestHeroInRange(state, creep.pos, def.aggroRange, world);
       if (target) {
         creep.aggroTargetId = target.id;
         creep.lastActiveTick = state.tick;
@@ -282,21 +282,33 @@ function stepCamps(state: MatchState, dt: number, world: SimWorld, events: SimEv
   }
 }
 
-/** Closest alive, non-invulnerable, non-invisible hero within `range`, or null. */
-function closestHeroInRange(state: MatchState, pos: V.Vec2, range: number): HeroState | null {
+/**
+ * Closest alive, non-invulnerable, non-invisible hero within `range` that the
+ * creep can actually see, or null. Sight uses the nav grid's line of sight, so
+ * a hero behind a cliff, a tree line, or a building draws no aggro even when
+ * well inside the radius — creeps only wake up for heroes they can look at.
+ * Candidates are checked nearest-first so the LOS march runs at most once per
+ * hero and stops as soon as a visible one is found.
+ */
+function closestHeroInRange(
+  state: MatchState,
+  pos: V.Vec2,
+  range: number,
+  world: SimWorld,
+): HeroState | null {
   const r2 = range * range;
-  let best: HeroState | null = null;
-  let bestD2 = Infinity;
+  const candidates: { hero: HeroState; d2: number }[] = [];
   for (const hero of state.heroes) {
     if (!hero.alive || hero.invulnerable) continue;
     if (hero.invisTimer > 0) continue; // invisible heroes draw no aggro
     const d2 = V.distanceSq(pos, hero.pos);
-    if (d2 < r2 && d2 < bestD2) {
-      best = hero;
-      bestD2 = d2;
-    }
+    if (d2 < r2) candidates.push({ hero, d2 });
   }
-  return best;
+  candidates.sort((a, b) => a.d2 - b.d2);
+  for (const { hero } of candidates) {
+    if (world.navGrid.hasLineOfSight(pos.x, pos.z, hero.pos.x, hero.pos.z)) return hero;
+  }
+  return null;
 }
 
 /**
