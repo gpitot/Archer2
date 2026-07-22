@@ -22,9 +22,10 @@
  *    economy, progression, inventory — which change rarely.
  * Values are quantized server-side before serialization.
  */
-import { AbilityRuntime, Command, Inventory, ProjectileState, WardState, BlastState, SimEvent } from './state';
+import { AbilityRuntime, Command, GameMode, Inventory, ProjectileState, WardState, BlastState, SimEvent } from './state';
 import type { AbilityId } from './abilities';
 import { CreepTypeId } from './creepRules';
+import { BuildingTypeId } from './buildingRules';
 import { RuneTypeId } from './runeRules';
 import { Vec2 } from './math';
 import type { AiDifficulty } from './ai/AiController';
@@ -39,6 +40,16 @@ export interface JoinMessage {
    * decides the room's map; later joins with a different map are rejected.
    */
   map?: string;
+  /**
+   * Game mode ('ffa' when absent). The first join decides the room's mode;
+   * later joiners simply adopt it (the welcome tells them which it is).
+   */
+  mode?: string;
+  /**
+   * How many of the map's creep camps to enable, 1–4 (all when absent or out
+   * of range — see `resolveCampCount`). First join decides, like the mode.
+   */
+  campCount?: number;
 }
 
 export interface InputMessage {
@@ -203,6 +214,28 @@ export interface CreepMeta {
   spawnPos: Vec2;
 }
 
+// ── Wire building representations ────────────────────────────────────
+
+/**
+ * Building registry entry, sent once in the welcome. Buildings never move;
+ * per-tick hp rides `SnapshotBuilding`, and razing is event-carried
+ * (`buildingKill`).
+ */
+export interface BuildingMeta {
+  id: string;
+  type: BuildingTypeId;
+  team: number;
+  pos: Vec2;
+  hp: number;
+  alive: boolean;
+}
+
+/** Per-tick building fields — hp only (0 = razed). */
+export interface SnapshotBuilding {
+  id: string;
+  hp: number;
+}
+
 // ── Wire rune representations ──────────────────────────────────
 
 /**
@@ -229,14 +262,20 @@ export interface RuneMeta {
 export interface MatchInit {
   /** Map this room is running. */
   map: string;
+  /** Game mode this room is running ('ffa' when absent — older servers). */
+  mode?: GameMode;
   /** Initial full state so the client can start rendering immediately. */
   snapshot: Snapshot;
   /** Cold fields for every hero in the snapshot. */
   meta: HeroMeta[];
   /** Cold registry for every creep in the match. */
   creepMeta: CreepMeta[];
+  /** Registry for every building in the match (Defenders castles). */
+  buildingMeta?: BuildingMeta[];
   /** Registry for every rune spot in the match. */
   runeMeta: RuneMeta[];
+  /** Present iff the match already ended (late joiner after `matchOver`). */
+  outcome?: 'victory' | 'defeat';
 }
 
 export interface WelcomeMessage {
@@ -248,6 +287,8 @@ export interface WelcomeMessage {
   snapshotRate: number;
   /** Map this room is running. */
   map?: string;
+  /** Game mode this room is running ('ffa' when absent). */
+  mode?: GameMode;
   /** Which phase the room is in at the moment we joined. */
   phase: RoomPhase;
   /** Everyone currently in the room, including us. */
@@ -285,6 +326,11 @@ export interface SnapshotMessage {
   blasts: BlastState[];
   /** Active creeps only — idle/dead creeps are omitted (see SnapshotCreep). */
   creeps: SnapshotCreep[];
+  /** Buildings' current hp (absent when the match has none). */
+  buildings?: SnapshotBuilding[];
+  /** Defenders only: current wave number (1-based; camps have no client-side
+   *  tier state, so the HUD counter rides the wire). */
+  wave?: number;
   /** Sim events since the previous snapshot, if any (piggybacked to save a WS frame). */
   events?: SimEvent[];
 }
@@ -311,6 +357,10 @@ export interface Snapshot {
   wards: WardState[];
   blasts: BlastState[];
   creeps: SnapshotCreep[];
+  /** Buildings' current hp (absent when the match has none). */
+  buildings?: SnapshotBuilding[];
+  /** Defenders only: current wave number (see SnapshotMessage.wave). */
+  wave?: number;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────

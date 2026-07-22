@@ -40,6 +40,8 @@ export class LobbyScreen {
   private _status: HTMLDivElement;
   private _readyBtn: HTMLButtonElement;
   private _startBtn: HTMLButtonElement;
+  private _botRow: HTMLDivElement | null = null;
+  private _modeLine: HTMLDivElement;
   private _visible = false;
   private _loaded = false;
   private _ready = false;
@@ -68,6 +70,11 @@ export class LobbyScreen {
 
     panel.appendChild(this._buildHeader());
 
+    // Mode line — filled via setMode once the room's mode is known.
+    this._modeLine = document.createElement('div');
+    this._modeLine.style.cssText = 'color:#cc9944; font-size:12px; font-weight:bold; min-height:0;';
+    panel.appendChild(this._modeLine);
+
     this._rows = document.createElement('div');
     this._rows.style.cssText = 'margin: 12px 0; min-height: 40px;';
     panel.appendChild(this._rows);
@@ -76,7 +83,10 @@ export class LobbyScreen {
     this._status.style.cssText = 'color:#998866; font-size:11px; min-height:14px; margin-bottom:8px;';
     panel.appendChild(this._status);
 
-    if (_opts.showBots) panel.appendChild(this._buildBotControl());
+    if (_opts.showBots) {
+      this._botRow = this._buildBotControl();
+      panel.appendChild(this._botRow);
+    }
 
     this._readyBtn = this._button('Ready', false);
     this._readyBtn.onclick = () => {
@@ -124,6 +134,16 @@ export class LobbyScreen {
   /** Free-text line under the roster: loading, errors, disconnects. */
   setStatus(text: string): void {
     this._status.textContent = text;
+  }
+
+  /**
+   * Show which game mode the room runs, once known (creator: immediately;
+   * joiner: from the welcome). Defenders also hides the bot control — the
+   * server rejects bots there (the AI only knows how to hunt heroes).
+   */
+  setMode(mode: string): void {
+    this._modeLine.textContent = mode === 'defenders' ? 'Defenders — defend your castle together' : '';
+    if (this._botRow) this._botRow.style.display = mode === 'defenders' ? 'none' : 'flex';
   }
 
   /** The local world finished building — Ready becomes available. */

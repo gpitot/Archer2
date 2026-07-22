@@ -128,6 +128,7 @@ function main() {
         custom.arena, custom.obstacles, custom.camps, custom.spawns, custom.runes,
         custom.fountains.map((f) => ({ x: f.pos.x, z: f.pos.z })),
         custom.shops.map((s) => ({ x: s.x, z: s.z })),
+        custom.castles.map((c) => ({ x: c.x, z: c.z })),
       ));
     }
   }
@@ -170,6 +171,8 @@ export interface NavdataMap {
   runes: readonly RunePlacement[] | null;
   fountains: readonly NavdataPoint[] | null;
   shops: readonly NavdataPoint[] | null;
+  /** Authored castle placements — Defenders objectives (null → none). */
+  castles: readonly NavdataPoint[] | null;
 }
 
 export const NAVDATA = {
@@ -198,6 +201,7 @@ function buildEntry(
   runes: RunePlacement[] | null = null,
   fountains: { x: number; z: number }[] | null = null,
   shops: { x: number; z: number }[] | null = null,
+  castles: { x: number; z: number }[] | null = null,
 ): string {
   const tilesH = terrain.height - 1;
   const bounds = { minX: terrain.offsetX, minZ: -(terrain.offsetY + tilesH * 128) };
@@ -275,6 +279,9 @@ ${obsLines.join(',\n')}
 
     /** Authored shop placements (null → none). */
     shops: ${shops && shops.length > 0 ? JSON.stringify(shops.map((s) => ({ x: round1(s.x), z: round1(s.z) }))) : 'null'},
+
+    /** Authored castle placements — Defenders objectives (null → none). */
+    castles: ${castles && castles.length > 0 ? JSON.stringify(castles.map((c) => ({ x: round1(c.x), z: round1(c.z) }))) : 'null'},
   }`;
 }
 

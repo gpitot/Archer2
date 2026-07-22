@@ -13,6 +13,9 @@ const KILL_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13
 // ── Skull (deaths) ──
 const DEATH_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ff7766" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="10" r="1"/><circle cx="15" cy="10" r="1"/><path d="M12 3a7 7 0 0 0-7 7c0 2.5 1 4 2 5h10c1-1 2-2.5 2-5a7 7 0 0 0-7-7z"/><path d="M9 16v3h6v-3"/><line x1="8" y1="21" x2="16" y2="21"/></svg>`;
 
+// ── Banner (Defenders wave counter; purple to match the castle marker) ──
+const WAVE_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#aa88ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>`;
+
 // ── Coin (gold) ──
 const GOLD_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#ffcc44" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 7v10"/><path d="M15 9.5c0-1-1.3-2-3-2s-3 1-3 2 1 1.8 3 2.3 3 1.3 3 2.2c0 1-1.3 2-3 2s-3-1-3-2"/></svg>`;
 
@@ -40,6 +43,9 @@ export class KDDisplay {
   private _killsLabel: HTMLSpanElement;
   private _deathsLabel: HTMLSpanElement;
   private _goldLabel: HTMLSpanElement;
+  private _waveGroup: HTMLDivElement;
+  private _waveDivider: HTMLDivElement;
+  private _waveLabel: HTMLSpanElement;
   private _lastFrameTime = 0;
   private _fpsSmoothed = 60;
 
@@ -61,6 +67,31 @@ export class KDDisplay {
       padding: 5px 10px;
       font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
     `;
+
+    // ── Section 0: Defenders wave counter (hidden outside that mode) ──
+    this._waveGroup = document.createElement('div');
+    this._waveGroup.style.cssText = 'display: none; align-items: center; gap: 4px;';
+    const waveIcon = document.createElement('span');
+    waveIcon.innerHTML = WAVE_ICON;
+    waveIcon.style.cssText = 'display: flex; align-items: center;';
+
+    this._waveLabel = document.createElement('span');
+    this._waveLabel.style.cssText = `
+      font-size: 14px;
+      font-weight: 700;
+      color: #aa88ff;
+      font-variant-numeric: tabular-nums;
+      min-width: 10px;
+      text-align: center;
+    `;
+    this._waveLabel.textContent = '1/1';
+    this._waveGroup.appendChild(waveIcon);
+    this._waveGroup.appendChild(this._waveLabel);
+    this.el.appendChild(this._waveGroup);
+
+    this._waveDivider = makeDivider();
+    this._waveDivider.style.display = 'none';
+    this.el.appendChild(this._waveDivider);
 
     // ── Section 1: kills / deaths ──
     const killGroup = document.createElement('div');
@@ -179,6 +210,13 @@ export class KDDisplay {
     this.el.appendChild(fpsGroup);
 
     document.body.appendChild(this.el);
+  }
+
+  /** Defenders only: reveal the leftmost section and show "wave/total". */
+  setWave(current: number, total: number): void {
+    this._waveGroup.style.display = 'flex';
+    this._waveDivider.style.display = 'block';
+    this._waveLabel.textContent = `${current}/${total}`;
   }
 
   update(kills: number, deaths: number, gold: number, gameTimeSeconds: number): void {

@@ -8,6 +8,7 @@ import type { NavGrid } from '../navigation/NavGrid';
 import type { CustomMap } from '../world/custom/buildCustomMap';
 import type { MapSource } from '../world/custom/mapSource';
 import { CREEP_TYPES } from '../sim/creepRules';
+import { BUILDING_TYPES } from '../sim/buildingRules';
 import { RUNE } from '../sim/runeRules';
 import { TILE_SIZE } from '../world/wc3/W3EParser';
 
@@ -159,6 +160,31 @@ export class Overlays {
       this._markers.add(ring);
     }
 
+    // Castle placements: stone-keep stand-in + body-radius ring.
+    for (const c of src.castles) {
+      const y = heightAt(c.x, c.z);
+      const radius = BUILDING_TYPES.castle.bodyRadius;
+      const keep = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius * 0.4, radius * 0.5, 90, 10),
+        new THREE.MeshBasicMaterial({ color: 0xaa88ff, transparent: true, opacity: 0.7 }),
+      );
+      keep.position.set(c.x, y + 45, c.z);
+      this._markers.add(keep);
+      const roof = new THREE.Mesh(
+        new THREE.ConeGeometry(radius * 0.5, 40, 10),
+        new THREE.MeshBasicMaterial({ color: 0x8866dd, transparent: true, opacity: 0.7 }),
+      );
+      roof.position.set(c.x, y + 110, c.z);
+      this._markers.add(roof);
+
+      const ring = new THREE.LineLoop(
+        circleGeometry(radius, 40),
+        new THREE.LineBasicMaterial({ color: 0xaa88ff, transparent: true, opacity: 0.6 }),
+      );
+      ring.position.set(c.x, y + 2, c.z);
+      this._markers.add(ring);
+    }
+
     // Shop placements: gold pillar stand-in + interact-radius ring.
     for (const s of src.shops) {
       const y = heightAt(s.x, s.z);
@@ -222,7 +248,7 @@ export class Overlays {
   // ── Placement ghost ───────────────────────────────────────────
 
   /** Simple stand-in shown under the cursor for placement tools. */
-  setGhost(kind: 'tree' | 'rock' | 'deco' | 'camp' | 'spawn' | 'rune' | 'shop' | 'fountain' | null, radius: number): void {
+  setGhost(kind: 'tree' | 'rock' | 'deco' | 'camp' | 'spawn' | 'rune' | 'shop' | 'fountain' | 'castle' | null, radius: number): void {
     disposeChildren(this._ghost);
     if (!kind) {
       this._ghost.visible = false;
@@ -230,7 +256,7 @@ export class Overlays {
     }
 
     const mat = new THREE.MeshBasicMaterial({
-      color: kind === 'camp' ? 0xcc4444 : kind === 'spawn' ? 0x4488cc : kind === 'rune' ? 0xffcc33 : kind === 'shop' ? 0xffcc44 : kind === 'fountain' ? 0x4488ff : 0x66cc66,
+      color: kind === 'camp' ? 0xcc4444 : kind === 'spawn' ? 0x4488cc : kind === 'rune' ? 0xffcc33 : kind === 'shop' ? 0xffcc44 : kind === 'fountain' ? 0x4488ff : kind === 'castle' ? 0xaa88ff : 0x66cc66,
       transparent: true,
       opacity: 0.5,
       depthWrite: false,
@@ -257,6 +283,9 @@ export class Overlays {
       case 'fountain':
         mesh = new THREE.Mesh(new THREE.TorusGeometry(28, 6, 8, 14), mat);
         mesh.position.y = 20;
+      case 'castle':
+        mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.4, radius * 0.5, 90, 10), mat);
+        mesh.position.y = 45;
         break;
       default:
         mesh = new THREE.Mesh(new THREE.SphereGeometry(20, 12, 8), mat);

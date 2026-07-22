@@ -27,6 +27,7 @@ import {
 import { TILE_SIZE } from '../world/wc3/W3EParser';
 import { worldToTile } from '../world/wc3/MapData';
 import { RUNE } from '../sim/runeRules';
+import { BUILDING_TYPES } from '../sim/buildingRules';
 import { SHOP_ITEMS } from '../sim/shopItems';
 import { Overlays, disposeObject } from './overlays';
 import { EditorUI } from './ui';
@@ -477,6 +478,8 @@ export class EditorApp {
       this._overlays.setGhost('shop', 120);
     } else if (this._tool === 'fountain') {
       this._overlays.setGhost('fountain', 200);
+    } else if (this._tool === 'castle') {
+      this._overlays.setGhost('castle', BUILDING_TYPES.castle.bodyRadius);
     } else {
       this._overlays.setGhost(null, 0);
     }
@@ -588,6 +591,8 @@ export class EditorApp {
         break;
       case 'fountain':
         if (!fromDrag) this._placeFountain();
+      case 'castle':
+        if (!fromDrag) this._placeCastle();
         break;
       case 'erase':
         this._eraseAt();
@@ -710,6 +715,11 @@ export class EditorApp {
 
   private _placeFountain(): void {
     this._src.fountains.push({ x: this._hover!.wx, z: this._hover!.wz });
+     this._rebuild('doodads');
+  }
+
+  private _placeCastle(): void {
+    this._src.castles.push({ x: this._hover!.wx, z: this._hover!.wz });
     this._rebuild('doodads');
   }
 
@@ -740,6 +750,12 @@ export class EditorApp {
     this._src.fountains.forEach((f, i) => {
       const dist = Math.hypot(f.x - wx, f.z - wz);
       if (dist < 120) candidates.push({ dist, remove: () => this._src.fountains.splice(i, 1) });
+    });
+    this._src.castles.forEach((c, i) => {
+      const dist = Math.hypot(c.x - wx, c.z - wz);
+      if (dist < BUILDING_TYPES.castle.bodyRadius + 20) {
+        candidates.push({ dist, remove: () => this._src.castles.splice(i, 1) });
+      }
     });
 
     if (candidates.length === 0) return;
@@ -805,6 +821,7 @@ export class EditorApp {
       `${this._src.doodads.length} doodads, ${this._src.camps.length} camps, ` +
       `${this._src.spawns.length} spawns, ${this._src.runes.length} runes, ` +
       `${this._src.shops.length} shops, ${this._src.fountains.length} fountains`,
+      `${this._src.shops.length} shops, ${this._src.castles.length} castles`,
     );
     this._ui.setStatus(parts.join('  ·  '));
   }

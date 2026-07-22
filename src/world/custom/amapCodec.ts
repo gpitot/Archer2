@@ -15,6 +15,7 @@
  *   u8 rune count, then per rune: u16 qx, u16 qz   (v2+; absent in v1)
  *   u8 fountain count, then per fountain: u16 qx, u16 qz   (v3+; absent in v1–v2)
  *   u8 shop count, then per shop: u16 qx, u16 qz   (v4+; absent in v1–v3)
+ *   u8 castle count, then per castle: u16 qx, u16 qz   (v5+; absent in v1–v4)
  *
  * Positions are quantized to u16 across the map extent (≤0.25 world units
  * of error at the 128-tile maximum). Compression uses the platform-native
@@ -94,6 +95,13 @@ export async function encodeAmap(src: MapSource): Promise<Uint8Array> {
     w.u16(q.qz(s.z));
   }
 
+  // Castles (v5+)
+  w.u8(src.castles.length);
+  for (const c of src.castles) {
+    w.u16(q.qx(c.x));
+    w.u16(q.qz(c.z));
+  }
+
   const compressed = await deflate(w.finish());
   const out = new Uint8Array(5 + compressed.length);
   out[0] = MAGIC.charCodeAt(0);
@@ -110,7 +118,7 @@ export async function decodeAmap(buf: ArrayBuffer | Uint8Array): Promise<MapSour
   const magic = String.fromCharCode(raw[0], raw[1], raw[2], raw[3]);
   if (magic !== MAGIC) throw new Error(`amap: bad magic "${magic}"`);
   const version = raw[4];
-  if (version !== MAP_VERSION && version !== 1 && version !== 2 && version !== 3) {
+  if (!Number.isInteger(version) || version < 1 || version > MAP_VERSION) {
     throw new Error(`amap: unsupported version ${version}`);
   }
 
@@ -193,7 +201,14 @@ export async function decodeAmap(buf: ArrayBuffer | Uint8Array): Promise<MapSour
     for (let i = 0; i < nShops; i++) shops.push({ x: q.x(r.u16()), z: q.z(r.u16()) });
   }
 
-  return { name, tilesX, tilesZ, layer, texture, flags, doodads, camps, spawns, runes, fountains, shops };
+  // Castles — v5+; earlier files simply have none.
+  const castles = [];
+  if (version >= 5) {
+    const nCastles = r.u8();
+    for (let i = 0; i < nCastles; i++) castles.push({ x: q.x(r.u16()), z: q.z(r.u16()) });
+  }
+
+  return { name, tilesX, tilesZ, layer, texture, flags, doodads, camps, spawns, runes, fountains, shops, castles };
 }
 
 // ── Quantization ──────────────────────────────────────────────────────

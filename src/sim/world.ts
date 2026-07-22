@@ -58,6 +58,12 @@ export interface SimWorld {
   shops: Shop[];
   /** Static healing fountains placed on the map. */
   fountains: FountainDef[];
+  /**
+   * Authored hero spawn points (empty when the map has none). Defenders mode
+   * respawns heroes here instead of at random walkable positions, so the
+   * defenders always come back at their base.
+   */
+  spawns: Vec2[];
 }
 
 /** True if a sphere at `pos` with `radius` overlaps any obstacle (2D). */

@@ -4,6 +4,7 @@
  * No behaviour lives here — the logic is in `stepMatch`.
  */
 import { CreepTypeId } from './creepRules';
+import { BuildingTypeId, BUILDING_TYPES } from './buildingRules';
 import { RuneTypeId } from './runeRules';
 import { Vec2 } from './math';
 import { HERO, maxHpForLevel } from './rules';
@@ -11,6 +12,34 @@ import { createAbilityRuntimes, type AbilityId } from './abilities';
 
 /** Six inventory slots holding item ids (null = empty). */
 export type Inventory = (string | null)[];
+
+// ── Game modes ───────────────────────────────────────────────────────
+
+/**
+ * How a match is scored and who fights whom.
+ *  - 'ffa': every hero on its own team, no end condition (the original game).
+ *  - 'defenders': all heroes on team 0 defending the map's castles from creep
+ *    waves; the match ends in defeat (castles razed) or victory (waves
+ *    survived — see `DEFENDERS.wavesToWin`).
+ */
+export type GameMode = 'ffa' | 'defenders';
+
+/** Resolve untrusted mode input (URL params, join messages) to a GameMode. */
+export function resolveGameMode(raw: string | null | undefined): GameMode {
+  return raw === 'defenders' ? 'defenders' : 'ffa';
+}
+
+/**
+ * Sanitize a requested creep-camp count (the room creator can enable just the
+ * first 1–4 of the map's camps, e.g. one camp for a solo defenders game).
+ * Anything outside 1–4 — including absent — means "all of the map's camps".
+ */
+export function resolveCampCount(raw: number | null | undefined): number | null {
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= 1 && raw <= 4 ? raw : null;
+}
+
+/** 'playing' until a mode's end condition fires; the sim freezes after. */
+export type MatchOutcome = 'playing' | 'victory' | 'defeat';
 
 // ── Unit substrate ───────────────────────────────────────────────────
 
@@ -267,6 +296,38 @@ export interface CreepState extends UnitCore {
 }
 
 /**
+ * A static, attackable structure (Defenders-mode castles). Never moves and
+ * never acts — creeps damage it, `buildingKill` announces its fall. Ids are
+ * stable for the whole match, like creeps and runes.
+ */
+export interface BuildingState {
+  id: string;
+  type: BuildingTypeId;
+  /** Owning hero team (0 in Defenders — the defenders' shared team). */
+  team: number;
+  pos: Vec2;
+  /** Max HP is derived: `BUILDING_TYPES[type].maxHp`. */
+  hp: number;
+  alive: boolean;
+}
+
+export function createBuildingState(
+  id: string,
+  type: BuildingTypeId,
+  team: number,
+  pos: Vec2,
+): BuildingState {
+  return {
+    id,
+    type,
+    team,
+    pos: { x: pos.x, z: pos.z },
+    hp: BUILDING_TYPES[type].maxHp,
+    alive: true,
+  };
+}
+
+/**
  * Per-camp progression state. A camp climbs one `tier` each time it is fully
  * cleared and respawns (see `stepCreeps`); `respawnTimer` counts down only
  * while every member is dead. Sim-internal — never sent over the wire; the
@@ -284,12 +345,18 @@ export interface CampState {
 
 export interface MatchState {
   tick: number;
+  /** Game mode this match runs under — set at creation, never changes. */
+  mode: GameMode;
+  /** 'playing' until a mode end condition fires; the sim freezes after. */
+  outcome: MatchOutcome;
   heroes: HeroState[];
   projectiles: ProjectileState[];
   wards: WardState[];
   blasts: BlastState[];
   creeps: CreepState[];
   camps: CampState[];
+  /** Attackable structures (Defenders castles); empty in FFA. */
+  buildings: BuildingState[];
   runes: RuneState[];
   /** First blood is a one-time global bonus. */
   firstBlood: boolean;
@@ -350,7 +417,11 @@ export type SimEvent =
     }
   | { type: 'creepRespawn'; creepId: string; creepType: CreepTypeId; level: number }
   | { type: 'runeSpawn'; runeId: string; runeType: RuneTypeId }
-  | { type: 'runePickup'; runeId: string; heroId: string; runeType: RuneTypeId; x: number; z: number };
+  | { type: 'runePickup'; runeId: string; heroId: string; runeType: RuneTypeId; x: number; z: number }
+  | { type: 'buildingHit'; buildingId: string; sourceId: string; damage: number; x: number; z: number }
+  | { type: 'buildingKill'; buildingId: string; x: number; z: number }
+  /** A mode end condition fired — the sim freezes on the next tick. */
+  | { type: 'matchOver'; outcome: 'victory' | 'defeat' };
 
 // ── Factories ─────────────────────────────────────────────────────────
 export function createHeroState(id: string, team: number, pos: Vec2): HeroState {
@@ -405,15 +476,18 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
   };
 }
 
-export function createMatchState(): MatchState {
+export function createMatchState(mode: GameMode = 'ffa'): MatchState {
   return {
     tick: 0,
+    mode,
+    outcome: 'playing',
     heroes: [],
     projectiles: [],
     wards: [],
     blasts: [],
     creeps: [],
     camps: [],
+    buildings: [],
     runes: [],
     firstBlood: true,
     incomeAccumulator: 0,

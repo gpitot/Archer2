@@ -82,6 +82,12 @@ export interface ShopSource {
   z: number;
 }
 
+/** A castle placement — the Defenders-mode objective creeps besiege. */
+export interface CastleSource {
+  x: number;
+  z: number;
+}
+
 export interface MapSource {
   name: string;
   /** Size in tiles (tilepoint grids are +1 per axis). */
@@ -101,11 +107,12 @@ export interface MapSource {
   runes: RuneSource[];
   fountains: FountainSource[];
   shops: ShopSource[];
+  castles: CastleSource[];
 }
 
 export const MAP_FORMAT = 'archer-map';
-/** v3 added fountain placements (v1–v2 files load fine — no fountains). */
-export const MAP_VERSION = 4;
+/** v5 added castle placements (older files load fine — no castles). */
+export const MAP_VERSION = 5;
 export const MIN_TILES = 8;
 export const MAX_TILES = 128;
 /** Ground layer new maps start on (WC3 convention: layer 2 = height 0). */
@@ -147,6 +154,7 @@ export function createEmptyMapSource(name: string, tilesX: number, tilesZ: numbe
     runes: [],
     fountains: [],
     shops: [],
+    castles: [],
   };
 }
 
@@ -164,6 +172,7 @@ export function cloneMapSource(src: MapSource): MapSource {
     runes: src.runes.map((r) => ({ ...r })),
     fountains: src.fountains.map((f) => ({ ...f })),
     shops: src.shops.map((s) => ({ ...s })),
+    castles: src.castles.map((c) => ({ ...c })),
   };
 }
 
@@ -209,6 +218,8 @@ interface MapJson {
   fountains?: { x: number; z: number }[];
   /** Shop placements — absent in v1–v3 files. */
   shops?: { x: number; z: number }[];
+  /** Castle placements (Defenders objectives) — absent in v1–v4 files. */
+  castles?: { x: number; z: number }[];
 }
 
 const FLAG_CHARS: Record<number, string> = {
@@ -266,6 +277,7 @@ export function serializeMapJson(src: MapSource): string {
     runes: src.runes.map((r) => ({ x: Math.round(r.x), z: Math.round(r.z) })),
     fountains: src.fountains.map((f) => ({ x: Math.round(f.x), z: Math.round(f.z) })),
     shops: src.shops.map((s) => ({ x: Math.round(s.x), z: Math.round(s.z) })),
+    castles: src.castles.map((c) => ({ x: Math.round(c.x), z: Math.round(c.z) })),
   };
   // Hand-rolled layout: one grid row / doodad per line so diffs stay readable.
   const rows = (a: string[]) => a.map((r) => `    ${JSON.stringify(r)}`).join(',\n');
@@ -302,6 +314,9 @@ ${items(json.fountains ?? [])}
   ],
   "shops": [
 ${items(json.shops ?? [])}
+  ],
+  "castles": [
+${items(json.castles ?? [])}
   ]
 }
 `;
@@ -310,7 +325,7 @@ ${items(json.shops ?? [])}
 export function parseMapJson(text: string): MapSource {
   const json = JSON.parse(text) as MapJson;
   if (json.format !== MAP_FORMAT) throw new Error(`not an archer map (format=${json.format})`);
-  if (json.version !== MAP_VERSION && json.version !== 3 && json.version !== 2 && json.version !== 1) {
+  if (!Number.isInteger(json.version) || json.version < 1 || json.version > MAP_VERSION) {
     throw new Error(`unsupported map version ${json.version}`);
   }
   validateMapName(json.name);
@@ -364,5 +379,6 @@ export function parseMapJson(text: string): MapSource {
     runes: (json.runes ?? []).map((r) => ({ x: r.x, z: r.z })),
     fountains: (json.fountains ?? []).map((f) => ({ x: f.x, z: f.z })),
     shops: (json.shops ?? []).map((s) => ({ x: s.x, z: s.z })),
+    castles: (json.castles ?? []).map((c) => ({ x: c.x, z: c.z })),
   };
 }

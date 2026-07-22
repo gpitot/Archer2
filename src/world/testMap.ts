@@ -266,5 +266,6 @@ export function buildTestSimWorld(): SimWorld {
     healRadius: 200,
     healPerSecond: 100,
   }];
+  world.spawns = TEST_MAP_SPAWNS.map((s) => ({ ...s }));
   return world;
 }

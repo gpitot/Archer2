@@ -10,7 +10,7 @@ export type ToolId =
   | 'pan'
   | 'raise' | 'lower' | 'ramp' | 'water' | 'paint'
   | 'treeDark' | 'treeGreen' | 'treeTeal' | 'rock' | 'deco'
-  | 'camp' | 'spawn' | 'rune' | 'shop' | 'fountain' | 'erase';
+  | 'camp' | 'spawn' | 'rune' | 'shop' | 'fountain' | 'castle' | 'erase';
 
 export interface ToolInfo {
   id: ToolId;
@@ -36,6 +36,7 @@ export const TOOLS: ToolInfo[] = [
   { id: 'rune', key: 'U', label: 'Rune spot', hint: 'power-up rune spawn location' },
   { id: 'shop', key: 'S', label: 'Shop', hint: 'place a shop building where heroes can buy items' },
   { id: 'fountain', key: 'F', label: 'Healing spring', hint: 'heals nearby heroes' },
+  { id: 'castle', key: 'B', label: 'Castle', hint: 'Defenders-mode objective the creep waves besiege' },
   { id: 'erase', key: 'X', label: 'Erase', hint: 'click/drag removes the nearest placed object' },
 ];
 

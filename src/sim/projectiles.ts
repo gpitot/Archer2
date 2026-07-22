@@ -62,6 +62,10 @@ export function advanceProjectile(
  * passed through (dodge evades projectiles). Pass `skipOwnerId` for
  * hero-owned projectiles so archers can't shoot themselves; creep-owned
  * projectiles hit any hero.
+ *
+ * Same-team heroes are always passed through: in FFA every hero has its own
+ * team so this only re-covers the owner skip, but in Defenders (one shared
+ * team) it is what makes allied arrows and hooks fly through teammates.
  */
 export function findHitHero(
   state: MatchState,
@@ -72,6 +76,7 @@ export function findHitHero(
   const r2 = hitRadius * hitRadius;
   for (const hero of state.heroes) {
     if (skipOwnerId !== undefined && hero.id === skipOwnerId) continue;
+    if (hero.team === p.team) continue; // never hit allies (creep shots are team −1)
     if (!hero.alive || hero.invulnerable) continue;
     if (hero.abilities.dodge.active) continue;
     if (V.distanceSq(p.pos, hero.pos) < r2) return hero;

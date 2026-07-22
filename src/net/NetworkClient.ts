@@ -67,7 +67,7 @@ export class NetworkClient {
    * `waitForMatchStart`) or a match already in progress (`welcome.init` is
    * populated and `waitForMatchStart` resolves immediately).
    */
-  connect(roomCode: string, name: string, map?: string): Promise<WelcomeMessage> {
+  connect(roomCode: string, name: string, map?: string, mode?: string, campCount?: number): Promise<WelcomeMessage> {
     this._url = `/ws/${roomCode}`;
     this._state = 'connecting';
     this._snapshots = [];
@@ -87,7 +87,7 @@ export class NetworkClient {
       this._ws = ws;
 
       ws.onopen = () => {
-        this._send({ type: 'join', name, map });
+        this._send({ type: 'join', name, map, mode, campCount });
       };
 
       ws.onmessage = (event) => {

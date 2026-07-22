@@ -36,10 +36,13 @@ import { DEFAULT_NAME, loadPlayerName } from './playerPrefs';
 import { SoundManager, STREAK_SOUNDS, MULTI_KILL_SOUNDS } from '../audio/SoundManager';
 
 // ── Sim layer ──
-import { HeroState, ProjectileState, WardState, BlastState, CreepState, RuneState, MatchState, Command, HeroInput, SimEvent, createHeroState, createMatchState } from '../sim/state';
+import { HeroState, ProjectileState, WardState, BlastState, CreepState, RuneState, BuildingState, MatchState, Command, GameMode, HeroInput, SimEvent, createHeroState, createMatchState, resolveCampCount } from '../sim/state';
 import { stepMatch, heroSpeed } from '../sim/stepMatch';
 import { stepStun } from '../sim/statusEffects';
 import { spawnCamps } from '../sim/stepCreeps';
+import { currentWave, spawnCastles } from '../sim/buildings';
+import { BUILDING_TYPES } from '../sim/buildingRules';
+import type { CastlePlacement } from '../sim/buildingRules';
 import { spawnRunes } from '../sim/stepRunes';
 import type { CampPlacement } from '../sim/creepRules';
 import { RUNE_TYPES, RunePlacement } from '../sim/runeRules';
@@ -53,7 +56,7 @@ import { GRAPPLE_ANCHOR_GAP, SHOP_ITEMS, SHOP_ITEMS_BY_ID } from '../sim/shopIte
 
 /** Height the grapple rope leaves the hero's hand at. */
 const GRAPPLE_ROPE_HAND_HEIGHT = 42;
-import { SnapshotMessage, MatchInit, Snapshot, SnapshotHero, HeroMeta, CreepMeta, RuneMeta } from '../sim/protocol';
+import { SnapshotMessage, MatchInit, Snapshot, SnapshotHero, HeroMeta, CreepMeta, RuneMeta, BuildingMeta } from '../sim/protocol';
 import { creepMaxHp } from '../sim/creepRules';
 import { Vec2, distance } from '../sim/math';
 
@@ -67,6 +70,7 @@ import { WardView } from '../entities/WardView';
 import { BlastView } from '../entities/BlastView';
 import { RuneView } from '../entities/RuneView';
 import { FountainView } from '../entities/FountainView';
+import { BuildingView } from '../entities/BuildingView';
 import { ExplosionEffects } from '../rendering/ExplosionEffect';
 import { ImpactEffects, ImpactElement } from '../rendering/ImpactEffect';
 import { PortalEffects } from '../rendering/PortalEffects';
@@ -113,6 +117,7 @@ export class Game {
   private _mapRunes: RunePlacement[] | null = null;
   private _mapFountains: FountainDef[] | null = null;
   private _mapShops: { x: number; z: number }[] | null = null;
+  private _mapCastles: CastlePlacement[] | null = null;
   private _terrain!: GroundProvider;
   private _water!: Water;
   private _doodads!: Doodads;
@@ -231,6 +236,9 @@ export class Game {
   private _creepViews = new Map<string, CreepView>();
   private _runeViews = new Map<string, RuneView>();
   private _fountainViews = new Map<number, FountainView>();
+  private _buildingViews = new Map<string, BuildingView>();
+  /** Defenders wave number from the server (camps have no client-side tier). */
+  private _netWave = 1;
   private _projectilePool: ProjectileView[] = [];
 
   // ── Player helpers ──
@@ -326,6 +334,7 @@ export class Game {
     this._mapRunes = loaded.runes;
     this._mapFountains = loaded.fountains;
     this._mapShops = loaded.shops;
+    this._mapCastles = loaded.castles;
     const bounds = this._map.bounds;
 
     // ── Renderer ──
@@ -406,6 +415,10 @@ export class Game {
     // ── Fountains: use authored placements (every map provides them now) ──
     this._world.fountains = this._mapFountains ?? [];
 
+    // ── Authored hero spawns (Defenders respawns land here) — must match
+    // the server's copy (both derive from the same map data) ──
+    this._world.spawns = (this._mapSpawns ?? []).map((s) => ({ x: s.x, z: s.z }));
+
     // Shop positions: use authored map spots if available, else none.
     const shopSources: THREE.Vector3[] = this._mapShops
       ? this._mapShops.map((s) => this._findWalkableNear(s.x, s.z))
@@ -469,7 +482,14 @@ export class Game {
 
     // Apply the initial snapshot to initialise our state and views.
     this._playerId = welcome.playerId;
-    this._applySnapshot(init.snapshot, init.meta, init.creepMeta ?? [], init.runeMeta ?? []);
+    this._state.mode = init.mode ?? 'ffa';
+    this._netWave = init.snapshot.wave ?? 1;
+    this._applySnapshot(init.snapshot, init.meta, init.creepMeta ?? [], init.runeMeta ?? [], init.buildingMeta ?? []);
+    // Joined after the match already ended (rare) — show the result at once.
+    if (init.outcome) {
+      this._state.outcome = init.outcome;
+      this._showMatchOver(init.outcome);
+    }
 
     // Confirm our hero made it into the snapshot (`_applySnapshot` set
     // `_playerState` from it).
@@ -488,15 +508,32 @@ export class Game {
     console.log(`[Game] network mode ready, playerId=${welcome.playerId}, team=${this._playerState.team}, heroes=${this._state.heroes.length}, pos=${this._playerState.pos.x.toFixed(0)},${this._playerState.pos.z.toFixed(0)}`);
   }
 
-  /** Offline practice: local sim, one player plus a dummy bot. */
-  startOfflineMatch(playerName: string): void {
-    this._names = new Map([['player', playerName], ['dummy', 'Bot']]);
+  /**
+   * Offline practice: local sim, one player plus a dummy bot (FFA), or a
+   * solo castle defense with no bot (Defenders — v1 has no allied AI).
+   */
+  startOfflineMatch(playerName: string, mode: GameMode = 'ffa', campCount?: number): void {
+    this._state.mode = mode;
+    this._names = mode === 'defenders'
+      ? new Map([['player', playerName]])
+      : new Map([['player', playerName], ['dummy', 'Bot']]);
 
     // ── Offline mode: jungle creep camps, simulated by the local stepMatch ──
-    spawnCamps(this._state, this._world, this._mapCamps);
+    // The player can enable just the first 1–4 of the map's camps (solo games).
+    const campLimit = resolveCampCount(campCount);
+    spawnCamps(this._state, this._world,
+      campLimit !== null ? this._mapCamps?.slice(0, campLimit) : this._mapCamps);
 
     // ── Offline mode: power-up rune spots ──
     spawnRunes(this._state, this._world, this._mapRunes);
+
+    // ── Defenders: the castles the creeps besiege ──
+    if (mode === 'defenders') {
+      spawnCastles(this._state, this._world, this._mapCastles);
+      if (this._state.buildings.length === 0) {
+        console.warn('[Game] defenders mode on a map with no authored castles — no objective to defend');
+      }
+    }
 
     // ── Offline mode: create local heroes ──
     // Maps with fixed spawns (test map) place the heroes deterministically.
@@ -508,11 +545,13 @@ export class Game {
     this._playerId = 'player';
     this._playerState = playerState;
 
-    const dummySpawn = this._mapSpawns && this._mapSpawns.length > 1
-      ? this._findWalkableNear(this._mapSpawns[1].x, this._mapSpawns[1].z)
-      : this._findWalkableNear(heroSpawn.x + 400, heroSpawn.z + 200);
-    const dummyState = createHeroState('dummy', 1, { x: dummySpawn.x, z: dummySpawn.z });
-    this._state.heroes.push(dummyState);
+    if (mode !== 'defenders') {
+      const dummySpawn = this._mapSpawns && this._mapSpawns.length > 1
+        ? this._findWalkableNear(this._mapSpawns[1].x, this._mapSpawns[1].z)
+        : this._findWalkableNear(heroSpawn.x + 400, heroSpawn.z + 200);
+      const dummyState = createHeroState('dummy', 1, { x: dummySpawn.x, z: dummySpawn.z });
+      this._state.heroes.push(dummyState);
+    }
 
     this._syncHeroViews(this._state.heroes);
     this._playerView = this._heroViews.get('player')!;
@@ -700,20 +739,22 @@ export class Game {
   async init(): Promise<void> {
     await this.preload();
 
-    const roomCode = new URLSearchParams(window.location.search).get('room');
+    const params = new URLSearchParams(window.location.search);
+    const roomCode = params.get('room');
+    const mode = params.get('mode') === 'defenders' ? 'defenders' : 'ffa';
     const name = loadPlayerName() ?? DEFAULT_NAME;
 
     if (roomCode) {
       this._roomCode = roomCode;
       const net = new NetworkClient();
-      await net.connect(roomCode, name, this._mapName);
+      await net.connect(roomCode, name, this._mapName, mode);
       net.setReady(true);
       net.startGame();
       const init = await net.waitForMatchStart();
       const names = new Map(net.roster.map((p) => [p.playerId, p.name]));
       this.startNetworkMatch(net, init, names);
     } else {
-      this.startOfflineMatch(name);
+      this.startOfflineMatch(name, mode);
     }
 
     this.finish();
@@ -798,7 +839,7 @@ export class Game {
    * Hydrates full HeroStates from the wire hot fields + cold meta, then
    * builds views. Nothing aliases the snapshot.
    */
-  private _applySnapshot(snap: Snapshot, meta: HeroMeta[], creepMeta: CreepMeta[] = [], runeMeta: RuneMeta[] = []): void {
+  private _applySnapshot(snap: Snapshot, meta: HeroMeta[], creepMeta: CreepMeta[] = [], runeMeta: RuneMeta[] = [], buildingMeta: BuildingMeta[] = []): void {
     const metaById = new Map(meta.map((m) => [m.id, m]));
     this._state.heroes = snap.heroes.map((h) => this._heroFromWire(h, metaById.get(h.id)));
     this._state.projectiles = this._cloneProjectiles(snap.projectiles);
@@ -810,6 +851,8 @@ export class Game {
     this._state.creeps = creepMeta.map((m) => this._creepFromMeta(m));
     // Same for runes: welcome registry, pickup/respawn are event-carried.
     this._state.runes = runeMeta.map((m) => this._runeFromMeta(m));
+    // Buildings: welcome registry; snapshots carry hp, `buildingKill` razing.
+    this._state.buildings = buildingMeta.map((m) => this._buildingFromMeta(m));
     this._state.tick = snap.tick;
 
     // Seed the remote-projectile registry with arrows already in flight,
@@ -851,6 +894,18 @@ export class Game {
       stunTimer: 0,
       pullTimer: 0,
       pullDuration: 0,
+    };
+  }
+
+  /** Build a persistent local BuildingState from a welcome registry entry. */
+  private _buildingFromMeta(m: BuildingMeta): BuildingState {
+    return {
+      id: m.id,
+      type: m.type,
+      team: m.team,
+      pos: { x: m.pos.x, z: m.pos.z },
+      hp: m.hp,
+      alive: m.alive,
     };
   }
 
@@ -913,6 +968,16 @@ export class Game {
       creep.facing = sc.facing;
       creep.stunTimer = sc.stunTimer ?? 0;
     }
+
+    // Buildings: hp rides every snapshot; razing arrives via `buildingKill`
+    // (hp 0 doubles as dead for robustness on a missed event).
+    for (const sb of snap.buildings ?? []) {
+      const building = this._state.buildings.find((b) => b.id === sb.id);
+      if (!building) continue;
+      building.hp = sb.hp;
+      if (sb.hp <= 0) building.alive = false;
+    }
+    if (snap.wave !== undefined) this._netWave = snap.wave;
     this._state.tick = snap.tick;
   }
 
@@ -1067,6 +1132,10 @@ export class Game {
     // (projectiles, blasts, income accumulation) never leak across ticks.
     const temp = this._predictScratch;
     temp.tick = 0;
+    // Mirror mode/outcome so prediction freezes the instant the match ends
+    // (matching the server) and mode-gated rules agree with the real sim.
+    temp.mode = this._state.mode;
+    temp.outcome = this._state.outcome;
     temp.heroes.length = 0;
     temp.heroes.push(player);
     temp.projectiles.length = 0;
@@ -1701,6 +1770,7 @@ export class Game {
     this._deathEffect.update(dt);
     // Sync creep views
     this._syncCreepViews(dt);
+    this._syncBuildingViews(dt);
     // Sync rune views
     this._syncRuneViews(dt);
     // Sync fountain views
@@ -1806,6 +1876,31 @@ export class Game {
           this._floatingText.spawnGold(new THREE.Vector3(ev.x, y + 80, ev.z), ev.gold);
           this._floatingText.spawn(new THREE.Vector3(ev.x, y + 50, ev.z), ev.xp, '#88ff88');
         }
+        break;
+      }
+      case 'buildingHit': {
+        const bv = this._buildingViews.get(ev.buildingId);
+        if (bv) {
+          this._floatingText.spawn(bv.mesh.position.clone().add(new THREE.Vector3(0, 120, 0)), ev.damage);
+          bv.flashHit();
+        }
+        // The attacking creep lunges, same as a melee swing on a hero.
+        this._creepViews.get(ev.sourceId)?.playAttack();
+        break;
+      }
+      case 'buildingKill': {
+        // Snapshot hp will confirm, but apply the death now (offline already
+        // set it — idempotent) so the collapse plays without a frame of lag.
+        const building = this._state.buildings.find((b) => b.id === ev.buildingId);
+        if (building) building.alive = false;
+        const y = this._heightAt(ev.x, ev.z);
+        this._explosions.spawn(ev.x, y + 30, ev.z, 180);
+        this._killFeed.announce('The castle has fallen!', '#ff4444');
+        break;
+      }
+      case 'matchOver': {
+        this._state.outcome = ev.outcome;
+        this._showMatchOver(ev.outcome);
         break;
       }
       case 'creepRespawn': {
@@ -2178,6 +2273,51 @@ export class Game {
     }
   }
 
+  // ── Building view sync (Defenders castles) ──────────────────────────
+
+  private _syncBuildingViews(dt: number): void {
+    for (const b of this._state.buildings) {
+      let bv = this._buildingViews.get(b.id);
+      if (!bv) {
+        bv = new BuildingView(b);
+        this._scene.add(bv.mesh);
+        this._buildingViews.set(b.id, bv);
+        this._fogLayer.applyTo(bv.mesh);
+      }
+      bv.sync(b, dt, this._heightAt.bind(this));
+    }
+  }
+
+  // ── Match-over banner (Defenders) ───────────────────────────────────
+
+  /** Full-screen victory/defeat banner. The sim is frozen underneath. */
+  private _showMatchOver(outcome: 'victory' | 'defeat'): void {
+    if (document.getElementById('match-over-banner')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'match-over-banner';
+    overlay.style.cssText = `
+      position: fixed; inset: 0; z-index: 450;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: rgba(0, 0, 0, 0.55); pointer-events: none;
+      font-family: sans-serif;
+    `;
+    const title = document.createElement('div');
+    title.textContent = outcome === 'victory' ? 'Victory!' : 'Defeat';
+    title.style.cssText = `
+      font-size: 64px; font-weight: bold;
+      color: ${outcome === 'victory' ? '#ffcc44' : '#ff5544'};
+      text-shadow: 0 0 24px rgba(0,0,0,0.8);
+    `;
+    overlay.appendChild(title);
+    const sub = document.createElement('div');
+    sub.textContent = outcome === 'victory'
+      ? 'The castle stands — every wave repelled.'
+      : 'The castle has fallen.';
+    sub.style.cssText = 'margin-top: 12px; font-size: 18px; color: #ddccaa; text-shadow: 0 0 8px rgba(0,0,0,0.8);';
+    overlay.appendChild(sub);
+    document.body.appendChild(overlay);
+  }
+
   // ── Death overlay ─────────────────────────────────────────────────
 
   /** Create the full-screen death overlay (hidden initial). */
@@ -2284,6 +2424,10 @@ export class Game {
       camera: this._camera,
       isPlayerNearShop: this._isPlayerNearShop(),
       gameTime: this._state.tick / 60,
+      // Offline runs the camps locally; online the server sends the wave.
+      wave: this._state.mode === 'defenders'
+        ? (this._networkMode ? this._netWave : currentWave(this._state))
+        : undefined,
     };
     updateHud(ctx);
   }
@@ -2343,6 +2487,14 @@ export class Game {
       const fv = this._fountainViews.get(i);
       if (fv) {
         fv.mesh.visible = this._fog.isVisible(team, fountain.pos.x, fountain.pos.z);
+      }
+    }
+
+    // Buildings: our own castles — always visible to the defending team.
+    for (const b of this._state.buildings) {
+      const bv = this._buildingViews.get(b.id);
+      if (bv) {
+        bv.mesh.visible = b.team === team || this._fog.isVisible(team, b.pos.x, b.pos.z);
       }
     }
   }
