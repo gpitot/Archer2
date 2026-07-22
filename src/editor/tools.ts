@@ -10,7 +10,7 @@ export type ToolId =
   | 'pan'
   | 'raise' | 'lower' | 'ramp' | 'water' | 'paint'
   | 'treeDark' | 'treeGreen' | 'treeTeal' | 'rock' | 'deco'
-  | 'camp' | 'spawn' | 'rune' | 'shop' | 'erase';
+  | 'camp' | 'spawn' | 'rune' | 'shop' | 'fountain' | 'erase';
 
 export interface ToolInfo {
   id: ToolId;
@@ -35,6 +35,7 @@ export const TOOLS: ToolInfo[] = [
   { id: 'spawn', key: 'P', label: 'Hero spawn', hint: 'numbered spawn points (max 4)' },
   { id: 'rune', key: 'U', label: 'Rune spot', hint: 'power-up rune spawn location (max 6)' },
   { id: 'shop', key: 'S', label: 'Shop', hint: 'place a shop building where heroes can buy items' },
+  { id: 'fountain', key: 'F', label: 'Healing spring', hint: 'heals nearby heroes (max 4)' },
   { id: 'erase', key: 'X', label: 'Erase', hint: 'click/drag removes the nearest placed object' },
 ];
 

@@ -37,6 +37,7 @@ const MAX_SPAWNS = 4;
 const MAX_CAMPS = 8;
 const MAX_RUNES = 6;
 const MAX_SHOPS = 4;
+const MAX_FOUNTAINS = 4;
 /** Min distance between drag-scattered trees. */
 const SCATTER_SPACING = 70;
 const REBUILD_THROTTLE_MS = 130;
@@ -255,6 +256,9 @@ export class EditorApp {
       data.doodads,
     );
     this._world.obstacles = this._custom.obstacles;
+
+    // Override fountain positions from map source
+    this._world.fountains = this._custom.fountains;
 
     // Override shop positions from map source
     if (this._src.shops.length > 0) {
@@ -476,6 +480,8 @@ export class EditorApp {
       this._overlays.setGhost('rune', RUNE.pickupRadius);
     } else if (this._tool === 'shop') {
       this._overlays.setGhost('shop', 120);
+    } else if (this._tool === 'fountain') {
+      this._overlays.setGhost('fountain', 200);
     } else {
       this._overlays.setGhost(null, 0);
     }
@@ -584,6 +590,9 @@ export class EditorApp {
         break;
       case 'shop':
         if (!fromDrag) this._placeShop();
+        break;
+      case 'fountain':
+        if (!fromDrag) this._placeFountain();
         break;
       case 'erase':
         this._eraseAt();
@@ -720,6 +729,15 @@ export class EditorApp {
     this._rebuild('doodads');
   }
 
+  private _placeFountain(): void {
+    if (this._src.fountains.length >= MAX_FOUNTAINS) {
+      this._ui.flash(`max ${MAX_FOUNTAINS} fountains`);
+      return;
+    }
+    this._src.fountains.push({ x: this._hover!.wx, z: this._hover!.wz });
+    this._rebuild('doodads');
+  }
+
   private _eraseAt(): void {
     const { wx, wz } = this._hover!;
     const candidates: { dist: number; remove: () => void }[] = [];
@@ -743,6 +761,10 @@ export class EditorApp {
     this._src.shops.forEach((s, i) => {
       const dist = Math.hypot(s.x - wx, s.z - wz);
       if (dist < 120) candidates.push({ dist, remove: () => this._src.shops.splice(i, 1) });
+    });
+    this._src.fountains.forEach((f, i) => {
+      const dist = Math.hypot(f.x - wx, f.z - wz);
+      if (dist < 120) candidates.push({ dist, remove: () => this._src.fountains.splice(i, 1) });
     });
 
     if (candidates.length === 0) return;
@@ -806,7 +828,8 @@ export class EditorApp {
     }
     parts.push(
       `${this._src.doodads.length} doodads, ${this._src.camps.length} camps, ` +
-      `${this._src.spawns.length} spawns, ${this._src.runes.length} runes, ${this._src.shops.length} shops`,
+      `${this._src.spawns.length} spawns, ${this._src.runes.length} runes, ` +
+      `${this._src.shops.length} shops, ${this._src.fountains.length} fountains`,
     );
     this._ui.setStatus(parts.join('  ·  '));
   }

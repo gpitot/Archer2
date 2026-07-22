@@ -176,6 +176,24 @@ export class Overlays {
       ring.position.set(s.x, y + 2, s.z);
       this._markers.add(ring);
     }
+
+    // Fountain placements: blue basin stand-in + heal-radius ring.
+    for (const f of src.fountains) {
+      const y = heightAt(f.x, f.z);
+      const basin = new THREE.Mesh(
+        new THREE.TorusGeometry(28, 6, 8, 14),
+        new THREE.MeshBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.8 }),
+      );
+      basin.position.set(f.x, y + 20, f.z);
+      this._markers.add(basin);
+
+      const ring = new THREE.LineLoop(
+        circleGeometry(200, 48),
+        new THREE.LineBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5 }),
+      );
+      ring.position.set(f.x, y + 2, f.z);
+      this._markers.add(ring);
+    }
   }
 
   // ── Hover highlight ───────────────────────────────────────────
@@ -204,7 +222,7 @@ export class Overlays {
   // ── Placement ghost ───────────────────────────────────────────
 
   /** Simple stand-in shown under the cursor for placement tools. */
-  setGhost(kind: 'tree' | 'rock' | 'deco' | 'camp' | 'spawn' | 'rune' | 'shop' | null, radius: number): void {
+  setGhost(kind: 'tree' | 'rock' | 'deco' | 'camp' | 'spawn' | 'rune' | 'shop' | 'fountain' | null, radius: number): void {
     disposeChildren(this._ghost);
     if (!kind) {
       this._ghost.visible = false;
@@ -212,7 +230,7 @@ export class Overlays {
     }
 
     const mat = new THREE.MeshBasicMaterial({
-      color: kind === 'camp' ? 0xcc4444 : kind === 'spawn' ? 0x4488cc : kind === 'rune' ? 0xffcc33 : kind === 'shop' ? 0xffcc44 : 0x66cc66,
+      color: kind === 'camp' ? 0xcc4444 : kind === 'spawn' ? 0x4488cc : kind === 'rune' ? 0xffcc33 : kind === 'shop' ? 0xffcc44 : kind === 'fountain' ? 0x4488ff : 0x66cc66,
       transparent: true,
       opacity: 0.5,
       depthWrite: false,
@@ -235,6 +253,10 @@ export class Overlays {
       case 'shop':
         mesh = new THREE.Mesh(new THREE.ConeGeometry(14, 30, 8), mat);
         mesh.position.y = 15;
+        break;
+      case 'fountain':
+        mesh = new THREE.Mesh(new THREE.TorusGeometry(28, 6, 8, 14), mat);
+        mesh.position.y = 20;
         break;
       default:
         mesh = new THREE.Mesh(new THREE.SphereGeometry(20, 12, 8), mat);
