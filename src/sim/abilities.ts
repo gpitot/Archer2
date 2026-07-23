@@ -10,14 +10,14 @@
  * and HUD slot all follow from the registry.
  */
 import * as V from './math';
-import { ARROW, BLAST, DODGE, SCOUT } from './rules';
+import { ARROW, BLAST, SCOUT, SPLIT } from './rules';
 import type { AbilityRuntime, HeroState, MatchState, SimEvent } from './state';
 import type { SimWorld } from './world';
 import type { StatLine, TooltipContent } from '../ui/TooltipContent';
 import { spawnProjectile } from './projectiles';
 import { breakInvisibility } from './stepRunes';
 
-export type AbilityId = 'arrow' | 'dodge' | 'reveal' | 'blast';
+export type AbilityId = 'arrow' | 'split' | 'reveal' | 'blast';
 
 /**
  * Format a per-rank table (index 0 = unlearned) into a stat line's values,
@@ -32,7 +32,7 @@ function perRank(table: readonly number[], suffix = ''): readonly string[] {
  * ticks ability timers in this order on every peer, and hero state / wire
  * records are built with keys in this order.
  */
-export const ABILITY_ORDER: readonly AbilityId[] = ['arrow', 'dodge', 'reveal', 'blast'];
+export const ABILITY_ORDER: readonly AbilityId[] = ['arrow', 'split', 'reveal', 'blast'];
 
 /** Everything a cast implementation may touch. */
 export interface CastContext {
@@ -244,24 +244,49 @@ export function cancelArrowWindup(hero: HeroState): void {
   }
 }
 
-// ── W — Dodge ─────────────────────────────────────────────────────────
+// ── W — Split Arrow ───────────────────────────────────────────────────
 
-function canCastDodge(hero: HeroState): boolean {
-  const a = hero.abilities.dodge;
-  return !a.active && a.cooldown <= 0 && a.level >= 1;
+function canCastSplit(hero: HeroState): boolean {
+  const a = hero.abilities.split;
+  return a.level >= 1 && a.cooldown <= 0;
 }
 
-function castDodge(ctx: CastContext): void {
-  const hero = ctx.hero;
-  if (!hero.alive || !canCastDodge(hero)) return;
-  const a = hero.abilities.dodge;
+/**
+ * Fire a fan of three arrows toward the aim point: one straight at it, one
+ * rotated `spreadDegrees` to either side. Each arrow is an ordinary piercing
+ * arrow at ~70% of the Q arrow's damage, with Q's range scaling. Unlike Q
+ * there is no cast point — the volley looses immediately.
+ */
+function castSplit(ctx: CastContext): void {
+  const { state, hero, events } = ctx;
+  if (!hero.alive || !canCastSplit(hero)) return;
+  const a = hero.abilities.split;
 
-  // Dodging interrupts movement (and doesn't break invisibility — it's
-  // defensive, not an attack).
-  beginCast(hero, false);
-  a.active = true;
-  a.activeTimer = DODGE.durationByLevel[a.level];
-  a.cooldown = DODGE.cooldownByLevel[a.level];
+  // Casting interrupts movement, breaks invisibility (it's an attack), and
+  // turns the hero toward the volley.
+  beginCast(hero, true);
+  const dir = aimDir(hero, ctx.x ?? hero.pos.x, ctx.z ?? hero.pos.z);
+  hero.targetFacing = V.heading(dir);
+
+  const spread = (SPLIT.spreadDegrees * Math.PI) / 180;
+  for (let i = 0; i < SPLIT.arrowCount; i++) {
+    // Fan angles centred on the aim: -spread, 0, +spread for three arrows.
+    const angle = (i - (SPLIT.arrowCount - 1) / 2) * spread;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const d = { x: dir.x * cos - dir.z * sin, z: dir.x * sin + dir.z * cos };
+    spawnProjectile(state, events, {
+      ownerId: hero.id,
+      team: hero.team,
+      pos: V.add(hero.pos, V.scale(d, ARROW.spawnOffset)),
+      dir: d,
+      speed: ARROW.speed,
+      maxRange: SPLIT.rangeByLevel[a.level],
+      traveled: 0,
+      damage: SPLIT.damageByLevel[a.level] + hero.bonusDamage,
+    });
+  }
+  a.cooldown = SPLIT.cooldownByLevel[a.level];
 }
 
 // ── E — Scout ─────────────────────────────────────────────────────────
@@ -376,30 +401,24 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
       }
     },
   },
-  dodge: {
-    id: 'dodge',
+  split: {
+    id: 'split',
     slot: 'W',
-    name: 'Dodge',
-    description: 'Enter an evasive stance that avoids all incoming arrows for a short window.',
+    name: 'Split Arrow',
+    description: 'Fire a fan of three arrows — one at the cursor and one angled to either side.',
     stats: [
-      { label: 'Duration', values: [`${DODGE.durationByLevel[1]}s`] },
-      { label: 'Cooldown', values: perRank(DODGE.cooldownByLevel, 's') },
+      { label: 'Damage', values: perRank(SPLIT.damageByLevel) },
+      { label: 'Range', values: perRank(SPLIT.rangeByLevel) },
+      { label: 'Cooldown', values: perRank(SPLIT.cooldownByLevel, 's') },
+      { label: 'Spread', values: [`${SPLIT.spreadDegrees}°`] },
     ],
     kind: 'basic',
-    maxLevel: DODGE.maxLevel,
-    cooldownByLevel: DODGE.cooldownByLevel,
-    targeting: 'self',
-    hasActiveWindow: true,
-    canCast: canCastDodge,
-    cast: castDodge,
-    tick: (h, dt) => {
-      const a = h.abilities.dodge;
-      if (a.active) {
-        a.activeTimer! -= dt;
-        if (a.activeTimer! <= 0) a.active = false;
-      }
-      tickCooldown(a, dt);
-    },
+    maxLevel: SPLIT.maxLevel,
+    cooldownByLevel: SPLIT.cooldownByLevel,
+    targeting: 'aim',
+    canCast: canCastSplit,
+    cast: castSplit,
+    tick: (h, dt) => tickCooldown(h.abilities.split, dt),
   },
   reveal: {
     id: 'reveal',

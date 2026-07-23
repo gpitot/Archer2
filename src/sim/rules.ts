@@ -126,13 +126,28 @@ export const ARROW = {
   flyHeight: 22,
 } as const;
 
-// ── Dodge ability (W) ────────────────────────────────────────────────
-export const DODGE = {
-  /** Dodge window duration (fixed at 0.8s for all ranks). */
-  durationByLevel: [0, 0.8, 0.8, 0.8, 0.8, 0.8],
-  /** Cooldown per level (seconds). */
-  cooldownByLevel: [0, 8, 7, 6, 5, 4],
+// ── Split Arrow ability (W) ──────────────────────────────────────────
+export const SPLIT = {
+  /** Arrows in the fan: one at the aim point, one to either side. */
+  arrowCount: 3,
+  /** Angle between adjacent arrows (degrees). */
+  spreadDegrees: 15,
+  /** Damage per arrow per rank — ~70% of the Q arrow's (index 0 = unlearned). */
+  damageByLevel: [0, 140, 210, 280, 350, 420],
+  /** Max flight range per rank — same scaling as Q. */
+  rangeByLevel: ARROW.rangeByLevel,
+  /** Cooldown per rank (seconds) — a real cooldown, unlike Q's fast recharge. */
+  cooldownByLevel: [0, 10, 9, 8, 7, 6],
   maxLevel: 5,
+} as const;
+
+// ── Dodge (evasion window) ───────────────────────────────────────────
+// No longer a spell: the old W dodge was replaced by Split Arrow. The evasion
+// mechanic itself survives as `hero.dodgeTimer` (arrows, fireballs, and melee
+// swings pass through while it runs) so a future item can grant it.
+export const DODGE = {
+  /** Evasion window a future dodge item would grant (seconds). */
+  duration: 0.8,
 } as const;
 
 // ── Scout ability (E) ────────────────────────────────────────────────

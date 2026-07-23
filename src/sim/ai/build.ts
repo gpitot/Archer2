@@ -29,7 +29,7 @@ export function nextAbilityToLevel(hero: HeroState): AbilityId | null {
 
   const cap = Math.min(basicRankCap(hero.level), 5);
   if (a.arrow.level < cap) return 'arrow';
-  if (a.dodge.level < cap) return 'dodge';
+  if (a.split.level < cap) return 'split';
   if (a.reveal.level < cap) return 'reveal';
   return null;
 }

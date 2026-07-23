@@ -235,7 +235,7 @@ export function stepCreeps(
         if (creep.attackCooldown <= 0) {
           if (def.kind === 'melee') {
             // Dodge evades melee swings too
-            if (!target.abilities.dodge.active) {
+            if (target.dodgeTimer <= 0) {
               applyCreepDamageToHero(state, target, creepDamage(creep.type, creep.level), creep, creep.id, events);
             }
           } else {

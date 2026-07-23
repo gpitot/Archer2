@@ -113,7 +113,10 @@
 
   ],
   "camps": [
-    {"x":25,"z":1737,"units":["ghoul","ghoul"]}
+    {"x":25,"z":1737,"units":["ghoul","ghoul"]},
+    {"x":-1774,"z":45,"units":["ghoul","ghoul"]},
+    {"x":-48,"z":-1695,"units":["ghoul","ghoul"]},
+    {"x":1860,"z":58,"units":["ghoul","ghoul"]}
   ],
   "spawns": [
     {"x":-138,"z":-29},
@@ -125,7 +128,7 @@
 
   ],
   "fountains": [
-
+    {"x":290,"z":-213}
   ],
   "shops": [
     {"x":-226,"z":-231}

@@ -172,6 +172,8 @@ export interface HeroMeta {
   invisTimer: number;
   /** Slow debuff timer from Ice Bow (seconds remaining; 0 = inactive). */
   slowTimer: number;
+  /** Evasion window (seconds remaining; 0 = inactive) — see `HeroState.dodgeTimer`. */
+  dodgeTimer: number;
   /** Per-ability rank/cooldown/charge state — mirrors `HeroState.abilities`. */
   abilities: Record<AbilityId, AbilityRuntime>;
   /** Active-item cooldowns keyed by item id — mirrors `HeroState.itemCooldowns`. */

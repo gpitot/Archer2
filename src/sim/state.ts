@@ -113,7 +113,7 @@ export interface AbilityRuntime {
   windup?: number;
   /** Aim point captured at cast; the wind-up looses toward it. Arrow only. */
   windupAim?: Vec2;
-  /** True while the ability's active window is open (e.g. dodge). */
+  /** True while the ability's active window is open (`hasActiveWindow` defs). */
   active?: boolean;
   /** Seconds left in the active window. */
   activeTimer?: number;
@@ -168,6 +168,12 @@ export interface HeroState extends UnitCore {
   hasteTimer: number;
   invisTimer: number;
   slowTimer: number;
+  /**
+   * Evasion window (seconds remaining; 0 = inactive): arrows, fireballs, and
+   * melee swings pass through while it runs. Formerly the W dodge spell —
+   * nothing grants it currently; reserved for a future dodge item.
+   */
+  dodgeTimer: number;
   /** Fire Bow burn: total damage still owed (stacks across hits); 0 = none. Sim-only. */
   burnRemaining: number;
   /** Rate the burn pool drains at (damage/sec), re-timed on each stacking hit. */
@@ -462,6 +468,7 @@ export function createHeroState(id: string, team: number, pos: Vec2): HeroState 
     hasteTimer: 0,
     invisTimer: 0,
     slowTimer: 0,
+    dodgeTimer: 0,
     burnRemaining: 0,
     burnDps: 0,
     burnSourceId: null,

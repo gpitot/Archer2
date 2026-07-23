@@ -332,6 +332,9 @@ function stepHero(hero: HeroState, dt: number): void {
     if (hero.invulnerableTimer <= 0) hero.invulnerable = false;
   }
 
+  // Evasion window (item-granted; formerly the W dodge spell).
+  if (hero.dodgeTimer > 0) hero.dodgeTimer = Math.max(0, hero.dodgeTimer - dt);
+
   // Blink Dagger cast delay — hero is immobilised until the timer expires.
   if (hero.blinkCastTimer > 0) {
     hero.blinkCastTimer -= dt;
@@ -508,7 +511,7 @@ function stepProjectiles(
       // where every hero has its own team).
       if (hero.team === p.team) continue;
       if (!hero.alive || hero.invulnerable) continue;
-      if (hero.abilities.dodge.active) continue; // dodge evades — don't mark as hit
+      if (hero.dodgeTimer > 0) continue; // dodge evades — don't mark as hit
       if (hitIds.includes(hero.id)) continue;
       const r = HERO.bodyRadius + ARROW.collisionRadius;
       if (V.distanceSq(p.pos, hero.pos) >= r * r) continue;

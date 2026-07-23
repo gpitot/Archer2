@@ -51,7 +51,7 @@ import { advanceProjectile } from '../sim/projectiles';
 import { buildSimWorld, buildNavGridFromWpm, buildObstaclesFromSolids } from '../sim/buildWorld';
 import { AiController, AI_DIFFICULTY_PRESETS, type AiDifficulty } from '../sim/ai/AiController';
 import { HERO, ARROW, WARD, SCOUT, BLAST, heroMaxHp } from '../sim/rules';
-import { ABILITIES, ABILITY_ORDER, AbilityDef, abilityTooltip, canCast } from '../sim/abilities';
+import { ABILITIES, ABILITY_ORDER, AbilityDef, AbilityId, abilityTooltip, canCast } from '../sim/abilities';
 import { GRAPPLE_ANCHOR_GAP, SHOP_ITEMS, SHOP_ITEMS_BY_ID } from '../sim/shopItems';
 
 /** Height the grapple rope leaves the hero's hand at. */
@@ -675,7 +675,7 @@ export class Game {
       abilityId: id,
       maxLevel: ABILITIES[id].maxLevel,
       tooltip: (level: number) => abilityTooltip(ABILITIES[id], level),
-      onLevel: (abilityId: string) => this._enqueueCommand({ type: 'levelAbility', ability: abilityId as 'arrow' | 'dodge' | 'reveal' | 'blast' }),
+      onLevel: (abilityId: string) => this._enqueueCommand({ type: 'levelAbility', ability: abilityId as AbilityId }),
     })));
     this._statusBar = new HeroStatusBar();
     this._itemBar = new ItemBar();
@@ -1070,6 +1070,7 @@ export class Game {
     dst.hasteTimer = src.hasteTimer;
     dst.invisTimer = src.invisTimer;
     dst.slowTimer = src.slowTimer;
+    dst.dodgeTimer = src.dodgeTimer;
     for (const id of ABILITY_ORDER) {
       const srcAbility = src.abilities[id];
       if (!srcAbility) continue;

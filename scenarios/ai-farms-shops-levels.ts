@@ -48,7 +48,7 @@ export function run(h: SimHarness): void {
 
   // Skill points spent — the hero leveled and invested.
   const spent =
-    (ai.abilities.arrow.level - 1) + ai.abilities.dodge.level +
+    (ai.abilities.arrow.level - 1) + ai.abilities.split.level +
     ai.abilities.reveal.level + ai.abilities.blast.level;
   expectTrue(ai.level >= 2, `AI leveled up (level=${ai.level})`);
   expectTrue(spent >= 1, `AI spent skill points (extra ranks=${spent})`);

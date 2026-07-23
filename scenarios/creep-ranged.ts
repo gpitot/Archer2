@@ -60,11 +60,9 @@ export function run(h: SimHarness): void {
     expectTrue(Math.abs(step - def.projectileSpeed! * DT) < 1, 'fireball step is uniform');
   }
 
-  // Dodge: grant a point for W rank 1 (the level-1 point is auto-spent on
-  // Q), activate as the next
+  // Dodge: grant the evasion window directly (the W dodge spell was replaced
+  // by Split Arrow; the mechanic survives for future items) as the next
   // fireball spawns → it passes through and expires with no hit.
-  hero.skillPoints = 1;
-  h.issue('p1', { type: 'levelAbility', ability: 'dodge' });
   const hpBeforeDodge = () => hero.hp;
   h.runUntil(
     (s) => s.projectiles.some((p) => p.ownerId === 'c1'),
@@ -72,7 +70,7 @@ export function run(h: SimHarness): void {
     'second fireball',
   );
   const hpAtDodge = hpBeforeDodge();
-  h.issue('p1', { type: 'cast', ability: 'dodge' });
+  hero.dodgeTimer = 2;
   const dodgeWindow = h.runUntil(
     (s) => !s.projectiles.some((p) => p.ownerId === 'c1'),
     h.seconds(2),

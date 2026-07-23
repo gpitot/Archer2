@@ -731,6 +731,7 @@ export class GameRoom extends DurableObject<Env> {
       hasteTimer: q(h.hasteTimer),
       invisTimer: q(h.invisTimer),
       slowTimer: q(h.slowTimer),
+      dodgeTimer: q(h.dodgeTimer),
       abilities: this._wireAbilities(h),
       itemCooldowns: this._wireItemCooldowns(h),
     }));

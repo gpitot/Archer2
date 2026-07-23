@@ -20,16 +20,12 @@ export function run(h: SimHarness): void {
   );
   expectTrue(h.hasLineOfSight(shooter.pos, ghoul.pos), 'clear arrow line to the ghoul');
 
-  // Grant p2 a point for W rank 1 (the level-1 point is auto-spent on Q).
-  dodger.skillPoints = 1;
   h.issue('p1', { type: 'levelAbility', ability: 'arrow' });
-  h.issue('p2', { type: 'levelAbility', ability: 'dodge' });
   h.tick();
 
-  // p2 dodges, p1 fires through them at the ghoul.
-  h.issue('p2', { type: 'cast', ability: 'dodge' });
-  h.tick();
-  expectTrue(dodger.abilities.dodge.active, 'p2 is dodging');
+  // p2 dodges (evasion window granted directly — the W dodge spell is gone,
+  // the mechanic survives for future items), p1 fires through them at the ghoul.
+  dodger.dodgeTimer = 5;
   h.issue('p1', { type: 'cast', ability: 'arrow', x: ghoul.pos.x, z: ghoul.pos.z });
 
   const events = h.runUntil(

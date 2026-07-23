@@ -8,7 +8,7 @@
  * changes, no new state, no protocol — see `docs/ai-opponent-plan.md`.
  *
  * Two cadences run inside `think`:
- *   • Threat responses (dodge / sidestep / blast evacuation) every frame —
+ *   • Threat responses (sidestep / blast evacuation) every frame —
  *     timing is frame-critical and the checks are cheap (no pathfinding).
  *   • The macro FSM + micro combat at ~10 Hz — `moveTo` triggers pathfinding
  *     and line-of-fire sampling, so we throttle it.
@@ -18,7 +18,7 @@
  * harness runs are reproducible.
  */
 import * as V from '../math';
-import { ARROW, BLAST, HERO, maxHpForLevel } from '../rules';
+import { ARROW, BLAST, HERO, SPLIT, maxHpForLevel } from '../rules';
 import type { Command, CreepState, HeroInput, HeroState, MatchState, RuneState } from '../state';
 import { type SimWorld, findWalkableNear } from '../world';
 import { ABILITIES, canCast } from '../abilities';
@@ -40,7 +40,7 @@ export interface AiOptions {
    */
   aimError?: number;
   /**
-   * Seconds a threat must persist before the bot reacts (dodge / sidestep /
+   * Seconds a threat must persist before the bot reacts (sidestep /
    * blast evacuation). `0` (default) reacts instantly, every frame.
    */
   reactionDelay?: number;
@@ -71,8 +71,6 @@ const REPATH_DIST = 64;
 const FIRE_MARGIN = 120;
 /** Fraction of max arrow range the kite band tries to hold. */
 const KITE_BAND = 0.7;
-/** Dodge when the soonest arrow will connect within this many seconds. */
-const DODGE_LEAD = 0.15;
 
 /** Commands are filtered through these flags after the threat pass runs. */
 interface ThreatOutcome {
@@ -171,32 +169,21 @@ export class AiController {
       return { skipMove: true, skipCast: true };
     }
 
-    // Incoming arrow: dodge if we can time it, else sidestep out of the line.
-    const dodgeRank = hero.abilities.dodge.level;
-    if (dodgeRank >= 1 && canCast(ABILITIES.dodge, hero)) {
-      const threat = incomingArrowThreat(state, hero);
-      if (threat && threat.timeToImpact <= DODGE_LEAD) {
-        out.push({ type: 'cast', ability: 'dodge' });
-        // Dodge stops movement; let the macro re-issue a fresh kite step.
-        this._lastDest = null;
-        return { skipMove: false, skipCast: false };
-      }
-    } else {
-      // Dodge unavailable: sidestep works only with enough lead time to clear
-      // the corridor (arrows are fast). Widen the corridor so we react early.
-      const threat = incomingArrowThreat(state, hero, HERO.bodyRadius);
-      if (threat && threat.timeToImpact > 0.2 && threat.timeToImpact < 1.0) {
-        const p = threat.projectile;
-        const rel = V.sub(hero.pos, p.pos);
-        const along = rel.x * p.dir.x + rel.z * p.dir.z;
-        const lateral = V.sub(rel, V.scale(p.dir, along));
-        const escape = V.length(lateral) > 1
-          ? V.normalize(lateral)
-          : { x: p.dir.z, z: -p.dir.x }; // exactly on the line → either side
-        const target = V.add(hero.pos, V.scale(escape, 300));
-        this._moveTo(world, hero, target, out, true);
-        return { skipMove: true, skipCast: true };
-      }
+    // Incoming arrow: sidestep out of the line. Sidestepping works only with
+    // enough lead time to clear the corridor (arrows are fast), so widen the
+    // corridor to react early.
+    const threat = incomingArrowThreat(state, hero, HERO.bodyRadius);
+    if (threat && threat.timeToImpact > 0.2 && threat.timeToImpact < 1.0) {
+      const p = threat.projectile;
+      const rel = V.sub(hero.pos, p.pos);
+      const along = rel.x * p.dir.x + rel.z * p.dir.z;
+      const lateral = V.sub(rel, V.scale(p.dir, along));
+      const escape = V.length(lateral) > 1
+        ? V.normalize(lateral)
+        : { x: p.dir.z, z: -p.dir.x }; // exactly on the line → either side
+      const target = V.add(hero.pos, V.scale(escape, 300));
+      this._moveTo(world, hero, target, out, true);
+      return { skipMove: true, skipCast: true };
     }
 
     return { skipMove: false, skipCast: false };
@@ -365,7 +352,7 @@ export class AiController {
     // Parting shot: a fleeing archer that never stops to shoot can't contest a
     // snowball now that firing roots (the cast point). When we're not critically
     // low, briefly stand and loose a clean shot at the chaser before running —
-    // the per-frame threat pass still dodges incoming arrows during the draw.
+    // the per-frame threat pass still sidesteps incoming arrows during the draw.
     if (
       enemy &&
       !threat.skipCast &&
@@ -476,16 +463,22 @@ export class AiController {
 
   /** Fire at a hero target with a lead shot, honouring every fire gate. */
   private _tryShootHero(world: SimWorld, hero: HeroState, target: HeroState, out: Command[]): boolean {
-    if (!canCast(ABILITIES.arrow, hero)) return false;
     if (target.invulnerable) return false; // never shoot respawn-invuln heroes
-    if (target.abilities.dodge.active) return false; // wait out the dodge window
-    return this._fireIntercept(world, hero, target.pos, heroVelocity(target), out);
+    if (target.dodgeTimer > 0) return false; // wait out the dodge window
+    // Prefer the W volley when it's up — three arrows at 70% damage each beat
+    // one Q arrow, and the fan punishes lateral juking.
+    if (canCast(ABILITIES.split, hero) &&
+        this._fireIntercept(world, hero, target.pos, heroVelocity(target), out, 'split')) {
+      return true;
+    }
+    if (!canCast(ABILITIES.arrow, hero)) return false;
+    return this._fireIntercept(world, hero, target.pos, heroVelocity(target), out, 'arrow');
   }
 
   /** Fire at a (slow, non-dodging) creep. */
   private _tryShootCreep(world: SimWorld, hero: HeroState, creep: CreepState, out: Command[]): boolean {
     if (!canCast(ABILITIES.arrow, hero)) return false;
-    return this._fireIntercept(world, hero, creep.pos, { x: 0, z: 0 }, out);
+    return this._fireIntercept(world, hero, creep.pos, { x: 0, z: 0 }, out, 'arrow');
   }
 
   /** Shared intercept-solve + range/LoF gate + cast emission. Returns whether it fired. */
@@ -495,22 +488,28 @@ export class AiController {
     targetPos: V.Vec2,
     targetVel: V.Vec2,
     out: Command[],
+    ability: 'arrow' | 'split',
   ): boolean {
-    // The arrow doesn't loose until the cast point elapses, and the hero is
+    // The Q arrow doesn't loose until the cast point elapses, and the hero is
     // rooted for it — so lead from where the target will be after the wind-up,
     // otherwise a strafing target has slid past the aim by the time we fire.
-    const launchTargetPos = V.add(targetPos, V.scale(targetVel, ARROW.windup));
+    // (Split has no cast point and looses immediately.)
+    const windup = ability === 'arrow' ? ARROW.windup : 0;
+    const launchTargetPos = V.add(targetPos, V.scale(targetVel, windup));
     const shot = solveIntercept(hero.pos, launchTargetPos, targetVel, ARROW.speed);
     if (!shot) return false; // target outruns the arrow → hold fire
 
     const flightDist = ARROW.speed * shot.time;
-    if (flightDist > this._arrowRange(hero) - FIRE_MARGIN) return false;
+    const range = ability === 'split'
+      ? SPLIT.rangeByLevel[Math.max(1, hero.abilities.split.level)]
+      : this._arrowRange(hero);
+    if (flightDist > range - FIRE_MARGIN) return false;
     if (!hasLineOfFire(world, hero.pos, shot.point)) return false;
 
     // Range/LoF gates use the true intercept; only the emitted aim is scattered
     // so an easier bot shoots when a perfect bot would, but misses by `_aimError`.
     const aim = this._scatter(shot.point);
-    out.push({ type: 'cast', ability: 'arrow', x: aim.x, z: aim.z });
+    out.push({ type: 'cast', ability, x: aim.x, z: aim.z });
     this._lastDest = null; // the cast stopped movement — force a fresh step
     return true;
   }

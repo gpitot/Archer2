@@ -32,9 +32,9 @@ export function run(h: SimHarness): void {
   expectTrue(h.state.blasts.length === 0, 'unlearned R cannot cast');
 
   // Basic rank 1 (here W) is allowed at level 1.
-  h.issue('p1', { type: 'levelAbility', ability: 'dodge' });
+  h.issue('p1', { type: 'levelAbility', ability: 'split' });
   h.tick();
-  expectTrue(hero.abilities.dodge.level === 1 && hero.skillPoints === 0, 'W rank 1 learned at level 1');
+  expectTrue(hero.abilities.split.level === 1 && hero.skillPoints === 0, 'W rank 1 learned at level 1');
 
   // Level 5 with banked points: Q climbs only to the cap (ceil(5/2) = 3).
   hero.level = 5;

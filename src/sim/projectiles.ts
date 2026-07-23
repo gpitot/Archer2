@@ -78,7 +78,7 @@ export function findHitHero(
     if (skipOwnerId !== undefined && hero.id === skipOwnerId) continue;
     if (hero.team === p.team) continue; // never hit allies (creep shots are team −1)
     if (!hero.alive || hero.invulnerable) continue;
-    if (hero.abilities.dodge.active) continue;
+    if (hero.dodgeTimer > 0) continue;
     if (V.distanceSq(p.pos, hero.pos) < r2) return hero;
   }
   return null;

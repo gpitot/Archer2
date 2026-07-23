@@ -591,6 +591,7 @@ export class EditorApp {
         break;
       case 'fountain':
         if (!fromDrag) this._placeFountain();
+        break;
       case 'castle':
         if (!fromDrag) this._placeCastle();
         break;
