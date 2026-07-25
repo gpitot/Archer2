@@ -193,6 +193,14 @@ export class Game {
    * lives until its `_remoteProjectiles` entry dies on the render timeline.
    */
   private _ownArrowIds = new Set<string>();
+  /**
+   * Server ids of our own shots whose `fire` event beat our prediction to the
+   * cast point, so there was no local arrow to claim them. The server's copy is
+   * rendered for these, and the local arrow is suppressed when prediction
+   * eventually looses it — see `_handleOwnArrowEvent`. FIFO: shots are loosed
+   * in the order they were fired.
+   */
+  private _unclaimedOwnFires: string[] = [];
 
   /**
    * Remote projectiles, keyed by server id. Registered from `fire` events
@@ -1371,6 +1379,11 @@ export class Game {
   private _retireRemoteProjectile(id: string): void {
     this._remoteProjectiles.delete(id);
     this._ownArrowIds.delete(id);
+    // If this shot's server copy died before our prediction ever loosed it, the
+    // suppression it was owed is moot — drop it so it can't silently eat the
+    // next shot's local arrow.
+    const pending = this._unclaimedOwnFires.indexOf(id);
+    if (pending >= 0) this._unclaimedOwnFires.splice(pending, 1);
   }
 
   /** Track our fire/hit events to link cosmetic arrows to server projectiles. */
@@ -1386,6 +1399,14 @@ export class Game {
       if (cosmetic) {
         cosmetic.serverId = ev.projectile.id;
         this._ownArrowIds.add(ev.projectile.id);
+      } else {
+        // No local arrow to claim it: our prediction hasn't reached this shot's
+        // cast point yet. That happens once frames get long enough for the
+        // fixed-step catch-up to hit its cap, so the predicted sim falls behind
+        // the server's timeline. Render the server's copy, and note that the
+        // local arrow for this shot must be suppressed when prediction finally
+        // does loose it — otherwise the shot is drawn twice, a few units apart.
+        this._unclaimedOwnFires.push(ev.projectile.id);
       }
       return;
     }
@@ -1417,6 +1438,14 @@ export class Game {
   private _spawnCosmeticFromFire(proj: ProjectileState): void {
     const player = this._playerState;
     if (!player) return;
+
+    // The server already told us about this shot and, finding no local arrow to
+    // claim, kept its own copy on screen (see `_handleOwnArrowEvent`). Spawning
+    // now would draw the same arrow a second time.
+    if (this._unclaimedOwnFires.length > 0) {
+      this._unclaimedOwnFires.shift();
+      return;
+    }
 
     const pv = this._projectilePool.pop();
     if (!pv) return;

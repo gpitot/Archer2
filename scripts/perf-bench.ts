@@ -8,11 +8,23 @@
  * The CPU throttle is the point: the machine this exists for is slower than a
  * dev box, and an unthrottled headless run is too fast to tell anything apart.
  *
- * It also samples the compiled shader-program count early and late in the run.
- * That number must be identical at both ends — if it grows, something is
- * changing a shader define at runtime (almost always the scene's light count),
- * which stalls the main thread recompiling every material mid-fight. See
- * `src/rendering/Lighting.ts`.
+ * Read `frame avg` / `frame p95`, not `frames/sec`. Headless Chromium in a
+ * container throttles requestAnimationFrame hard (often to a couple of hertz)
+ * no matter how cheap the frames are, so the rendered frame rate here says
+ * nothing. Per-frame *work* is what this measures, and it is what translates to
+ * frames on a real machine.
+ *
+ * It also tracks the compiled shader-program count once a second.
+ *
+ * Some growth early on is normal and harmless: a material compiles the first
+ * time something using it is actually drawn, so the first arrow, the first hit
+ * burst, and the first death each add one. What must not happen is growth that
+ * keeps going — that means a shader define is changing at runtime (almost always
+ * the scene's light count), which stalls the main thread recompiling every
+ * material in the scene, repeatedly, mid-fight. See `src/rendering/Lighting.ts`.
+ *
+ * So the check is on the *tail* of the run: once the fight is underway, the
+ * count must be flat.
  *
  * Usage:
  *   pnpm perf                       # default: 4× throttle, 30 s, auto quality
@@ -31,22 +43,28 @@ const PORT = 4174;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** One parsed `[perf] FPS=…` console line. */
+/** One parsed `[perf] FPS=…` console line — the monitor emits one per second. */
 interface PerfSample {
+  /** The monitor's 1000/avg figure: frames per second the *work* would allow. */
   fps: number;
   avg: number;
   p95: number;
   p99: number;
   max: number;
   drawCalls: number;
-  programs: number;
+  /**
+   * Frames actually rendered in that second. Distinct from `fps`: rAF can be
+   * capped by vsync, or throttled hard in a headless container, so this is the
+   * real frame rate while `fps` is the rate the per-frame cost would permit.
+   */
+  frames: number;
 }
 
 interface RunResult {
   throttle: number;
   samples: PerfSample[];
-  programsEarly: number;
-  programsLate: number;
+  /** Compiled-program count sampled once a second through the fight. */
+  programs: number[];
   renderScale: number;
   quality: string;
   errors: string[];
@@ -82,17 +100,14 @@ function parsePerfLine(text: string): PerfSample | null {
     p99: num(/p99=(\d+(?:\.\d+)?)ms/),
     max: num(/max=(\d+(?:\.\d+)?)ms/),
     drawCalls: num(/drawCalls=(\d+)/),
-    programs: num(/programs=(\d+)/),
+    frames: num(/samples=(\d+)/),
   };
   return Number.isFinite(sample.fps) ? sample : null;
 }
 
 // ── Scripted fight ─────────────────────────────────────────────────────
 
-/**
- * Level up the hero and hand back its ability ids, so the driver can cast
- * whatever this build actually has rather than hard-coded names.
- */
+/** Put the hero in the state a real mid-game fight would find it in. */
 async function prepareHero(page: Page): Promise<void> {
   await page.evaluate(() => {
     const g = (window as any).__game;
@@ -181,12 +196,21 @@ async function runOnce(browser: Browser, address: string, throttle: number): Pro
   await sleep(3000);
   samples.length = 0;
 
-  const fight = driveFight(page, SECONDS);
+  // Poll the program count alongside the fight, so the report shows how it
+  // evolves rather than just its endpoints.
+  const programs: number[] = [];
+  let polling = true;
+  const poller = (async () => {
+    while (polling) {
+      programs.push(await readPrograms(page));
+      await sleep(1000);
+    }
+  })();
 
-  await sleep(2000);
-  const programsEarly = await readPrograms(page);
-  await fight;
-  const programsLate = await readPrograms(page);
+  await driveFight(page, SECONDS);
+  polling = false;
+  await poller;
+
   const renderScale = await page.evaluate(
     () => (window as any).__perf?.renderScale?.() ?? 1,
   );
@@ -195,13 +219,24 @@ async function runOnce(browser: Browser, address: string, throttle: number): Pro
   );
 
   await page.close();
-  return { throttle, samples, programsEarly, programsLate, renderScale, quality, errors };
+  return { throttle, samples, programs, renderScale, quality, errors };
 }
 
 // ── Reporting ──────────────────────────────────────────────────────────
 
 function mean(xs: number[]): number {
   return xs.length === 0 ? NaN : xs.reduce((a, b) => a + b, 0) / xs.length;
+}
+
+/**
+ * Growth in the program count over the last two thirds of the run, or null when
+ * there aren't enough samples to say. Skipping the first third lets first-draw
+ * compiles settle, so what's left is steady-state churn.
+ */
+function programTailGrowth(series: number[]): number | null {
+  if (series.length < 6) return null;
+  const tail = series.slice(Math.floor(series.length / 3));
+  return Math.max(...tail) - tail[0];
 }
 
 function report(r: RunResult): void {
@@ -216,16 +251,20 @@ function report(r: RunResult): void {
   const p95 = mean(r.samples.map((s) => s.p95));
   const worstP95 = Math.max(...r.samples.map((s) => s.p95));
   const maxDraw = Math.max(...r.samples.map((s) => s.drawCalls));
-  console.log(`  FPS avg        ${fps.toFixed(1)}`);
+  const frames = mean(r.samples.map((s) => s.frames));
+  console.log(`  frames/sec     ${frames.toFixed(1)}  (actually rendered)`);
+  console.log(`  FPS if uncapped${fps.toFixed(1).padStart(7)}  (1000 / frame work)`);
   console.log(`  frame avg      ${avg.toFixed(1)} ms`);
   console.log(`  frame p95      ${p95.toFixed(1)} ms  (worst second: ${worstP95.toFixed(1)} ms)`);
   console.log(`  drawCalls max  ${maxDraw}`);
 
-  const drift = r.programsLate - r.programsEarly;
-  const verdict = !Number.isFinite(drift) ? '(unavailable)'
-    : drift === 0 ? '✅ stable'
-      : `❌ +${drift} — shaders recompiled mid-fight`;
-  console.log(`  programs       ${r.programsEarly} → ${r.programsLate}  ${verdict}`);
+  const series = r.programs.filter(Number.isFinite);
+  const tailGrowth = programTailGrowth(series);
+  const verdict = tailGrowth === null ? '(unavailable)'
+    : tailGrowth === 0 ? '✅ flat once the fight is underway'
+      : `❌ +${tailGrowth} in the tail — shaders recompiling mid-fight`;
+  console.log(`  programs       ${series.length > 0 ? series.join(' ') : 'n/a'}`);
+  console.log(`                 ${verdict}`);
   console.log(`  samples        ${n}`);
   if (r.errors.length > 0) {
     console.log(`  ⚠️  ${r.errors.length} page error(s):`);
@@ -258,11 +297,12 @@ async function main(): Promise<void> {
     }
     results.forEach(report);
 
-    const churned = results.filter(
-      (r) => Number.isFinite(r.programsEarly) && r.programsLate > r.programsEarly,
-    );
+    const churned = results.filter((r) => {
+      const growth = programTailGrowth(r.programs.filter(Number.isFinite));
+      return growth !== null && growth > 0;
+    });
     if (churned.length > 0) {
-      console.log('\n[perf-bench] ❌ shader program count grew during play — see Lighting.ts');
+      console.log('\n[perf-bench] ❌ shader programs still being compiled mid-fight — see Lighting.ts');
       process.exitCode = 1;
     }
   } finally {

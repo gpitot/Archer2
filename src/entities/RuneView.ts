@@ -51,8 +51,13 @@ export class RuneView {
     // Soft coloured glow pooling on the ground. A real PointLight here would
     // cost every fragment on screen, and runes spawn and despawn — which
     // changes the scene's light count and recompiles every standard material
-    // (see `src/rendering/Lighting.ts`). The decal reads the same from above.
-    this._glow = new GroundGlow(150, 0xffffff, 0.5);
+    // (see `src/rendering/Lighting.ts`).
+    //
+    // Deliberately faint: the light it replaces was intensity 1.2 over a 120u
+    // falloff, which barely registered against lit terrain. The gem and the
+    // ring are what mark the spot; this only has to keep the rune from looking
+    // flatter than it used to.
+    this._glow = new GroundGlow(90, 0xffffff, 0.2);
     this._glow.mesh.position.y = 1;
     this.mesh.add(this._glow.mesh);
   }
