@@ -6,6 +6,8 @@
 import * as THREE from 'three';
 import { ProjectileState } from '../sim/state';
 import { ARROW } from '../sim/rules';
+import { GroundGlow } from '../rendering/GroundGlow';
+import { quality } from '../core/qualitySettings';
 
 export type ProjectileStyle = 'arrow' | 'fireball' | 'scout' | 'ice' | 'fire' | 'grapple';
 
@@ -18,8 +20,11 @@ interface StyleColors {
   feather: number;
   glow: number; // additive halo sheath + tip orb
   trail: number; // additive motion streak
-  light: number; // point light tint
+  ground: number; // ground-glow decal tint (stands in for a point light)
 }
+
+/** Diameter of the arrow's ground decal, world units. */
+const GROUND_GLOW_SIZE = 130;
 
 const STYLES: Record<'arrow' | 'ice' | 'fire' | 'grapple', StyleColors> = {
   // Default arrow: warm wood shaft, bright steel head, gold energy halo so it
@@ -32,7 +37,7 @@ const STYLES: Record<'arrow' | 'ice' | 'fire' | 'grapple', StyleColors> = {
     feather: 0xef3b3b,
     glow: 0xffcc55,
     trail: 0xffd27a,
-    light: 0xffbb55,
+    ground: 0xffbb55,
   },
   // Ice arrow: frosty blue-white with a cold cyan halo and drifting snow.
   ice: {
@@ -43,7 +48,7 @@ const STYLES: Record<'arrow' | 'ice' | 'fire' | 'grapple', StyleColors> = {
     feather: 0x6fb2e6,
     glow: 0x9fe4ff,
     trail: 0xbfe8ff,
-    light: 0x7fd0ff,
+    ground: 0x7fd0ff,
   },
   // Fire arrow: charred shaft, molten head, orange flame halo and rising embers.
   // Purely cosmetic for now — wired for a future fire-bow item.
@@ -55,7 +60,7 @@ const STYLES: Record<'arrow' | 'ice' | 'fire' | 'grapple', StyleColors> = {
     feather: 0xff9d3c,
     glow: 0xff8a33,
     trail: 0xffb347,
-    light: 0xff6a22,
+    ground: 0xff6a22,
   },
   // Grappling hook: dark iron shaft with a hot amber head, matching the rope
   // drawn behind it so the two read as one object in flight.
@@ -67,7 +72,7 @@ const STYLES: Record<'arrow' | 'ice' | 'fire' | 'grapple', StyleColors> = {
     feather: 0x6b5a3a,
     glow: 0xffbb33,
     trail: 0xffcc66,
-    light: 0xffaa33,
+    ground: 0xffaa33,
   },
 };
 
@@ -75,7 +80,8 @@ export class ProjectileView {
   readonly mesh: THREE.Group;
   readonly projectileId: string;
 
-  private _light: THREE.PointLight;
+  /** Fake ground pooling in place of a real PointLight — see GroundGlow. */
+  private _groundGlow: GroundGlow;
   private _trailMat: THREE.MeshBasicMaterial;
   private _glowMat: THREE.MeshBasicMaterial;
   private _arrowParts!: THREE.Group;
@@ -92,7 +98,8 @@ export class ProjectileView {
     this.projectileId = projectileId;
     this.mesh = this._buildMesh();
     this.mesh.visible = false;
-    this._light = this.mesh.getObjectByName('arrowLight') as THREE.PointLight;
+    this._groundGlow = this._buildGroundGlow();
+    this.mesh.add(this._groundGlow.mesh);
     this._trailMat = (this.mesh.getObjectByName('arrowTrail') as THREE.Mesh)
       .material as THREE.MeshBasicMaterial;
     this._glowMat = (this.mesh.getObjectByName('arrowGlow') as THREE.Mesh)
@@ -126,12 +133,12 @@ export class ProjectileView {
       fireballMat.color.set(0x55ccff);
       fireballMat.emissive.set(0x1166cc);
       this._trailMat.color.set(0x99ddff);
-      this._light.color.set(0x66bbff);
+      this._groundGlow.setColor(0x66bbff);
     } else if (style === 'fireball') {
       fireballMat.color.set(0xff7733);
       fireballMat.emissive.set(0xdd3300);
       this._trailMat.color.set(0xff6633);
-      this._light.color.set(0xff5522);
+      this._groundGlow.setColor(0xff5522);
     } else {
       // Arrow family (arrow / ice / fire) — recolour every arrow part from the
       // shared palette so the shot reads instantly at a glance.
@@ -142,7 +149,7 @@ export class ProjectileView {
       this._arrowHeadMat.emissive.set(c.headEmissive);
       this._glowMat.color.set(c.glow);
       this._trailMat.color.set(c.trail);
-      this._light.color.set(c.light);
+      this._groundGlow.setColor(c.ground);
       for (const fm of this._featherMat) fm.color.set(c.feather);
     }
 
@@ -184,8 +191,8 @@ export class ProjectileView {
     // Pulse the trail + halo opacity for a subtle living feel.
     this._trailMat.opacity = 0.42 + 0.12 * Math.sin(t * 0.015);
     this._glowMat.opacity = 0.5 + 0.14 * Math.sin(t * 0.02);
-    // Gentle spin on the halo/tip so the glow shimmers rather than sits flat.
-    this._light.intensity = 130 + 30 * Math.sin(t * 0.02);
+    // Same shimmer the point light used to have, now on the ground decal.
+    this._groundGlow.setPulse(1 + 0.23 * Math.sin(t * 0.02));
 
     // Animate the particle system for ice/fire arrows.
     if (this._particles.visible) this._tickParticles();
@@ -316,13 +323,11 @@ export class ProjectileView {
     trail.rotation.x = Math.PI / 2;
     trail.name = 'arrowTrail';
     trail.renderOrder = 1;
+    // A long additive streak covers a lot of blended fragments per arrow; the
+    // sheath and tip orb carry the read on their own, so Low drops it. The mesh
+    // stays in the tree (the constructor looks its material up by name).
+    trail.visible = quality().tier !== 'low';
     root.add(trail); // shared by both styles
-
-    // ── Point light (glow around the arrowhead, colours the ground) ──
-    const light = new THREE.PointLight(0xffbb55, 130, 120);
-    light.position.z = 34;
-    light.name = 'arrowLight';
-    root.add(light); // shared by both styles
 
     // ── Particle system (snow for ice, embers for fire) ──
     this._particles = this._buildParticles();
@@ -333,11 +338,29 @@ export class ProjectileView {
     return root;
   }
 
+  // ── Ground glow ───────────────────────────────────────────────────
+
+  /**
+   * The arrow used to carry a real PointLight so its glow pooled on the
+   * terrain. In a forward-rendered scene of standard materials that cost every
+   * fragment on screen, and spawning/despawning arrows recompiled every shader
+   * mid-fight. This flat additive decal reproduces the read for one draw call.
+   *
+   * It's a child of the arrow root, whose Y is `heightAt(x,z) + flyHeight`, so
+   * cancelling `flyHeight` in local space lands it on the ground the arrow is
+   * flying over, and it inherits the root's XZ for free.
+   */
+  private _buildGroundGlow(): GroundGlow {
+    const glow = new GroundGlow(GROUND_GLOW_SIZE, STYLES.arrow.ground);
+    glow.mesh.position.y = -ARROW.flyHeight + 2;
+    return glow;
+  }
+
   // ── Particle system (ice snow / fire embers) ──────────────────────
 
   private _partPositions!: Float32Array;
   private _partVelocities!: Float32Array;
-  private _partCount = 34;
+  private _partCount = Math.max(8, Math.round(34 * quality().effectsDensity));
 
   private _buildParticles(): THREE.Points {
     const count = this._partCount;

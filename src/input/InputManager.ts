@@ -4,6 +4,12 @@ export type ClickHandler = (worldPos: THREE.Vector3) => void;
 /** Returns true if the click was consumed (don't pass to regular handlers). */
 export type ClickInterceptor = (worldPos: THREE.Vector3) => boolean;
 export type KeyHandler = () => void;
+
+/** Height-plane refinement steps used by `_screenToWorld`. */
+const PICK_ITERATIONS = 3;
+/** World units of height agreement that counts as converged. */
+const PICK_TOLERANCE = 1;
+
 /**
  * Captures mouse clicks (ground targeting), mouse movement (aim tracking),
  * and keyboard events (ability usage).
@@ -13,7 +19,12 @@ export class InputManager {
   private _camera: THREE.Camera;
   private _raycaster = new THREE.Raycaster();
   private _groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  private _ground: THREE.Object3D | null = null;
+  /** Terrain height sampler; null → pick against the flat y=0 plane. */
+  private _heightAt: ((x: number, z: number) => number) | null = null;
+
+  // Scratch vectors, reused so picking allocates nothing per event.
+  private _ndc = new THREE.Vector2();
+  private _pickHit = new THREE.Vector3();
 
   private _clickHandlers: ClickHandler[] = [];
   private _clickInterceptor: ClickInterceptor | null = null;
@@ -21,6 +32,15 @@ export class InputManager {
   // Mouse aim
   private _aimPosition = new THREE.Vector3();
   private _hasAim = false;
+  /**
+   * Latest mouse position that has not been converted to a world point yet.
+   * `mousemove` fires far more often than the game renders (and a burst can
+   * arrive between two frames), so the event only records coordinates and the
+   * pick happens lazily on the next `aimPosition` read — at most once per burst.
+   */
+  private _aimClientX = 0;
+  private _aimClientY = 0;
+  private _aimDirty = false;
 
   // Keyboard state
   private _keysDown = new Set<string>();
@@ -46,16 +66,34 @@ export class InputManager {
     window.addEventListener('mousemove', this._onWindowMouseMove.bind(this));
   }
 
-  /** Set the terrain mesh to raycast for click/aim. Falls back to the y=0 plane. */
-  setGround(mesh: THREE.Object3D): void {
-    this._ground = mesh;
+  /**
+   * Supply the terrain height sampler used to place click/aim points on the
+   * ground surface. Without one, picking falls back to the flat y=0 plane.
+   */
+  setGround(heightAt: (x: number, z: number) => number): void {
+    this._heightAt = heightAt;
   }
 
   // ── Mouse aim ──────────────────────────────────────────────────
 
-  /** Current world-space position of the mouse on the ground plane, or null. */
+  /**
+   * Current world-space position of the mouse on the ground, or null.
+   *
+   * The returned vector is the live internal one — **read-only**. Callers only
+   * read `.x`/`.z` out of it; copy it if you need to keep it.
+   */
   get aimPosition(): THREE.Vector3 | null {
-    return this._hasAim ? this._aimPosition.clone() : null;
+    if (this._aimDirty) {
+      this._aimDirty = false;
+      const pt = this._screenToWorld(this._aimClientX, this._aimClientY);
+      if (pt) {
+        this._aimPosition.copy(pt);
+        this._hasAim = true;
+      } else {
+        this._hasAim = false;
+      }
+    }
+    return this._hasAim ? this._aimPosition : null;
   }
 
   // ── Mouse click ────────────────────────────────────────────────
@@ -99,9 +137,11 @@ export class InputManager {
    *  - `.x` = screen right (+1) / left (-1)
    *  - `.z` = screen forward/up (+1) / down (-1)
    * The camera converts these into world directions via its yaw.
+   *
+   * The returned vector is the live internal one — **read-only**.
    */
   get edgePan(): THREE.Vector3 {
-    return this._panDirection.clone();
+    return this._panDirection;
   }
 
   private _onWindowMouseMove(event: MouseEvent): void {
@@ -152,41 +192,66 @@ export class InputManager {
     }
   }
 
+  /**
+   * Convert screen coordinates to a point on the ground.
+   *
+   * This used to raycast the terrain group triangle-by-triangle, which meant
+   * walking every chunk's BVH-less geometry on every `mousemove` — by far the
+   * most expensive thing the input layer did. Instead: intersect a horizontal
+   * plane, sample the terrain height there, lift the plane to that height, and
+   * repeat. Two or three iterations converge wherever the ground is not close
+   * to vertical.
+   *
+   * Tradeoff: right at a cliff edge the returned point can be off by under a
+   * world unit (well inside a nav cell), because the height field is sampled
+   * rather than intersected. Nothing downstream is that precise — clicks are
+   * snapped to walkable nav cells and aim only feeds a direction.
+   *
+   * Returns the shared scratch vector — **read-only**, and invalidated by the
+   * next call.
+   */
   private _screenToWorld(clientX: number, clientY: number): THREE.Vector3 | null {
     const rect = this._canvas.getBoundingClientRect();
-    const mouse = new THREE.Vector2(
+    this._ndc.set(
       ((clientX - rect.left) / rect.width) * 2 - 1,
       -((clientY - rect.top) / rect.height) * 2 + 1,
     );
 
-    this._raycaster.setFromCamera(mouse, this._camera);
+    this._raycaster.setFromCamera(this._ndc, this._camera);
+    const ray = this._raycaster.ray;
+    const hit = this._pickHit;
+    const heightAt = this._heightAt;
 
-    // Prefer the actual terrain surface under the cursor. Recursive, since
-    // the terrain is a Group of chunk meshes.
-    if (this._ground) {
-      const hits = this._raycaster.intersectObject(this._ground, true);
-      if (hits.length > 0) return hits[0].point.clone();
+    // The plane's normal is +Y, so `constant = -y` puts it at height y.
+    let y = 0;
+    for (let i = 0; i < PICK_ITERATIONS; i++) {
+      this._groundPlane.constant = -y;
+      // Pointing at the sky, or along the plane: no ground under the cursor.
+      if (!ray.intersectPlane(this._groundPlane, hit)) return null;
+      if (!heightAt) return hit;
+      const h = heightAt(hit.x, hit.z);
+      // Converged: `hit` already lies on the plane at this height.
+      if (Math.abs(h - y) < PICK_TOLERANCE) break;
+      y = h;
     }
-
-    // Fallback: the flat y=0 plane (e.g. cursor pointing at the sky).
-    const intersection = new THREE.Vector3();
-    const hit = this._raycaster.ray.intersectPlane(this._groundPlane, intersection);
-    return hit ? intersection : null;
+    // Report the true surface height at the point we landed on, so the Y is
+    // exact even when the XZ hasn't fully converged on a steep slope.
+    if (heightAt) hit.y = heightAt(hit.x, hit.z);
+    return hit;
   }
 
   private _onMouseMove(event: MouseEvent): void {
-    const pt = this._screenToWorld(event.clientX, event.clientY);
-    if (pt) {
-      this._aimPosition.copy(pt);
-      this._hasAim = true;
-    } else {
-      this._hasAim = false;
-    }
+    // Just record it — the pick happens on the next `aimPosition` read.
+    this._aimClientX = event.clientX;
+    this._aimClientY = event.clientY;
+    this._aimDirty = true;
   }
 
   private _onClick(event: MouseEvent): void {
     const pt = this._screenToWorld(event.clientX, event.clientY);
     if (pt) {
+      // Handlers get their own copy: `_screenToWorld` returns shared scratch,
+      // and a handler may hold on to the point (move indicators do).
       if (this._clickInterceptor) {
         const consumed = this._clickInterceptor(pt.clone());
         if (consumed) return;

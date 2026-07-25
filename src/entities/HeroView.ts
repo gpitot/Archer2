@@ -8,6 +8,7 @@ import { createHeroRig, HeroRig, MESH_SCALE } from './HeroRig';
 import { makeTextSprite, TextSprite } from './TextSprite';
 import { StunIndicator } from './StunIndicator';
 import { UnitView } from './UnitView';
+import { radialGlowTexture } from '../rendering/GroundGlow';
 
 /**
  * Render-only view of a hero. Owns the Three.js group, health bar, and the
@@ -17,12 +18,19 @@ import { UnitView } from './UnitView';
  * The body mesh + animation is delegated to a HeroRig (classic procedural
  * archer or the GLB ranger — pick with `?hero=classic` / default ranger).
  */
+/** Seconds the muzzle flash takes to fade out (matched the old light's decay). */
+const MUZZLE_FLASH_DURATION = 0.125;
+
 export class HeroView extends UnitView {
   readonly heroId: string;
 
   private _rig: HeroRig;
   private _healthBar: HealthBar;
-  private _flashGlow: THREE.PointLight;
+  /** Additive muzzle-flash sprite at the bow hand (see `flashFire`). */
+  private _flashGlow: THREE.Sprite;
+  private _flashGlowMat: THREE.SpriteMaterial;
+  /** Seconds remaining on the muzzle flash. */
+  private _flashTimer = 0;
   private _healFlashTimer = 0;
   private _wasAlive = true;
   /** Rune-buff indicator sprites floating above the head (DotA-style). */
@@ -57,10 +65,20 @@ export class HeroView extends UnitView {
     this._healthBar.sprite.position.set(0, 2.5, 0); // above archer's head
     this.mesh.add(this._healthBar.sprite);
 
-    // Muzzle-flash glow, pulsed on fire. Kept invisible while idle so it
-    // doesn't count toward the forward pipeline's per-fragment light loop.
-    this._flashGlow = new THREE.PointLight(0xff6600, 0, 5);
+    // Muzzle-flash glow, pulsed on fire. An additive sprite rather than a
+    // PointLight: toggling a light's visibility changes the scene's light count,
+    // which recompiles every standard material in the scene (see Lighting.ts).
+    this._flashGlowMat = new THREE.SpriteMaterial({
+      map: radialGlowTexture(),
+      color: 0xff6600,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this._flashGlow = new THREE.Sprite(this._flashGlowMat);
     this._flashGlow.position.set(0, 1.5, 0);
+    this._flashGlow.scale.setScalar(1.6);
     this._flashGlow.visible = false;
     this.mesh.add(this._flashGlow);
 
@@ -126,8 +144,9 @@ export class HeroView extends UnitView {
 
   /** Pulse the muzzle flash (driven by a sim `fire` event). */
   flashFire(): void {
-    this._flashGlow.intensity = 3;
-    this._flashGlow.color.set(0xff6600);
+    this._flashTimer = MUZZLE_FLASH_DURATION;
+    this._flashGlowMat.color.set(0xff6600);
+    this._flashGlowMat.opacity = 1;
     this._flashGlow.visible = true;
   }
 
@@ -203,9 +222,12 @@ export class HeroView extends UnitView {
       if (t > 0) this._rig.setEmissive(0x22cc88, t * 0.35);
       else this._rig.setEmissive(0x000000, 0);
     }
-    if (this._flashGlow.intensity > 0) {
-      this._flashGlow.intensity = Math.max(0, this._flashGlow.intensity - dt * 8);
-      if (this._flashGlow.intensity === 0) this._flashGlow.visible = false;
+    // Muzzle flash — fades out over MUZZLE_FLASH_DURATION, then stops drawing.
+    if (this._flashTimer > 0) {
+      this._flashTimer = Math.max(0, this._flashTimer - dt);
+      const t = this._flashTimer / MUZZLE_FLASH_DURATION;
+      this._flashGlowMat.opacity = t;
+      if (this._flashTimer === 0) this._flashGlow.visible = false;
     }
 
     // Tick healing sparkle particles.

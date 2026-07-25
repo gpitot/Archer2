@@ -17,6 +17,13 @@ export class ItemBar {
   private _flashes: HTMLDivElement[] = [];
   private _wasOnCd: boolean[] = [];
   private _hotkeys: HTMLSpanElement[] = [];
+  // Values currently in the DOM per slot, so an unchanged slot costs no write.
+  /** Cooldown sweep angle drawn in each slot; null = no sweep. */
+  private _cdAngles: (number | null)[] = [];
+  /** Countdown text drawn in each slot. */
+  private _cdTextValues: string[] = [];
+  /** Charge badge text drawn in each slot; null = badge hidden. */
+  private _badgeValues: (string | null)[] = [];
 
   constructor() {
     this.container = document.createElement('div');
@@ -124,6 +131,9 @@ export class ItemBar {
       this._flashes.push(flash);
       this._wasOnCd.push(false);
       this._itemIds.push(null);
+      this._cdAngles.push(null);
+      this._cdTextValues.push('');
+      this._badgeValues.push(null);
 
       // Hover tooltip — only shown when the slot holds an item.
       const slotIndex = i;
@@ -152,48 +162,72 @@ export class ItemBar {
     cooldownRemaining: Record<string, number> = {},
   ): void {
     for (let i = 0; i < 6; i++) {
-      const itemId = inventory[i];
+      const itemId = inventory[i] ?? null;
       const slot = this._slots[i];
       const badge = this._badges[i];
       const cooldown = this._cooldowns[i];
       const cdText = this._cdTexts[i];
-      this._itemIds[i] = itemId ?? null;
+      const itemChanged = itemId !== this._itemIds[i];
+      this._itemIds[i] = itemId;
+
       if (itemId) {
-        this._icons[i].textContent = SHOP_ITEMS_BY_ID[itemId]?.icon ?? '●';
+        if (itemChanged) {
+          this._icons[i].textContent = SHOP_ITEMS_BY_ID[itemId]?.icon ?? '●';
+        }
         const progress = cooldowns[itemId] ?? 1;
         const onCd = progress < 1;
         if (onCd) {
           // Radial wipe: revealed clockwise from the top as cooldown elapses.
-          const angle = progress * 360;
-          cooldown.style.background =
-            `conic-gradient(transparent ${angle}deg, rgba(0,0,0,0.6) ${angle}deg)`;
-          cdText.style.display = 'flex';
-          cdText.textContent = formatCooldown(cooldownRemaining[itemId] ?? 0);
-        } else {
+          // Whole degrees only — the finest step the gradient can render, and
+          // rounding keeps the string from being rebuilt for invisible deltas.
+          const angle = Math.round(progress * 360);
+          if (angle !== this._cdAngles[i]) {
+            this._cdAngles[i] = angle;
+            cooldown.style.background =
+              `conic-gradient(transparent ${angle}deg, rgba(0,0,0,0.6) ${angle}deg)`;
+            cdText.style.display = 'flex';
+          }
+          const text = formatCooldown(cooldownRemaining[itemId] ?? 0);
+          if (text !== this._cdTextValues[i]) {
+            this._cdTextValues[i] = text;
+            cdText.textContent = text;
+          }
+        } else if (this._cdAngles[i] !== null) {
+          this._cdAngles[i] = null;
           cooldown.style.background = 'none';
           cdText.style.display = 'none';
         }
         // Ready flash on the cooldown → ready transition
         if (this._wasOnCd[i] && !onCd) this._playReadyFlash(i);
-        this._wasOnCd[i] = onCd;
-        // Border stays visible during cooldown — slightly muted; bright when ready.
-        slot.style.borderColor = onCd ? 'rgba(150,132,85,0.6)' : 'rgba(255,200,60,0.7)';
-        slot.style.background = 'rgba(255, 255, 255, 0.1)';
-        this._hotkeys[i].style.color = onCd ? '#997733' : '#ffcc44';
-        this._icons[i].style.filter = onCd ? 'grayscale(0.6) brightness(0.7)' : 'none';
-        const count = charges[itemId];
-        if (count !== undefined) {
-          badge.textContent = String(count);
-          badge.style.display = 'block';
-        } else {
-          badge.style.display = 'none';
+        // The border, hotkey colour, and icon filter only move with the
+        // cooldown state or the item itself — both rare.
+        if (itemChanged || onCd !== this._wasOnCd[i]) {
+          slot.style.borderColor = onCd ? 'rgba(150,132,85,0.6)' : 'rgba(255,200,60,0.7)';
+          slot.style.background = 'rgba(255, 255, 255, 0.1)';
+          this._hotkeys[i].style.color = onCd ? '#997733' : '#ffcc44';
+          this._icons[i].style.filter = onCd ? 'grayscale(0.6) brightness(0.7)' : 'none';
         }
-      } else {
+        this._wasOnCd[i] = onCd;
+        const count = charges[itemId];
+        const badgeText = count !== undefined ? String(count) : null;
+        if (badgeText !== this._badgeValues[i]) {
+          this._badgeValues[i] = badgeText;
+          if (badgeText !== null) {
+            badge.textContent = badgeText;
+            badge.style.display = 'block';
+          } else {
+            badge.style.display = 'none';
+          }
+        }
+      } else if (itemChanged) {
+        // Empty slot: only needs clearing on the frame the item left.
         this._icons[i].textContent = '';
         this._icons[i].style.filter = 'none';
         badge.style.display = 'none';
+        this._badgeValues[i] = null;
         cooldown.style.background = 'none';
         cdText.style.display = 'none';
+        this._cdAngles[i] = null;
         this._wasOnCd[i] = false;
         slot.style.borderColor = 'rgba(180, 160, 100, 0.5)';
         slot.style.background = 'rgba(255, 255, 255, 0.1)';

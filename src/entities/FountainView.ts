@@ -4,6 +4,7 @@
  * logic lives in the sim; this is purely visual.
  */
 import * as THREE from 'three';
+import { quality } from '../core/qualitySettings';
 
 export class FountainView {
   readonly mesh: THREE.Group;
@@ -75,10 +76,15 @@ export class FountainView {
     water.name = 'fountainWater';
     g.add(water);
 
-    // Soft blue glow light
-    const glow = new THREE.PointLight(0x4488ff, 1.5, 200);
-    glow.position.y = 20;
-    g.add(glow);
+    // Soft blue glow light. Fountains are placed once at map load and never
+    // spawn or despawn, so this light does not churn the scene's light count —
+    // it is safe to keep (unlike arrow and rune lights, which were removed).
+    // It still costs a PBR light evaluation per fragment, so Low drops it.
+    if (quality().staticLights) {
+      const glow = new THREE.PointLight(0x4488ff, 1.5, 200);
+      glow.position.y = 20;
+      g.add(glow);
+    }
 
     // Decorative stone pillars (4 corners)
     for (let i = 0; i < 4; i++) {

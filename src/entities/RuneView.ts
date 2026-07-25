@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { RuneState } from '../sim/state';
 import { RUNE_TYPES, RuneTypeId } from '../sim/runeRules';
+import { GroundGlow } from '../rendering/GroundGlow';
 
 export class RuneView {
   readonly mesh: THREE.Group;
@@ -15,7 +16,7 @@ export class RuneView {
   private _gemMat: THREE.MeshStandardMaterial;
   private _ring: THREE.Mesh;
   private _ringMat: THREE.MeshBasicMaterial;
-  private _glow: THREE.PointLight;
+  private _glow: GroundGlow;
   private _time = Math.random() * Math.PI * 2;
   private _type: RuneTypeId | null = null;
 
@@ -47,9 +48,13 @@ export class RuneView {
     this._ring.renderOrder = 5;
     this.mesh.add(this._ring);
 
-    // Soft colored glow.
-    this._glow = new THREE.PointLight(0xffffff, 1.2, 120);
-    this.mesh.add(this._glow);
+    // Soft coloured glow pooling on the ground. A real PointLight here would
+    // cost every fragment on screen, and runes spawn and despawn — which
+    // changes the scene's light count and recompiles every standard material
+    // (see `src/rendering/Lighting.ts`). The decal reads the same from above.
+    this._glow = new GroundGlow(150, 0xffffff, 0.5);
+    this._glow.mesh.position.y = 1;
+    this.mesh.add(this._glow.mesh);
   }
 
   /** Mirror the simulation state onto the meshes for this frame. */
@@ -66,7 +71,7 @@ export class RuneView {
       this._gemMat.color.set(color);
       this._gemMat.emissive.set(color);
       this._ringMat.color.set(color);
-      this._glow.color.set(color);
+      this._glow.setColor(color);
     }
 
     this._time += dt;
@@ -74,8 +79,11 @@ export class RuneView {
     this.mesh.position.set(state.pos.x, y, state.pos.z);
     this._gem.position.y = 26 + Math.sin(this._time * 2.2) * 5;
     this._gem.rotation.y = this._time * 1.6;
-    this._glow.position.y = this._gem.position.y;
-    this._gemMat.emissiveIntensity = 0.7 + 0.25 * Math.sin(this._time * 3.1);
+    // The gem's emissive and the ground pool breathe together, so the rune
+    // still pulses now that the light is gone.
+    const pulse = Math.sin(this._time * 3.1);
+    this._gemMat.emissiveIntensity = 0.7 + 0.25 * pulse;
+    this._glow.setPulse(1 + 0.3 * pulse);
   }
 
   dispose(): void {
@@ -84,5 +92,6 @@ export class RuneView {
     this._gemMat.dispose();
     this._ring.geometry.dispose();
     this._ringMat.dispose();
+    this._glow.dispose();
   }
 }

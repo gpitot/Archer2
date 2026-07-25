@@ -5,9 +5,10 @@
  * Purely cosmetic — spawned from `kill` sim events.
  */
 import * as THREE from 'three';
+import { quality } from '../core/qualitySettings';
 
 const DURATION = 0.85;
-const PARTICLE_COUNT = 16;
+const PARTICLE_COUNT = Math.max(4, Math.round(16 * quality().effectsDensity));
 const MAX_RISE = 100;
 const RING_RADIUS = 50;
 

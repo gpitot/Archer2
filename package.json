@@ -11,6 +11,7 @@
     "build:types": "wrangler types server/worker-configuration.d.ts",
     "preview": "vite preview",
     "shot": "pnpm tsx scripts/screenshot.ts",
+    "perf": "pnpm tsx scripts/perf-bench.ts",
     "sim": "pnpm tsx scripts/sim.ts",
     "test:sim": "pnpm tsx scripts/sim.ts",
     "trace": "pnpm tsx scripts/trace.ts",

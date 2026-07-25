@@ -3,6 +3,7 @@ import { FLAG_WATER } from '../world/wc3/W3EParser';
 import { isCellWalkable } from '../world/wc3/WpmParser';
 import { TILE_BASE_COLORS, WATER_SHALLOW, WATER_DEEP } from '../world/wc3/TilePalette';
 import { FogOfWar, FOG_EXPLORED, FOG_VISIBLE } from '../vision/FogOfWar';
+import { quality } from '../core/qualitySettings';
 
 interface MinimapMarker {
   x: number;
@@ -35,6 +36,10 @@ export class Minimap {
   private _fogCtx: CanvasRenderingContext2D | null = null;
   private _fogImage: ImageData | null = null;
   private _fogVersion = -1;
+
+  // Redraw rate limit (see `draw`).
+  private _minInterval = 1000 / quality().minimapHz;
+  private _lastDraw = 0;
 
   // Drag state
   private _dragging = false;
@@ -215,7 +220,20 @@ export class Minimap {
     return [px, py];
   }
 
+  /**
+   * Repaint the minimap.
+   *
+   * Self-rate-limited: a full redraw clears the canvas, blits the baked terrain
+   * and the fog overlay, and strokes a circle per marker. That is real 2D-canvas
+   * work every time, and none of it is worth doing at display refresh rate for
+   * dots that move a fraction of a pixel per frame. Callers may call this every
+   * frame; only `minimapHz` of those calls do anything.
+   */
   draw(markers: MinimapMarker[], cameraView?: { cx: number; cz: number; halfW: number }): void {
+    const now = performance.now();
+    if (now - this._lastDraw < this._minInterval) return;
+    this._lastDraw = now;
+
     const ctx = this._ctx;
     const pad = this._pad;
 
