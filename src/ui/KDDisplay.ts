@@ -48,6 +48,14 @@ export class KDDisplay {
   private _waveLabel: HTMLSpanElement;
   private _lastFrameTime = 0;
   private _fpsSmoothed = 60;
+  // Last values written to the DOM, so an unchanged field costs no write. The
+  // panel is refreshed several times a second and most of it rarely changes.
+  private _prevKills = -1;
+  private _prevDeaths = -1;
+  private _prevGold = -1;
+  private _prevTime = '';
+  private _prevFps = -1;
+  private _prevWave = '';
 
   constructor() {
     // ── Panel wrapper ──
@@ -214,24 +222,51 @@ export class KDDisplay {
 
   /** Defenders only: reveal the leftmost section and show "wave/total". */
   setWave(current: number, total: number): void {
+    const text = `${current}/${total}`;
+    if (text === this._prevWave) return;
+    this._prevWave = text;
     this._waveGroup.style.display = 'flex';
     this._waveDivider.style.display = 'block';
-    this._waveLabel.textContent = `${current}/${total}`;
+    this._waveLabel.textContent = text;
   }
 
-  update(kills: number, deaths: number, gold: number, gameTimeSeconds: number): void {
-    this._killsLabel.textContent = String(kills);
-    this._deathsLabel.textContent = String(deaths);
-    this._goldLabel.textContent = String(Math.floor(gold));
-    this._timeLabel.textContent = formatGameTime(gameTimeSeconds);
-
-    // Rolling-average FPS
+  /**
+   * Feed one rendered frame into the FPS average. Separate from `update`
+   * because the panel is refreshed on a throttle while the FPS readout has to
+   * see every frame to mean anything.
+   */
+  sampleFrame(): void {
     const now = performance.now();
     if (this._lastFrameTime > 0) {
       const instant = 1000 / (now - this._lastFrameTime);
       this._fpsSmoothed += (instant - this._fpsSmoothed) * 0.1;
     }
     this._lastFrameTime = now;
-    this._fpsLabel.textContent = String(Math.round(this._fpsSmoothed));
+  }
+
+  update(kills: number, deaths: number, gold: number, gameTimeSeconds: number): void {
+    if (kills !== this._prevKills) {
+      this._prevKills = kills;
+      this._killsLabel.textContent = String(kills);
+    }
+    if (deaths !== this._prevDeaths) {
+      this._prevDeaths = deaths;
+      this._deathsLabel.textContent = String(deaths);
+    }
+    const goldInt = Math.floor(gold);
+    if (goldInt !== this._prevGold) {
+      this._prevGold = goldInt;
+      this._goldLabel.textContent = String(goldInt);
+    }
+    const time = formatGameTime(gameTimeSeconds);
+    if (time !== this._prevTime) {
+      this._prevTime = time;
+      this._timeLabel.textContent = time;
+    }
+    const fps = Math.round(this._fpsSmoothed);
+    if (fps !== this._prevFps) {
+      this._prevFps = fps;
+      this._fpsLabel.textContent = String(fps);
+    }
   }
 }

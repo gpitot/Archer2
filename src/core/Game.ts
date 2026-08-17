@@ -31,6 +31,8 @@ import { ScoreWindow } from '../ui/ScoreWindow';
 import { KillFeed } from '../ui/KillFeed';
 import { playerColor } from '../ui/colors';
 import { DEFAULT_NAME, loadPlayerName } from './playerPrefs';
+import { quality, setQualityTier } from './qualitySettings';
+import { AdaptiveResolution } from './AdaptiveResolution';
 
 // ── Audio ──
 import { SoundManager, STREAK_SOUNDS, MULTI_KILL_SOUNDS } from '../audio/SoundManager';
@@ -191,6 +193,14 @@ export class Game {
    * lives until its `_remoteProjectiles` entry dies on the render timeline.
    */
   private _ownArrowIds = new Set<string>();
+  /**
+   * Server ids of our own shots whose `fire` event beat our prediction to the
+   * cast point, so there was no local arrow to claim them. The server's copy is
+   * rendered for these, and the local arrow is suppressed when prediction
+   * eventually looses it — see `_handleOwnArrowEvent`. FIFO: shots are loosed
+   * in the order they were fired.
+   */
+  private _unclaimedOwnFires: string[] = [];
 
   /**
    * Remote projectiles, keyed by server id. Registered from `fire` events
@@ -287,6 +297,34 @@ export class Game {
   private _deathOverlay: HTMLDivElement | null = null;
   private _deathCountdown: HTMLSpanElement | null = null;
   private _wasPlayerAlive = true;
+
+  // ── Per-frame scratch (reused so the render path allocates nothing) ──
+  /** Snapshot indexes for `_interpolateHeroes` / `_interpolateCreeps`. */
+  private _lerpPrevHeroes = new Map<string, SnapshotHero>();
+  private _lerpNextHeroes = new Map<string, SnapshotHero>();
+  private _lerpPrevCreeps = new Map<string, NonNullable<Snapshot['creeps']>[number]>();
+  private _lerpNextCreeps = new Map<string, NonNullable<Snapshot['creeps']>[number]>();
+  /** Live id sets handed to `syncKeyedViews`, refilled instead of rebuilt. */
+  private _activeProjectileIds = new Set<string>();
+  private _activeBlastIds = new Set<string>();
+  private _activeWardIds = new Set<string>();
+  /** Projectile-state index for this frame's projectile view sync. */
+  private _projectileById = new Map<string, ProjectileState>();
+  /** Hero ids holding an ice bow, recomputed once per projectile sync. */
+  private _iceBowOwners = new Set<string>();
+
+  // ── HUD throttle ──
+  /**
+   * Reused HudContext — mutated in place each refresh rather than reallocated,
+   * since `_render` is the hottest function in the client.
+   */
+  private _hudCtx!: HudContext;
+  /** Starts past the interval so the first displayed frame has a full HUD. */
+  private _hudAccum = Infinity;
+  private _hudInterval = 1 / quality().hudHz;
+
+  // ── Adaptive resolution (null until `finish`) ──
+  private _adaptive: AdaptiveResolution | null = null;
 
   // ── Audio ──
   private _sound = new SoundManager();
@@ -604,7 +642,7 @@ export class Game {
 
     // ── Input ──
     this._input = new InputManager(this._renderer.domElement, this._camera.camera);
-    this._input.setGround(this._terrain.mesh);
+    this._input.setGround(this._heightAtBound);
 
     // ── Targeting system ──
     this._targeting = new TargetingSystem();
@@ -617,8 +655,6 @@ export class Game {
         const clickDist = Math.hypot(pos.x - shop.pos.x, pos.z - shop.pos.z);
         if (clickDist < shop.interactRadius) {
           const inRange = this._isPlayerNearShop(si);
-          const heroDist = Math.hypot(this._playerState.pos.x - shop.pos.x, this._playerState.pos.z - shop.pos.z);
-          console.log(`[shop-click] shop=${si} clickDist=${clickDist.toFixed(0)} heroDist=${heroDist.toFixed(0)} clickRadius=${shop.interactRadius} buyRadius=${shop.buyRadius} inRange=${inRange}`);
           this._shopWindow.open(SHOP_ITEMS as ShopItem[], this._playerState.gold, this._playerState.inventory, inRange, si);
           return;
         }
@@ -714,6 +750,46 @@ export class Game {
       this._camera.setTarget(new THREE.Vector3(wx, this._smoothHeightAt(wx, wz), wz));
     };
 
+    // ── HUD context (mutated in place every refresh; see `_render`) ──
+    this._hudCtx = {
+      state: this._state,
+      world: this._world,
+      playerState: this._playerState,
+      fog: this._fog,
+      minimap: this._minimap,
+      spellBar: this._spellBar,
+      statusBar: this._statusBar,
+      itemBar: this._itemBar,
+      kdDisplay: this._kdDisplay,
+      shopWindow: this._shopWindow,
+      shopOverlay: this._shopOverlay,
+      scoreWindow: this._scoreWindow,
+      camera: this._camera,
+      isPlayerNearShop: false,
+      gameTime: 0,
+    };
+
+    // ── Adaptive resolution ──
+    // If the controller ends up pinned at its floor and still can't hold frame
+    // rate, resolution alone isn't enough — persist the Low tier so the next
+    // load starts with the cheaper shaders and effects too.
+    if (quality().adaptiveResolution) {
+      this._adaptive = new AdaptiveResolution(
+        (scale) => this._renderer.setRenderScale(scale),
+        () => setQualityTier('low'),
+      );
+    }
+
+    // Debug surface for the perf harness (see scripts/perf-bench.ts).
+    if (perf.enabled) {
+      (window as any).__perf = {
+        renderScale: () => this._renderer.renderScale,
+        programs: () => this._renderer.info.programs,
+        drawCalls: () => this._renderer.info.drawCalls,
+        quality: () => quality().tier,
+      };
+    }
+
     window.addEventListener('resize', this._onResize.bind(this));
 
     // ── Audio init — browsers require a user gesture to unlock AudioContext ──
@@ -804,7 +880,7 @@ export class Game {
       this._heroViews.delete(id);
     }
 
-    const heightAt = this._heightAt.bind(this);
+    const heightAt = this._heightAtBound;
     for (const hs of heroes) {
       if (this._heroViews.has(hs.id)) continue;
       const color = playerColor(hs.team);
@@ -1177,13 +1253,29 @@ export class Game {
   private _interpolateHeroes(renderTime: number): void {
     const pair = findStraddlingPair(this._snapshots, renderTime, this._tickDt);
     if (!pair) return;
+    // Index each side once instead of scanning both snapshot arrays per hero.
+    const prev = this._indexById(this._lerpPrevHeroes, pair.prev.heroes);
+    const next = this._indexById(this._lerpNextHeroes, pair.next.heroes);
     for (const hero of this._state.heroes) {
       if (hero.id === this._playerId) continue;
-      const prevH = pair.prev.heroes.find((h) => h.id === hero.id);
-      const nextH = pair.next.heroes.find((h) => h.id === hero.id);
+      const prevH = prev.get(hero.id);
+      const nextH = next.get(hero.id);
       if (!prevH || !nextH) continue;
       lerpHero(hero, prevH, nextH, pair.t);
     }
+  }
+
+  /**
+   * Refill `into` as an id → entity index of `items` and return it.
+   *
+   * The maps are long-lived and cleared rather than reallocated: interpolation
+   * runs every frame over every entity, and this is the difference between a
+   * linear scan per entity and one hash lookup.
+   */
+  private _indexById<T extends { id: string }>(into: Map<string, T>, items: readonly T[] | undefined): Map<string, T> {
+    into.clear();
+    if (items) for (const item of items) into.set(item.id, item);
+    return into;
   }
 
   /**
@@ -1195,9 +1287,11 @@ export class Game {
   private _interpolateCreeps(renderTime: number): void {
     const pair = findStraddlingPair(this._snapshots, renderTime, this._tickDt);
     if (!pair) return;
+    const prev = this._indexById(this._lerpPrevCreeps, pair.prev.creeps);
+    const next = this._indexById(this._lerpNextCreeps, pair.next.creeps);
     for (const creep of this._state.creeps) {
-      const prevC = pair.prev.creeps?.find((c) => c.id === creep.id);
-      const nextC = pair.next.creeps?.find((c) => c.id === creep.id);
+      const prevC = prev.get(creep.id);
+      const nextC = next.get(creep.id);
       if (!prevC || !nextC) continue;
       lerpCreep(creep, prevC, nextC, pair.t);
     }
@@ -1285,6 +1379,11 @@ export class Game {
   private _retireRemoteProjectile(id: string): void {
     this._remoteProjectiles.delete(id);
     this._ownArrowIds.delete(id);
+    // If this shot's server copy died before our prediction ever loosed it, the
+    // suppression it was owed is moot — drop it so it can't silently eat the
+    // next shot's local arrow.
+    const pending = this._unclaimedOwnFires.indexOf(id);
+    if (pending >= 0) this._unclaimedOwnFires.splice(pending, 1);
   }
 
   /** Track our fire/hit events to link cosmetic arrows to server projectiles. */
@@ -1300,6 +1399,14 @@ export class Game {
       if (cosmetic) {
         cosmetic.serverId = ev.projectile.id;
         this._ownArrowIds.add(ev.projectile.id);
+      } else {
+        // No local arrow to claim it: our prediction hasn't reached this shot's
+        // cast point yet. That happens once frames get long enough for the
+        // fixed-step catch-up to hit its cap, so the predicted sim falls behind
+        // the server's timeline. Render the server's copy, and note that the
+        // local arrow for this shot must be suppressed when prediction finally
+        // does loose it — otherwise the shot is drawn twice, a few units apart.
+        this._unclaimedOwnFires.push(ev.projectile.id);
       }
       return;
     }
@@ -1331,6 +1438,14 @@ export class Game {
   private _spawnCosmeticFromFire(proj: ProjectileState): void {
     const player = this._playerState;
     if (!player) return;
+
+    // The server already told us about this shot and, finding no local arrow to
+    // claim, kept its own copy on screen (see `_handleOwnArrowEvent`). Spawning
+    // now would draw the same arrow a second time.
+    if (this._unclaimedOwnFires.length > 0) {
+      this._unclaimedOwnFires.shift();
+      return;
+    }
 
     const pv = this._projectilePool.pop();
     if (!pv) return;
@@ -1378,23 +1493,16 @@ export class Game {
     }
   }
 
-  private _shopRangePrev: boolean | null = null;
   private _isPlayerNearShop(shopIndex?: number): boolean {
     const idx = shopIndex ?? this._shopWindow.shopIndex;
     if (idx < 0 || idx >= this._world.shops.length) return false;
     const s = this._world.shops[idx].pos;
     const p = this._playerState?.pos;
-    if (!s || !p) {
-      console.log('[shop] missing shop or player pos');
-      return false;
-    }
-    const dist = Math.hypot(s.x - p.x, s.z - p.z);
-    const result = dist <= this._world.shops[idx].buyRadius;
-    if (result !== this._shopRangePrev) {
-      console.log(`[shop] inRange changed to ${result}, shop=${idx} dist=${dist.toFixed(0)} (buyRadius=${this._world.shops[idx].buyRadius}), player=(${p.x.toFixed(0)},${p.z.toFixed(0)}), shopPos=(${s.x.toFixed(0)},${s.z.toFixed(0)})`);
-      this._shopRangePrev = result;
-    }
-    return result;
+    if (!s || !p) return false;
+    const dx = s.x - p.x;
+    const dz = s.z - p.z;
+    const r = this._world.shops[idx].buyRadius;
+    return dx * dx + dz * dz <= r * r;
   }
 
   /** Find the nearest shop to the player, or null if no shops exist. */
@@ -1414,6 +1522,16 @@ export class Game {
   private _heightAt(x: number, z: number): number {
     return this._terrain.heightAt(x, z);
   }
+
+  /**
+   * `_heightAt` as a standalone function, created once.
+   *
+   * Every view's `sync` takes a height sampler, and building
+   * a fresh bound copy at each of those call sites allocated a dozen
+   * closures per frame — per entity, in the projectile and creep cases.
+   */
+  private readonly _heightAtBound = (x: number, z: number): number =>
+    this._terrain.heightAt(x, z);
 
   private _smoothHeightAt(x: number, z: number): number {
     return this._terrain.smoothHeightAt(x, z);
@@ -1555,9 +1673,21 @@ export class Game {
 
   // ── Debug trace & driver API (?debug=1, used by scripts/drive.ts) ────
 
-  /** Record one trace line: sim positions and view-mesh positions side by side. */
-  private _recordTraceFrame(snapTicks: number[], events: SimEvent[]): void {
+  /**
+   * Sim events and snapshot ticks seen since the last trace line, collected
+   * across this frame's fixed steps (see `_updateCommon`).
+   */
+  private _pendingTraceEvents: SimEvent[] = [];
+  private _pendingSnapTicks: number[] = [];
+
+  /**
+   * Record one trace line: sim positions and view-mesh positions side by side.
+   * Called once per rendered frame from `_render`, after view syncing.
+   */
+  private _recordTraceFrame(): void {
     if (!this._trace) return;
+    const snapTicks = this._pendingSnapTicks;
+    const events = this._pendingTraceEvents;
     const r = (v: number) => +v.toFixed(2);
     this._trace.record({
       tick: this._state.tick,
@@ -1585,6 +1715,8 @@ export class Game {
       })),
       events: events.length > 0 ? events : undefined,
     });
+    this._pendingSnapTicks = [];
+    this._pendingTraceEvents = [];
   }
 
   /** True once init() has finished (drivers poll this before issuing input). */
@@ -1595,6 +1727,19 @@ export class Game {
   /** Inject a command exactly as player input would (driver entry point). */
   debugIssue(cmd: Command): void {
     this._enqueueCommand(cmd);
+  }
+
+  /**
+   * Grant a level and a skill point, as the debug panel's button does.
+   * Offline only — in network mode the server owns hero progression, so this
+   * would just be reconciled away on the next snapshot.
+   *
+   * Exists for `scripts/perf-bench.ts`, which needs a levelled hero to put
+   * enough arrows in the air to reproduce a real fight's load.
+   */
+  debugGrantLevel(): void {
+    if (this._networkMode) return;
+    this._debugLevelUp();
   }
 
   /** JSON-safe snapshot of the current client state for drivers. */
@@ -1720,19 +1865,30 @@ export class Game {
     this._camera.setFocusY(this._smoothHeightAt(focus.x, focus.z));
   }
 
-  /** Tail shared by offline and network update paths (fog, views, misc). */
+  /**
+   * Tail shared by offline and network update paths (fog, views, misc).
+   *
+   * Runs once per *fixed* step, so it must stay limited to work that has to see
+   * every tick. View syncing and fog rendering used to live here and were
+   * paying for up to six catch-up substeps on exactly the frames that were
+   * already slow; they moved to `_render` (see the note there).
+   */
   private _updateCommon(dt: number, events: SimEvent[], snapTicks: number[]): void {
     this._updateDeathOverlay();
     this._updateHealSparkle(dt);
-    this._syncAllViews(dt);
     this._fog.update(dt);
-    this._fogLayer.update(dt);
-    this._applyFogVisibility();
     this._floatingText.update(dt, this._camera.camera);
     this._killFeed.update(dt);
     this._water.update(dt);
     this._moveIndicators.update(dt);
-    this._recordTraceFrame(snapTicks, events);
+    // The trace line is written once per rendered frame, after the views have
+    // been synced — it exists to compare sim positions against view positions,
+    // and a pre-sync snapshot would show a frame of phantom lag. Accumulate
+    // this step's events and snapshot ticks for that line to carry.
+    if (this._trace) {
+      for (const ev of events) this._pendingTraceEvents.push(ev);
+      for (const t of snapTicks) this._pendingSnapTicks.push(t);
+    }
   }
 
   // ── View sync ──────────────────────────────────────────────────────
@@ -1781,9 +1937,12 @@ export class Game {
   // ── Blast zone view sync ───────────────────────────────────────────────────
 
   private _syncBlastViews(): void {
+    const activeIds = this._activeBlastIds;
+    activeIds.clear();
+    for (const b of this._state.blasts) activeIds.add(b.id);
     syncKeyedViews(
       this._blastViews,
-      new Set(this._state.blasts.map((b) => b.id)),
+      activeIds,
       (id) => {
         const bv = new BlastView(id);
         this._scene.add(bv.mesh);
@@ -1791,7 +1950,7 @@ export class Game {
       },
       (id, bv) => {
         const b = this._state.blasts.find((sb) => sb.id === id)!;
-        bv.sync(b, this._heightAt.bind(this));
+        bv.sync(b, this._heightAtBound);
       },
       (_id, bv) => bv.dispose(),
     );
@@ -2089,7 +2248,25 @@ export class Game {
   // ── Projectile view sync ────────────────────────────────────────────
 
   private _syncProjectileViews(): void {
-    const activeIds = new Set(this._state.projectiles.map((p) => p.id));
+    // Index the projectiles once: `syncKeyedViews` needs the live id set, and
+    // both callbacks below need the state by id. Doing it per callback made
+    // this quadratic in projectile count during a volley.
+    const activeIds = this._activeProjectileIds;
+    const byId = this._projectileById;
+    activeIds.clear();
+    byId.clear();
+    for (const p of this._state.projectiles) {
+      activeIds.add(p.id);
+      byId.set(p.id, p);
+    }
+
+    // Which heroes carry an ice bow changes only when someone buys one, so it
+    // is resolved once per frame rather than once per projectile.
+    const iceBowOwners = this._iceBowOwners;
+    iceBowOwners.clear();
+    for (const h of this._state.heroes) {
+      if (h.inventory.includes('ice_bow')) iceBowOwners.add(h.id);
+    }
 
     const getOrCreateView = (id: string): ProjectileView => {
       const pooled = this._projectilePool.pop();
@@ -2103,7 +2280,7 @@ export class Game {
       this._projectileViews,
       activeIds,
       (id) => {
-        const p = this._state.projectiles.find((sp) => sp.id === id)!;
+        const p = byId.get(id)!;
         const pv = getOrCreateView(id);
         // Scout (E) projectiles grant fog vision to their team while flying.
         if (p.kind === 'scout') {
@@ -2121,11 +2298,9 @@ export class Game {
         return pv;
       },
       (id, pv) => {
-        const p = this._state.projectiles.find((sp) => sp.id === id)!;
-        const isIce = p.ownerKind !== 'creep' && this._state.heroes.some(
-          (h) => h.id === p.ownerId && h.inventory.includes('ice_bow'),
-        );
-        pv.sync(p, this._heightAt.bind(this), isIce);
+        const p = byId.get(id)!;
+        const isIce = p.ownerKind !== 'creep' && iceBowOwners.has(p.ownerId);
+        pv.sync(p, this._heightAtBound, isIce);
         if (p.kind === 'scout') this._dropScoutBreadcrumbs(p);
       },
       (id, pv) => {
@@ -2197,9 +2372,12 @@ export class Game {
   // ── Ward view sync ──────────────────────────────────────────────────
 
   private _syncWardViews(): void {
+    const activeIds = this._activeWardIds;
+    activeIds.clear();
+    for (const w of this._state.wards) activeIds.add(w.id);
     syncKeyedViews(
       this._wardViews,
-      new Set(this._state.wards.map((w) => w.id)),
+      activeIds,
       (id) => {
         const w = this._state.wards.find((sw) => sw.id === id)!;
         const wv = new WardView(id);
@@ -2211,7 +2389,7 @@ export class Game {
       },
       (id, wv) => {
         const w = this._state.wards.find((sw) => sw.id === id)!;
-        wv.sync(w, this._heightAt.bind(this));
+        wv.sync(w, this._heightAtBound);
       },
       (id, wv) => {
         const vSrc = this._wardVisionAdapters.get(id);
@@ -2234,7 +2412,7 @@ export class Game {
         // that has never been alive — it may activate later as a different
         // monster type, or never. Create lazily on first appearance.
         if (!c.alive) continue;
-        cv = new CreepView(c.id, c.type, this._heightAt.bind(this));
+        cv = new CreepView(c.id, c.type, this._heightAtBound);
         this._scene.add(cv.mesh);
         this._creepViews.set(c.id, cv);
       }
@@ -2254,7 +2432,7 @@ export class Game {
         this._scene.add(rv.mesh);
         return rv;
       },
-      (r, rv) => rv.sync(r, dt, this._heightAt.bind(this)),
+      (r, rv) => rv.sync(r, dt, this._heightAtBound),
     );
   }
 
@@ -2270,7 +2448,7 @@ export class Game {
         this._fountainViews.set(i, fv);
         this._fogLayer.applyTo(fv.mesh);
       }
-      fv.sync(fountain.pos, dt, this._heightAt.bind(this));
+      fv.sync(fountain.pos, dt, this._heightAtBound);
     }
   }
 
@@ -2285,7 +2463,7 @@ export class Game {
         this._buildingViews.set(b.id, bv);
         this._fogLayer.applyTo(bv.mesh);
       }
-      bv.sync(b, dt, this._heightAt.bind(this));
+      bv.sync(b, dt, this._heightAtBound);
     }
   }
 
@@ -2406,30 +2584,54 @@ export class Game {
 
   // ── Render ──────────────────────────────────────────────────────────
 
-  private _render(_interpolation: number): void {
+  /**
+   * One displayed frame: mirror sim state onto the views, draw, then refresh
+   * the HUD.
+   *
+   * View syncing, fog rendering, and fog visibility live here rather than in
+   * the fixed update because they only *read* current state — running them
+   * after all of this frame's substeps produces exactly what the old
+   * last-substep pass produced, but once instead of up to six times, and the
+   * multiplier used to bite hardest on the frames that were already slow.
+   *
+   * `frameDelta` (not the fixed step) is what the view animations advance by,
+   * since this runs once per frame. It is clamped so a tab switch or a long
+   * hitch can't teleport every animation.
+   */
+  private _render(_interpolation: number, frameDelta = 0): void {
+    const dt = Math.min(frameDelta, 0.1);
+
+    this._syncAllViews(dt);
+    this._fogLayer.update(dt);
+    this._applyFogVisibility();
+    this._recordTraceFrame();
+
     this._renderer.render(this._scene, this._camera.camera);
 
-    const ctx: HudContext = {
-      state: this._state,
-      world: this._world,
-      playerState: this._playerState,
-      fog: this._fog,
-      minimap: this._minimap,
-      spellBar: this._spellBar,
-      statusBar: this._statusBar,
-      itemBar: this._itemBar,
-      kdDisplay: this._kdDisplay,
-      shopWindow: this._shopWindow,
-      shopOverlay: this._shopOverlay,
-      scoreWindow: this._scoreWindow,
-      camera: this._camera,
-      isPlayerNearShop: this._isPlayerNearShop(),
-      gameTime: this._state.tick / 60,
-      // Offline runs the camps locally; online the server sends the wave.
-      wave: this._state.mode === 'defenders'
-        ? (this._networkMode ? this._netWave : currentWave(this._state))
-        : undefined,
-    };
+    // Frame-time sampling for the adaptive-resolution controller and the HUD's
+    // FPS readout — both need every frame, unlike the HUD rebuild below.
+    this._kdDisplay.sampleFrame();
+    this._adaptive?.update(dt);
+
+    // ── HUD (throttled) ──
+    // A full HUD rebuild walks every entity, allocates a marker list, and
+    // writes a few hundred DOM style properties. At 15 Hz it is still visually
+    // continuous — cooldown sweeps and health bars read fine — for a quarter of
+    // the cost at 60 fps.
+    this._hudAccum += dt;
+    if (this._hudAccum < this._hudInterval) return;
+    this._hudAccum = 0;
+
+    const ctx = this._hudCtx;
+    ctx.state = this._state;
+    ctx.world = this._world;
+    ctx.playerState = this._playerState;
+    ctx.isPlayerNearShop = this._isPlayerNearShop();
+    ctx.gameTime = this._state.tick / 60;
+    // Offline runs the camps locally; online the server sends the wave.
+    ctx.wave = this._state.mode === 'defenders'
+      ? (this._networkMode ? this._netWave : currentWave(this._state))
+      : undefined;
     updateHud(ctx);
   }
 

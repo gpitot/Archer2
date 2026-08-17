@@ -7,6 +7,7 @@
  */
 import { MAX_NAME_LEN, sanitizeName } from '../core/playerPrefs';
 import { normalizeRoomCode } from '../core/roomCode';
+import { clearQualityTier, detectedTier, savedQualityTier, setQualityTier } from '../core/qualitySettings';
 
 export type StartMode = 'create' | 'join' | 'offline';
 
@@ -169,6 +170,46 @@ export class StartScreen {
     this._panel.appendChild(offline);
   }
 
+  /**
+   * Graphics-quality picker.
+   *
+   * Auto-detection gets this right for most machines, so the default option is
+   * "Auto" and the two explicit tiers are there for the cases it misses — a
+   * gaming laptop on battery, or a machine with a fast CPU and a weak GPU. The
+   * choice is saved and applied on the next load, which is this screen's own
+   * navigation into the match, so it always takes effect immediately.
+   */
+  private _buildQualityPicker(): void {
+    const label = document.createElement('div');
+    const auto = detectedTier();
+    label.textContent = 'Graphics';
+    label.style.cssText = 'color:#998866; font-size:11px; font-weight:bold; margin-bottom:4px;';
+    this._panel.appendChild(label);
+
+    const select = document.createElement('select');
+    select.style.cssText = INPUT_CSS + 'margin-bottom:12px; cursor:pointer;';
+    for (const opt of [
+      { value: 'auto', label: `Auto (${auto === 'low' ? 'Performance' : 'Quality'})` },
+      { value: 'high', label: 'Quality' },
+      { value: 'low', label: 'Performance (weak GPU)' },
+    ]) {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      o.style.cssText = 'background:#1a140a; color:#ffe9b0;';
+      select.appendChild(o);
+    }
+    select.value = savedQualityTier() ?? 'auto';
+    select.onchange = () => {
+      if (select.value === 'high' || select.value === 'low') {
+        setQualityTier(select.value);
+      } else {
+        clearQualityTier();
+      }
+    };
+    this._panel.appendChild(select);
+  }
+
   private _buildDefault(): void {
     // Map picker — rides the 'create' choice (the first joiner sets the
     // room's map) and offline practice alike; joiners adopt the room's.
@@ -232,6 +273,8 @@ export class StartScreen {
     }
     this._campsSelect = campsSelect;
     this._panel.appendChild(campsSelect);
+
+    this._buildQualityPicker();
 
     const create = button('Create room', true);
     create.onclick = () => this._pick('create');

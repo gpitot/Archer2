@@ -1,15 +1,24 @@
 import * as THREE from 'three';
 import { FogOfWar, FOG_EXPLORED, FOG_VISIBLE } from './FogOfWar';
+import { quality } from '../core/qualitySettings';
 
 /**
- * Upsampling factor of the render texture over the fog grid. The LoL-style
- * recipe: compute vision coarse, then upsample + blur for rendering only.
+ * Separable Gaussian kernels by radius, applied to the upsampled target field.
+ * Radius 2 is the authored look; radius 1 pairs with the Low tier's 2× upsample
+ * (a wider kernel over fewer texels would just smear the fog edge into mush).
  */
-const UPSAMPLE = 4;
+const BLUR_KERNELS: Record<number, number[]> = {
+  1: [1 / 4, 2 / 4, 1 / 4],
+  2: [1 / 16, 4 / 16, 6 / 16, 4 / 16, 1 / 16],
+};
 
-/** Separable Gaussian kernel applied to the upsampled target field. */
-const BLUR_KERNEL = [1 / 16, 4 / 16, 6 / 16, 4 / 16, 1 / 16];
-const BLUR_RADIUS = 2;
+/**
+ * Rate the brightness ease runs at. The ease is a full walk of the upsampled
+ * texture in JS plus a texture upload, and it runs for as long as vision is
+ * changing — which, with a moving hero, is always. Through a bilinearly
+ * filtered, Gaussian-blurred texture, 20 Hz is indistinguishable from 60.
+ */
+const EASE_HZ = 20;
 
 /**
  * Renders one team's fog into the 3D scene.
@@ -49,18 +58,32 @@ export class FogLayer {
   private _lastVersion = -1;
   private _settled = false;
   private _patched = new WeakSet<THREE.Material>();
+  /** Upsample factor of the render texture over the coarse fog grid. */
+  private _upsample: number;
+  private _blurRadius: number;
+  private _blurKernel: number[];
+  /** Seconds of ease owed since the last texture walk (see `EASE_HZ`). */
+  private _easeAccum = 0;
   private _uniforms: {
     uFogMap: { value: THREE.Texture };
     uFogOrigin: { value: THREE.Vector2 };
     uFogSizeInv: { value: THREE.Vector2 };
   };
 
-  constructor(fog: FogOfWar, team: number) {
+  /**
+   * @param upsample Render-texture upsample factor over the coarse fog grid.
+   *   Defaults to the quality tier's value — halving it quarters the number of
+   *   texels every ease walk touches and uploads.
+   */
+  constructor(fog: FogOfWar, team: number, upsample = quality().fogUpsample) {
     this._fog = fog;
     this._team = team;
+    this._upsample = upsample;
+    this._blurRadius = quality().fogBlurRadius;
+    this._blurKernel = BLUR_KERNELS[this._blurRadius] ?? BLUR_KERNELS[2];
 
-    this._hiX = fog.cellsX * UPSAMPLE;
-    this._hiZ = fog.cellsZ * UPSAMPLE;
+    this._hiX = fog.cellsX * upsample;
+    this._hiZ = fog.cellsZ * upsample;
     const n = this._hiX * this._hiZ;
     this._data = new Uint8Array(n); // starts fully hidden (black)
     this._brightness = new Float32Array(n);
@@ -82,7 +105,15 @@ export class FogLayer {
     };
   }
 
-  /** Ease brightness toward the current fog states and upload the texture. */
+  /**
+   * Ease brightness toward the current fog states and upload the texture.
+   *
+   * Throttled to `EASE_HZ`: the walk below touches every texel of the
+   * upsampled texture and re-uploads the whole thing, and it runs continuously
+   * while vision is changing. The accumulated delta is fed into the same
+   * exponential ease, so the *fade speed* is unchanged — the fade just advances
+   * in fewer, larger steps.
+   */
   update(delta: number): void {
     if (this._fog.version !== this._lastVersion) {
       this._lastVersion = this._fog.version;
@@ -92,10 +123,18 @@ export class FogLayer {
     // Once every texel has reached its target there is nothing to ease and
     // nothing new to upload — skip the full-texture walk until the next
     // fog recompute.
-    if (this._settled) return;
+    if (this._settled) {
+      this._easeAccum = 0;
+      return;
+    }
+
+    this._easeAccum += delta;
+    if (this._easeAccum < 1 / EASE_HZ) return;
+    const eased = this._easeAccum;
+    this._easeAccum = 0;
 
     const target = this._targetHi;
-    const k = 1 - Math.exp(-delta * 10);
+    const k = 1 - Math.exp(-eased * 10);
     const EPS = 0.5 / 255; // below one texture quantization step
     let maxErr = 0;
     for (let i = 0; i < target.length; i++) {
@@ -114,7 +153,7 @@ export class FogLayer {
     this.texture.needsUpdate = true;
   }
 
-  /** Coarse states → brightness targets → 4× bilinear upsample → blur. */
+  /** Coarse states → brightness targets → bilinear upsample → blur. */
   private _rebuildTarget(): void {
     const states = this._fog.team(this._team);
     const coarse = this._targetCoarse;
@@ -130,7 +169,7 @@ export class FogLayer {
     const hiX = this._hiX;
     const hiZ = this._hiZ;
     const hi = this._targetHi;
-    const inv = 1 / UPSAMPLE;
+    const inv = 1 / this._upsample;
     for (let hz = 0; hz < hiZ; hz++) {
       let v = (hz + 0.5) * inv - 0.5;
       v = Math.min(Math.max(v, 0), nZ - 1);
@@ -154,13 +193,15 @@ export class FogLayer {
     // darken the arena edge; the shader's outside-grid cutoff stays the void
     // mask). Horizontal hi→tmp, vertical tmp→hi.
     const tmp = this._blurTmp;
+    const radius = this._blurRadius;
+    const kernel = this._blurKernel;
     for (let hz = 0; hz < hiZ; hz++) {
       const row = hz * hiX;
       for (let hx = 0; hx < hiX; hx++) {
         let sum = 0;
-        for (let o = -BLUR_RADIUS; o <= BLUR_RADIUS; o++) {
+        for (let o = -radius; o <= radius; o++) {
           const sx = Math.min(Math.max(hx + o, 0), hiX - 1);
-          sum += hi[row + sx] * BLUR_KERNEL[o + BLUR_RADIUS];
+          sum += hi[row + sx] * kernel[o + radius];
         }
         tmp[row + hx] = sum;
       }
@@ -168,9 +209,9 @@ export class FogLayer {
     for (let hz = 0; hz < hiZ; hz++) {
       for (let hx = 0; hx < hiX; hx++) {
         let sum = 0;
-        for (let o = -BLUR_RADIUS; o <= BLUR_RADIUS; o++) {
+        for (let o = -radius; o <= radius; o++) {
           const sz = Math.min(Math.max(hz + o, 0), hiZ - 1);
-          sum += tmp[sz * hiX + hx] * BLUR_KERNEL[o + BLUR_RADIUS];
+          sum += tmp[sz * hiX + hx] * kernel[o + radius];
         }
         hi[hz * hiX + hx] = sum;
       }

@@ -19,6 +19,15 @@ export class HeroStatusBar {
   private _xpFill: HTMLDivElement;
   private _xpText: HTMLDivElement;
 
+  // Last values written to the DOM — see `update`.
+  private _prevLevel = -1;
+  private _prevHpWidth = '';
+  private _prevHpText = '';
+  private _prevHpBand = -1;
+  private _prevXpWidth = '';
+  private _prevXpText = '';
+  private _xpGradientSet = false;
+
   constructor() {
     // ── Container ──
     this.el = document.createElement('div');
@@ -110,31 +119,65 @@ export class HeroStatusBar {
   }
 
   /**
-   * Redraw bars and level. Call every frame from `updateHud`.
+   * Redraw bars and level. Called from `updateHud`.
+   *
+   * Every write is gated on an actual change: HP and XP are static most of the
+   * time, and the gradient strings in particular are expensive to rebuild and
+   * re-parse for nothing. Widths are compared at the rendered precision (0.1%)
+   * so sub-pixel churn doesn't defeat the gate.
    */
   update(hp: number, level: number, xp: number, bonusHp = 0): void {
     // ── Level ──
-    this._levelLabel.textContent = String(level);
+    if (level !== this._prevLevel) {
+      this._prevLevel = level;
+      this._levelLabel.textContent = String(level);
+    }
 
     // ── HP bar ──
     const maxHp = heroMaxHp(level, bonusHp);
     const hpFrac = Math.max(0, Math.min(1, hp / maxHp));
-    this._hpFill.style.width = `${(hpFrac * 100).toFixed(1)}%`;
-    this._hpFill.style.background = hpFrac > 0.5
-      ? `linear-gradient(to bottom, #66ee66, #339933)`
-      : hpFrac > 0.25
-        ? `linear-gradient(to bottom, #eeee44, #aa8800)`
-        : `linear-gradient(to bottom, #ee4444, #991111)`;
-    this._hpText.textContent = `${Math.floor(hp)} / ${Math.floor(maxHp)}`;
+    const hpWidth = `${(hpFrac * 100).toFixed(1)}%`;
+    if (hpWidth !== this._prevHpWidth) {
+      this._prevHpWidth = hpWidth;
+      this._hpFill.style.width = hpWidth;
+    }
+    // Three colour bands, so the gradient only changes when a band is crossed.
+    const hpBand = hpFrac > 0.5 ? 2 : hpFrac > 0.25 ? 1 : 0;
+    if (hpBand !== this._prevHpBand) {
+      this._prevHpBand = hpBand;
+      this._hpFill.style.background = hpBand === 2
+        ? `linear-gradient(to bottom, #66ee66, #339933)`
+        : hpBand === 1
+          ? `linear-gradient(to bottom, #eeee44, #aa8800)`
+          : `linear-gradient(to bottom, #ee4444, #991111)`;
+    }
+    const hpText = `${Math.floor(hp)} / ${Math.floor(maxHp)}`;
+    if (hpText !== this._prevHpText) {
+      this._prevHpText = hpText;
+      this._hpText.textContent = hpText;
+    }
 
     // ── XP bar ──
     const curXp = xpForLevel(level);
     const nextXp = xpForLevel(level + 1);
     const needed = nextXp - curXp;
     const xpFrac = needed > 0 ? Math.max(0, Math.min(1, (xp - curXp) / needed)) : 1;
-    this._xpFill.style.width = `${(xpFrac * 100).toFixed(1)}%`;
-    this._xpFill.style.background = `linear-gradient(to bottom, #ddbb44, #886600)`;
-    this._xpText.textContent = level >= HERO.maxLevel ? 'MAX' : `${xp - curXp} / ${needed}`;
+    const xpWidth = `${(xpFrac * 100).toFixed(1)}%`;
+    if (xpWidth !== this._prevXpWidth) {
+      this._prevXpWidth = xpWidth;
+      this._xpFill.style.width = xpWidth;
+      // The XP gradient is constant, so it is set once here rather than per
+      // update — the fill only exists to be widened.
+      if (!this._xpGradientSet) {
+        this._xpGradientSet = true;
+        this._xpFill.style.background = `linear-gradient(to bottom, #ddbb44, #886600)`;
+      }
+    }
+    const xpText = level >= HERO.maxLevel ? 'MAX' : `${xp - curXp} / ${needed}`;
+    if (xpText !== this._prevXpText) {
+      this._prevXpText = xpText;
+      this._xpText.textContent = xpText;
+    }
   }
 
   destroy(): void {

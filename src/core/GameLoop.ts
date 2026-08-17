@@ -2,7 +2,14 @@ import { Clock } from './Clock';
 import { perf } from './PerformanceMonitor';
 
 export type UpdateCallback = (delta: number) => void;
-export type RenderCallback = (interpolation: number) => void;
+/**
+ * @param interpolation Fraction of a fixed step left in the accumulator, [0,1).
+ * @param frameDelta    Wall-clock seconds since the previous rendered frame —
+ *                      what per-frame visual animation must advance by, since
+ *                      the render callback runs once per frame regardless of
+ *                      how many fixed updates preceded it.
+ */
+export type RenderCallback = (interpolation: number, frameDelta: number) => void;
 
 /**
  * A fixed-timestep game loop.
@@ -64,9 +71,14 @@ export class GameLoop {
     this._clock.tick(currentTime);
     this._accumulator += this._clock.delta;
 
-    // Cap accumulated time to avoid spiral of death after tab switch
-    if (this._accumulator > 0.2) {
-      this._accumulator = 0.2;
+    // Cap accumulated time to avoid a spiral of death after a tab switch or a
+    // long frame. 0.1 s = at most 6 catch-up substeps per frame: past that the
+    // extra sim work costs more than the missed time is worth, and it lands
+    // precisely on the frames that are already slow. Network mode reconciles
+    // from server snapshots, and offline the hero is only ever a fraction of a
+    // second behind, so dropping the surplus is invisible.
+    if (this._accumulator > 0.1) {
+      this._accumulator = 0.1;
     }
 
     perf.beginFrame();
@@ -79,7 +91,7 @@ export class GameLoop {
 
     // Render with interpolation factor [0, 1)
     const interpolation = this._accumulator / this.fixedDelta;
-    this.renderCb?.(interpolation);
+    this.renderCb?.(interpolation, this._clock.delta);
 
     perf.endFrame();
 

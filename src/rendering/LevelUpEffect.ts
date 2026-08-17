@@ -4,9 +4,10 @@
  * Purely cosmetic — spawned from `levelUp` sim events.
  */
 import * as THREE from 'three';
+import { quality } from '../core/qualitySettings';
 
 const DURATION = 1.0;
-const PARTICLE_COUNT = 12;
+const PARTICLE_COUNT = Math.max(4, Math.round(12 * quality().effectsDensity));
 const MAX_RISE = 120;
 const RING_RADIUS = 55;
 

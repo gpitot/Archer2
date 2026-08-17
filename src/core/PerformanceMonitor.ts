@@ -7,12 +7,18 @@
  * Logs:
  *  - 1 Hz summary: FPS, p50/p95/p99/max frame time, draw calls, triangles, heap
  *  - Instant warnings when a frame exceeds 50 ms (configurable)
+ *
+ * Separately, and *always on*, it keeps a small ring buffer of recent frame
+ * times so `AdaptiveResolution` can read `p75()` without the console logging
+ * being enabled. That costs one array write and one wrapped index per frame.
  */
 
 export interface RendererStats {
   drawCalls: number;
   triangles: number;
   points: number;
+  /** Compiled shader programs — must stay flat during play (see Lighting.ts). */
+  programs: number;
 }
 
 export class PerformanceMonitor {
@@ -23,6 +29,15 @@ export class PerformanceMonitor {
   private _summaryInterval = 1000; // ms between periodic logs
   private _spikeThreshold = 50; // ms — warn on frames longer than this
   private _sampleCount = 0;
+
+  // ── Always-on frame-time ring (drives adaptive resolution) ──
+  /** ~2 s at 60 fps: long enough to be stable, short enough to react. */
+  private static readonly RING_SIZE = 120;
+  private _ring = new Float32Array(PerformanceMonitor.RING_SIZE);
+  private _ringNext = 0;
+  private _ringFilled = 0;
+  /** Scratch buffer for percentile sorting, so `p75()` allocates nothing. */
+  private _ringSorted = new Float32Array(PerformanceMonitor.RING_SIZE);
 
   /** Callback that returns current renderer.info stats. */
   getRendererStats: (() => RendererStats | null) | null = null;
@@ -50,17 +65,39 @@ export class PerformanceMonitor {
     return this._enabled;
   }
 
+  /**
+   * 75th-percentile frame time over the recent ring, in ms, or null before
+   * enough frames have accumulated to mean anything.
+   *
+   * p75 rather than p95: the controller is looking for a sustained fill-rate
+   * problem, and p95 is dominated by one-off hitches (GC, a texture upload)
+   * that shedding resolution would not fix.
+   */
+  p75(): number | null {
+    const n = this._ringFilled;
+    if (n < 30) return null;
+    const sorted = this._ringSorted.subarray(0, n);
+    sorted.set(this._ring.subarray(0, n));
+    sorted.sort();
+    return sorted[Math.min(n - 1, Math.floor(n * 0.75))];
+  }
+
   /** Call at the very top of rAF. */
   beginFrame(): void {
-    if (!this._enabled) return;
     this._frameStart = performance.now();
   }
 
   /** Call at the very bottom of rAF (after renderer.render). */
   endFrame(): void {
-    if (!this._enabled) return;
     const now = performance.now();
     const dt = now - this._frameStart;
+
+    // Ring buffer: always on, so adaptive resolution works without ?perf=1.
+    this._ring[this._ringNext] = dt;
+    this._ringNext = (this._ringNext + 1) % PerformanceMonitor.RING_SIZE;
+    if (this._ringFilled < PerformanceMonitor.RING_SIZE) this._ringFilled++;
+
+    if (!this._enabled) return;
     this._frameSamples.push(dt);
     this._sampleCount++;
 
@@ -100,7 +137,7 @@ export class PerformanceMonitor {
 
     const stats = this.getRendererStats?.();
     const statStr = stats
-      ? `drawCalls=${stats.drawCalls} tri=${stats.triangles}`
+      ? `drawCalls=${stats.drawCalls} tri=${stats.triangles} programs=${stats.programs}`
       : '';
 
     const color = avg < 10 ? '#88cc88' : avg < 20 ? '#cccc88' : '#cc8888';

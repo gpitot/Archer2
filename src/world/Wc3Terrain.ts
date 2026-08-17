@@ -3,6 +3,7 @@ import { MapData, TILE_SIZE, sampleTilepointGrid } from './wc3/MapData';
 import { FLAG_WATER } from './wc3/W3EParser';
 import { createGroundAtlas, GroundAtlas, CLIFF_CELL_GRASS, CLIFF_CELL_DIRT } from './wc3/GroundTextures';
 import { tileIsCliff, cliffTileGeometry, steppedHeightAt, layerAt, visionLayerAt } from './wc3/terrainLevels';
+import { quality } from '../core/qualitySettings';
 
 const CHUNK_TILES = 32;
 
@@ -105,12 +106,23 @@ export class Wc3Terrain {
     const chunksZ = Math.ceil(tilesH / CHUNK_TILES);
     let skipped = 0;
 
-    const material = new THREE.MeshStandardMaterial({
-      map: this._atlas.texture,
-      vertexColors: true,
-      roughness: 0.95,
-      metalness: 0,
-    });
+    // One shared material for every chunk. The terrain covers most of the
+    // screen, so its shading model dominates fragment cost: on the Low tier it
+    // drops to Lambert, which skips the PBR specular/roughness work for a
+    // surface authored at roughness 0.95 and metalness 0 — i.e. one that has
+    // almost no specular response to lose. FogLayer patches either material
+    // the same way (both go through the same `dithering_fragment` chunk).
+    const material = quality().terrainLambert
+      ? new THREE.MeshLambertMaterial({
+          map: this._atlas.texture,
+          vertexColors: true,
+        })
+      : new THREE.MeshStandardMaterial({
+          map: this._atlas.texture,
+          vertexColors: true,
+          roughness: 0.95,
+          metalness: 0,
+        });
 
     for (let cj = 0; cj < chunksZ; cj++) {
       for (let ci = 0; ci < chunksX; ci++) {

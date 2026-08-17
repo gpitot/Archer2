@@ -32,7 +32,10 @@ export abstract class UnitView {
     opts: { tube?: number; y?: number; opacity?: number } = {},
   ): void {
     const { tube = 0.08, y = 0.05, opacity = 0.25 } = opts;
-    const geo = new THREE.TorusGeometry(localRadius, tube, 8, 64);
+    // 8×64 was 1024 triangles for a hairline circle a few pixels wide on
+    // screen; 6×32 is visually identical at this camera distance for a fifth
+    // of the geometry, on every unit in the match.
+    const geo = new THREE.TorusGeometry(localRadius, tube, 6, 32);
     const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthTest: false });
     const ring = new THREE.Mesh(geo, mat);
     ring.rotation.x = -Math.PI / 2;

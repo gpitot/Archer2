@@ -46,8 +46,17 @@ export class IsometricCamera {
 
   // ── Focus control ──────────────────────────────────────────────
 
+  /**
+   * The focus point — **read-only**. This is the live internal vector, not a
+   * copy: it is read every frame by the HUD (minimap view rect), and cloning it
+   * there was a pointless allocation. Mutate it only through `setTarget`,
+   * `follow`, `panScreen`, and `setFocusY`, which re-apply the camera transform.
+   *
+   * Identical to `focus`; both names are kept because call sites read naturally
+   * as one or the other.
+   */
   get target(): THREE.Vector3 {
-    return this._focus.clone();
+    return this._focus;
   }
 
   /** Read-only live reference to the focus point (for terrain sampling). */

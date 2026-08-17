@@ -6,12 +6,22 @@
  * shooter carries the matching bow.
  */
 import * as THREE from 'three';
+import { quality, effectScale } from '../core/qualitySettings';
 
 export type ImpactElement = 'ice' | 'fire';
 
 const DURATION = 0.55;
-const PARTICLE_COUNT = 20;
+const PARTICLE_COUNT = Math.max(4, Math.round(20 * quality().effectsDensity));
 const GRAVITY = 220; // world units / s²
+
+/**
+ * Peak sizes of the flash sphere and the ground shockwave ring, in world units.
+ * Both are large additive quads/spheres over the middle of the screen, so their
+ * area is pure blended fill — the Low tier trims them rather than dropping the
+ * burst entirely, which would lose the hit feedback.
+ */
+const FLASH_SIZE = 26 * effectScale();
+const RING_SIZE = 48 * effectScale();
 
 interface Palette {
   flash: number;
@@ -124,11 +134,11 @@ export class ImpactEffects {
       const ease = 1 - (1 - t) ** 3; // ease-out cubic
 
       // Flash: pops out fast, fades faster.
-      e.flash.scale.setScalar(Math.max(26 * ease, 0.001));
+      e.flash.scale.setScalar(Math.max(FLASH_SIZE * ease, 0.001));
       e.flashMat.opacity = 0.95 * (1 - t) ** 2;
 
       // Ring: expands wide across the ground.
-      e.ring.scale.setScalar(Math.max(48 * ease, 0.001));
+      e.ring.scale.setScalar(Math.max(RING_SIZE * ease, 0.001));
       e.ringMat.opacity = 0.85 * (1 - t);
 
       // Particles: ballistic spray with gravity, fading out.

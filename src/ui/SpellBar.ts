@@ -129,6 +129,12 @@ class SpellSlot {
   private _onCd = false;
   private _canLevel = false;
   private _level = 0;
+  /** Level currently painted onto the dots; -1 = never painted. */
+  private _paintedLevel = -1;
+  /** Cooldown sweep angle currently in the DOM; null = no sweep drawn. */
+  private _cdAngle: number | null = null;
+  /** Countdown text currently in the DOM. */
+  private _cdTextValue = '';
   private _onLevel?: (abilityId: string) => void;
   private _abilityId: string;
 
@@ -322,15 +328,28 @@ class SpellSlot {
    */
   setCooldown(progress: number, remaining: number): void {
     if (progress >= 1) {
+      if (this._cdAngle === null) return; // already cleared
+      this._cdAngle = null;
       this._cooldown.style.background = 'none';
       this._cdText.style.display = 'none';
       return;
     }
-    const angle = progress * 360; // revealed portion (elapsed)
-    this._cooldown.style.background =
-      `conic-gradient(transparent ${angle}deg, rgba(0,0,0,0.6) ${angle}deg)`;
-    this._cdText.style.display = 'flex';
-    this._cdText.textContent = formatCooldown(remaining);
+    // Rounded to whole degrees: that's the finest step the conic gradient can
+    // actually show, and it stops a re-parse of the gradient string on every
+    // refresh for a sub-degree change nobody can see.
+    const angle = Math.round(progress * 360); // revealed portion (elapsed)
+    if (angle !== this._cdAngle) {
+      const firstFrame = this._cdAngle === null;
+      this._cdAngle = angle;
+      this._cooldown.style.background =
+        `conic-gradient(transparent ${angle}deg, rgba(0,0,0,0.6) ${angle}deg)`;
+      if (firstFrame) this._cdText.style.display = 'flex';
+    }
+    const text = formatCooldown(remaining);
+    if (text !== this._cdTextValue) {
+      this._cdTextValue = text;
+      this._cdText.textContent = text;
+    }
   }
 
   /** Track cooldown state; flashes the slot when it becomes ready. */
@@ -361,6 +380,11 @@ class SpellSlot {
   /** Highlight dots up to `level` (0 = none). */
   setLevel(level: number): void {
     this._level = level;
+    // Tracked separately from `_level` (which the tooltip reads and which
+    // starts at a legitimate 0) so the very first call always paints the dots
+    // off their construction-time colour.
+    if (level === this._paintedLevel) return;
+    this._paintedLevel = level;
     const dots = this._levelDots.children;
     for (let i = 0; i < this._maxLevel; i++) {
       (dots[i] as HTMLElement).style.background = i < level ? '#cc9944' : '#444';
